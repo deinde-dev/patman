@@ -12,7 +12,7 @@ Standards-Version: 4.7.0
 Homepage: https://github.com/nxtboot/patman
 Rules-Requires-Root: no
 
-Package: patman
+Package: patch-manager
 Architecture: all
 Depends:
  ${python3:Depends},
@@ -24,6 +24,8 @@ Suggests:
  python3-googleapi,
  python3-google-auth-httplib2,
  python3-google-auth-oauthlib,
+Conflicts:
+ patman,
 Description: create, check and email patch series with Patchwork integration
  Patman helps you create, send, track and review patch series for projects
  that take patches by email, such as U-Boot and the Linux kernel.
