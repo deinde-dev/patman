@@ -8,6 +8,9 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+0.3.2 - 2026-10-11
+------------------
+
 Changed
 ~~~~~~~
 - The U-Boot Python library is now a dependency, from the ``u-boot-pylib``
