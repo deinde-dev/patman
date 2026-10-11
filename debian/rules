@@ -9,3 +9,8 @@ export PYBUILD_DISABLE=test
 
 %:
 	dh $@ --buildsystem=pybuild
+
+# Debian already has an unrelated /usr/bin/patman (the PatMaN aligner), so
+# ship only the upstream alternative name, patch-manager
+execute_after_dh_auto_install:
+	rm debian/patch-manager/usr/bin/patman
