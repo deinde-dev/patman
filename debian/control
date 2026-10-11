@@ -1,7 +1,8 @@
 Source: patch-manager
 Section: vcs
 Priority: optional
-Maintainer: Simon Glass <sjg@chromium.org>
+Maintainer: Debian Python Team <team+python@tracker.debian.org>
+Uploaders: Simon Glass <sjg@chromium.org>
 Build-Depends:
  debhelper-compat (= 13),
  dh-sequence-python3,
@@ -10,6 +11,8 @@ Build-Depends:
  python3-setuptools,
 Standards-Version: 4.7.0
 Homepage: https://github.com/nxtboot/patman
+Vcs-Git: https://salsa.debian.org/sjg1/patch-manager.git
+Vcs-Browser: https://salsa.debian.org/sjg1/patch-manager
 Rules-Requires-Root: no
 
 Package: patch-manager
