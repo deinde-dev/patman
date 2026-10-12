@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "patch-manager"
-version = "0.3.3rc1"
+version = "0.3.3"
 authors = [
   { name="Simon Glass", email="sjg@chromium.org" },
 ]
