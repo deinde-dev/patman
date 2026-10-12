@@ -1,0 +1,8 @@
+---
+# Salsa CI: build and test the Debian package on every push.
+# Enable by setting this file as the project CI/CD configuration file
+# (Settings -> CI/CD -> General pipelines -> CI/CD configuration file:
+#  debian/salsa-ci.yml).
+include:
+  - project: salsa-ci-team/pipeline
+    file: recipes/debian.yml

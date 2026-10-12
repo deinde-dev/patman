@@ -1,8 +1,8 @@
-.TH PATMAN 1 "October 2026" "patman 0.3.1" "User Commands"
+.TH PATCH-MANAGER 1 "October 2026" "patch-manager 0.3.3" "User Commands"
 .SH NAME
-patman \- create, check and email patch series with Patchwork integration
+patch-manager \- create, check and email patch series with Patchwork integration
 .SH SYNOPSIS
-.B patman
+.B patch-manager
 .RI [ global-options ]
 .I command
 .RI [ command-options ]
@@ -37,7 +37,7 @@ Show the Patchwork status of a series and gather its review tags.
 Manage the upstream trees that series are sent to.
 .PP
 Run
-.BI "patman " command " \-\-help"
+.BI "patch-manager " command " \-\-help"
 for the options of a particular command.
 .SH FILES
 .TP
@@ -47,6 +47,17 @@ Per-repository configuration at the top of the git tree.  It overrides
 (the user's global configuration) which in turn overrides the project's
 tracked
 .BR .patman-defaults .
+.SH NOTES
+Upstream installs this program as
+.BR patman ,
+and its documentation uses that name.  In Debian it is installed only as
+.BR patch-manager ,
+since
+.B patman
+is an unrelated program in Debian.  To use the upstream name, add an alias
+such as
+.B alias patman=patch-manager
+to your shell configuration.
 .SH SEE ALSO
 Full documentation is published at
 .UR https://patman.readthedocs.io/

@@ -45,7 +45,9 @@ Optional features are available as extras::
     pip install patch-manager[review]   # AI-assisted patch review
     pip install patch-manager[all]      # everything
 
-The ``patman`` command is then on your path.
+The ``patman`` command is then on your path. It is also installed as
+``patch-manager``, which is the only name the Debian package provides, since
+Debian already has an unrelated ``patman`` command.
 
 Quick start
 -----------

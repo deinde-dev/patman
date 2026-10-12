@@ -8,6 +8,12 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+Added
+~~~~~
+- The command is also installed as ``patch-manager``, alongside ``patman``.
+  Debian already has an unrelated ``patman`` command (the PatMaN sequence
+  aligner), so the Debian package installs only ``patch-manager``.
+
 0.3.2 - 2026-10-11
 ------------------
 
