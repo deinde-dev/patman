@@ -8,6 +8,9 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+0.3.3 - 2026-10-12
+------------------
+
 Added
 ~~~~~
 - The command is also installed as ``patch-manager``, alongside ``patman``.
