@@ -37,6 +37,9 @@ It can also draft reviews of patches for you, using a Claude agent:
 - Optionally build Gmail drafts, run Coverity or learn your writing
   voice from past reviews
 
+``patman serve`` provides the status of your series and your reviews as JSON
+over HTTP, for use from a phone or another computer (see `Web server`_).
+
 The series tracking and stored reviews are kept in an optional local
 database (a ``.patman.db`` file at the top of your git tree), which
 lets patman follow a series across versions and remember past reviews.
@@ -1743,6 +1746,95 @@ The ``review`` command supports aliases ``r`` and ``rev``::
 
     patman r -l 497923 -U us --reviewer 'Your Name <your@email>'
 
+
+Web server
+==========
+
+``patman serve`` runs a small web server in your git tree, so that you can
+check on your series and reviews from a phone or another computer. It provides
+the status of your series, the reviews drafted with ``patman review`` and your
+todo list as JSON, reading the comments on each patch and cover letter from
+patchwork when asked for them. The JSON API is described in
+``doc/serve-protocol.rst``.
+
+Starting the server
+-------------------
+
+The server only listens on the local machine by default::
+
+    patman serve
+
+To reach it from another machine, either forward the port over ssh (``ssh -L
+8040:localhost:8040 <host>``) or use a VPN such as Tailscale and listen on that
+address with a token, which each request must then give::
+
+    patman serve --host 100.64.1.2 --token <secret>
+
+The options are:
+
+- ``--host ADDR``: address to listen on (default 127.0.0.1)
+- ``--port PORT``: port to listen on (default 8040)
+- ``-t``, ``--token TOKEN``: token which clients must give; use this when
+  listening on any address other than a loopback one
+- ``-s``, ``--sync [MINUTES]``: sync with patchwork every MINUTES minutes
+  (default 60); see below
+- ``-r``, ``--review-sync``: also run ``patman review --sync`` in each sync
+
+Keeping the status up to date
+-----------------------------
+
+Since the status of each patch only changes in the database when patman asks
+patchwork, the server can do this periodically::
+
+    patman serve --sync        # every hour
+    patman serve --sync 20     # every 20 minutes
+    patman serve --sync -r     # also run 'patman review --sync'
+
+Each sync runs ``patman series gather-all -G`` in a separate process. The
+``-G`` flag means that review tags are not gathered into your branches, so
+nothing changes in your git tree while you are working in it. Use ``patman
+series gather`` yourself when you are ready to pick up the tags. The ``-r``
+flag also runs ``patman review --sync`` to track sent review drafts and
+replies; this needs Gmail access (see `Assisted patch review`_).
+
+The output of the last sync is available through the API, which can also start
+one.
+
+Running it as a service
+-----------------------
+
+To keep the server running, for example on a machine which you reach over a
+VPN, run it as a systemd user service. Put the token in a file which only you
+can read, such as ``~/.config/patman-serve.env``::
+
+    PATMAN_TOKEN=<secret>
+
+then create ``~/.config/systemd/user/patman-serve.service``, changing the
+directory, the path to patman and the address to suit::
+
+    [Unit]
+    Description=patman web server
+    After=network-online.target
+
+    [Service]
+    WorkingDirectory=%h/src/u-boot
+    EnvironmentFile=%h/.config/patman-serve.env
+    ExecStart=%h/.local/bin/patman serve --host 100.64.1.2 \
+        -t ${PATMAN_TOKEN} -s -r
+    Restart=on-failure
+    RestartSec=30
+
+    [Install]
+    WantedBy=default.target
+
+and start it with::
+
+    systemctl --user daemon-reload
+    systemctl --user enable --now patman-serve
+
+Use ``journalctl --user -u patman-serve`` to see its output. Run ``loginctl
+enable-linger`` once if the server should keep running while you are not logged
+in.
 
 Database schema
 ===============

@@ -26,6 +26,7 @@ from patman import cseries
 from patman import patchstream
 from patman import review as review_mod
 from patman import send
+from patman import server
 from patman import settings
 from patman import status
 from patman import workflow
@@ -454,6 +455,23 @@ def do_review(args, test_db=None, pwork=None, cser=None):
         cser.close_database()
 
 
+def do_serve(args, test_db=None):
+    """Process the 'serve' command
+
+    Args:
+        args (Namespace): Arguments to process
+        test_db (str or None): Directory containing the test database, None to
+            use the normal one
+    """
+    cser = cseries.Cseries(test_db)
+    try:
+        cser.open_database()
+        server.serve(cser, args.host, args.port, args.patchwork_url,
+                     args.sync_interval, args.review_sync, args.token)
+    finally:
+        cser.close_database()
+
+
 # pylint: disable=R0912
 def do_patman(args, test_db=None, pwork=None, cser=None):
     """Process a patman command
@@ -515,6 +533,8 @@ def do_patman(args, test_db=None, pwork=None, cser=None):
             ret_code = do_review(args, test_db, pwork, cser) or 0
         elif args.cmd == 'workflow':
             do_workflow(args, test_db)
+        elif args.cmd == 'serve':
+            do_serve(args, test_db)
     except Exception as exc:  # pylint: disable=W0718
         terminal.tprint(f'patman: {type(exc).__name__}: {exc}',
                         colour=terminal.Color.RED)

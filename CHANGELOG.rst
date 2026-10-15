@@ -8,6 +8,12 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+Added
+~~~~~
+- ``patman serve`` runs a web server providing the status of your series,
+  patchwork comments, draft reviews and todos as JSON, optionally syncing with
+  patchwork periodically. The API is described in ``doc/serve-protocol.rst``.
+
 0.3.3 - 2026-10-12
 ------------------
 

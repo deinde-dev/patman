@@ -726,6 +726,39 @@ def add_review_subparser(subparsers):
     return review
 
 
+def add_serve_subparser(subparsers):
+    """Add the 'serve' subparser
+
+    Args:
+        subparsers (argparse action): Subparser parent
+
+    Return:
+        ArgumentParser: serve subparser
+    """
+    serve = subparsers.add_parser(
+        'serve', help='Serve series status and reviews to a web browser')
+    serve.add_argument(
+        '--host', default='127.0.0.1',
+        help='Address to listen on (default: %(default)s)')
+    serve.add_argument(
+        '--port', type=int, default=8040,
+        help='Port to listen on (default: %(default)s)')
+    serve.add_argument(
+        '-s', '--sync', type=int, nargs='?', const=60, default=0,
+        dest='sync_interval', metavar='MINUTES',
+        help="Run 'series gather-all -G' every MINUTES minutes (default 60 "
+             'if no value is given), to keep the patch status up to date')
+    serve.add_argument(
+        '-r', '--review-sync', action='store_true',
+        help="Also run 'review --sync' each time, to track sent review "
+             'drafts and replies (needs Gmail)')
+    serve.add_argument(
+        '-t', '--token', default=None,
+        help='Token which clients must provide to use the API; use this '
+             'when listening on a non-loopback address')
+    return serve
+
+
 def setup_parser():
     """Set up command-line parser
 
@@ -767,6 +800,7 @@ def setup_parser():
     patchwork = add_patchwork_subparser(subparsers)
     review = add_review_subparser(subparsers)
     series = add_series_subparser(subparsers)
+    add_serve_subparser(subparsers)
     add_status_subparser(subparsers)
     upstream = add_upstream_subparser(subparsers)
     workflow = add_workflow_subparser(subparsers)
