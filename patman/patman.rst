@@ -37,8 +37,8 @@ It can also draft reviews of patches for you, using a Claude agent:
 - Optionally build Gmail drafts, run Coverity or learn your writing
   voice from past reviews
 
-``patman serve`` provides the status of your series and your reviews as JSON
-over HTTP, for use from a phone or another computer (see `Web server`_).
+``patman serve`` shows the status of your series and your reviews on a
+mobile-friendly web page (see `Web server`_).
 
 The series tracking and stored reviews are kept in an optional local
 database (a ``.patman.db`` file at the top of your git tree), which
@@ -1751,11 +1751,18 @@ Web server
 ==========
 
 ``patman serve`` runs a small web server in your git tree, so that you can
-check on your series and reviews from a phone or another computer. It provides
-the status of your series, the reviews drafted with ``patman review`` and your
-todo list as JSON, reading the comments on each patch and cover letter from
-patchwork when asked for them. The JSON API is described in
-``doc/serve-protocol.rst``.
+check on your series and read reviews from a phone or another computer. The
+page has these tabs:
+
+- **Series**: your series with the state of each patch in the latest version.
+  Tap a series to see each version's patches, then tap a patch or the cover
+  letter to read its comments, which are fetched from patchwork
+- **Reviews**: series you have reviewed with ``patman review``, showing the
+  review of each patch and whether it has been drafted, sent or replied to
+- **Todo**: series marked with ``patman workflow todo``, due ones first
+
+The page uses the JSON API described in ``doc/serve-protocol.rst``, which other
+tools can use too.
 
 Starting the server
 -------------------
@@ -1764,11 +1771,15 @@ The server only listens on the local machine by default::
 
     patman serve
 
-To reach it from another machine, either forward the port over ssh (``ssh -L
-8040:localhost:8040 <host>``) or use a VPN such as Tailscale and listen on that
-address with a token, which each request must then give::
+then browse to http://localhost:8040/ on the same machine. To use it from a
+phone, either forward the port over ssh (``ssh -L 8040:localhost:8040 <host>``)
+or use a VPN such as Tailscale and listen on that address with a token::
 
     patman serve --host 100.64.1.2 --token <secret>
+
+Open the URL that patman prints (which includes the token) once on the phone;
+the page remembers the token after that. With Tailscale, ``tailscale serve
+8040`` provides HTTPS, which lets the browser install the page as an app.
 
 The options are:
 
@@ -1797,8 +1808,8 @@ series gather`` yourself when you are ready to pick up the tags. The ``-r``
 flag also runs ``patman review --sync`` to track sent review drafts and
 replies; this needs Gmail access (see `Assisted patch review`_).
 
-The output of the last sync is available through the API, which can also start
-one.
+Tap the sync indicator at the top of the page to see the output of the last
+sync or to start one.
 
 Running it as a service
 -----------------------

@@ -10,9 +10,10 @@ Unreleased
 
 Added
 ~~~~~
-- ``patman serve`` runs a web server providing the status of your series,
-  patchwork comments, draft reviews and todos as JSON, optionally syncing with
-  patchwork periodically. The API is described in ``doc/serve-protocol.rst``.
+- ``patman serve`` runs a web server showing series status, patchwork
+  comments, draft reviews and todos on a mobile-friendly page, optionally
+  syncing with patchwork periodically. Its JSON API is described in
+  ``doc/serve-protocol.rst``.
 
 0.3.3 - 2026-10-12
 ------------------

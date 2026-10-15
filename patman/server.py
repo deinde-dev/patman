@@ -5,7 +5,7 @@
 """Serve series status and reviews over HTTP for viewing on a phone
 
 'patman serve' runs a small web server in the git tree. It provides a JSON
-API over the patman database.
+API over the patman database plus a mobile-friendly page which uses it.
 Comments on patches and cover letters are not stored in the database, so
 these are read live from patchwork when asked for.
 
@@ -32,6 +32,7 @@ from collections import Counter
 from datetime import datetime
 import hmac
 import ipaddress
+import os
 import sys
 
 import aiohttp
@@ -42,6 +43,9 @@ from u_boot_pylib import tout
 from patman import review as review_mod
 from patman.patchwork import Patchwork
 from patman.workflow import Wtype
+
+# Directory holding the web page and its assets
+WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web')
 
 # Maximum amount of output to keep from each sync command
 MAX_SYNC_OUTPUT = 20000
@@ -534,6 +538,9 @@ class Server:
         await asyncio.sleep(0)
         return web.json_response(self.sync_state, status=202)
 
+    async def _index(self, _request):
+        return web.FileResponse(os.path.join(WEB_DIR, 'index.html'))
+
     def make_app(self):
         """Create the aiohttp application
 
@@ -550,6 +557,8 @@ class Server:
                            self._comments)
         app.router.add_get('/api/sync', self._sync_get)
         app.router.add_post('/api/sync', self._sync_post)
+        app.router.add_get('/', self._index)
+        app.router.add_static('/static', WEB_DIR)
         app.on_startup.append(self._start_background)
         app.on_cleanup.append(self._stop_background)
         return app

@@ -8,7 +8,8 @@ The patman serve protocol
 HTTP, covering the patman database and, where needed, the patchwork servers of
 the upstreams. This document describes that API, for anyone working on the
 server or writing a client. See the 'Web server' chapter of the manual for how
-to run the server.
+to run the server. The page which the server provides is one such client; see
+`The page`_.
 
 Overview
 --------
@@ -222,3 +223,18 @@ The state of the most recent sync:
 
 Start a sync, giving status 202 and the sync state, or 409 and the sync state
 if a sync is already running.
+
+The page
+--------
+
+``GET /`` gives the page, a single HTML file which needs no build step and
+loads nothing from other sites, and ``/static/<file>`` gives the files it uses,
+such as its web-app manifest and icon. Neither needs the token.
+
+The page takes the token from a ``token`` query parameter in its own URL, as
+printed by ``patman serve``, keeps it in the browser's local storage and
+removes it from the URL. It sends the token in an ``Authorization`` header and
+asks for it if a request is refused with status 401.
+
+While a sync is running, the page asks for its state every few seconds to show
+its progress, and otherwise checks the sync state once a minute.

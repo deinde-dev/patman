@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f3a5f">
+<title>patman</title>
+<link rel="manifest" href="static/manifest.json">
+<link rel="icon" href="static/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="static/icon-512.png">
+<style>
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --text: #1b1f24;
+  --muted: #5f6b7a;
+  --border: #e1e5ea;
+  --accent: #1f3a5f;
+  --accent-text: #ffffff;
+  --link: #1d5fb4;
+  --quote: #6b7685;
+  --quote-bar: #c9d1db;
+  --st-accepted: #1e7d43;
+  --st-new: #3d6fb4;
+  --st-review: #7a52b3;
+  --st-changes: #b25e09;
+  --st-rejected: #b3343a;
+  --st-other: #78828f;
+  --code-bg: #f0f2f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111418;
+    --surface: #1a1e24;
+    --text: #e4e7eb;
+    --muted: #97a1ae;
+    --border: #2b3139;
+    --accent: #23415f;
+    --accent-text: #e9eef5;
+    --link: #79aef2;
+    --quote: #8f99a6;
+    --quote-bar: #3a434e;
+    --st-accepted: #4cb878;
+    --st-new: #6b9be0;
+    --st-review: #a888dc;
+    --st-changes: #e09445;
+    --st-rejected: #e4686e;
+    --st-other: #8a94a1;
+    --code-bg: #20252c;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  padding-bottom: calc(64px + env(safe-area-inset-bottom));
+}
+a { color: var(--link); text-decoration: none; }
+button { font: inherit; color: inherit; }
+
+header {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--accent); color: var(--accent-text);
+  display: flex; align-items: center; gap: 10px;
+  padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+}
+header .back {
+  background: none; border: 0; color: inherit; padding: 4px 8px 4px 0;
+  font-size: 22px; line-height: 1; cursor: pointer;
+}
+header h1 {
+  flex: 1; margin: 0; font-size: 17px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#sync {
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(255,255,255,0.12); border: 0; border-radius: 16px;
+  padding: 5px 10px; font-size: 13px; color: inherit; cursor: pointer;
+  white-space: nowrap;
+}
+#sync .dot { width: 8px; height: 8px; border-radius: 50%; background: #9aa5b1; }
+#sync.ok .dot { background: #5fd38d; }
+#sync.bad .dot { background: #ff7b7b; }
+#sync.running .dot { background: #ffd166; animation: pulse 1s infinite alternate; }
+@keyframes pulse { to { opacity: 0.3; } }
+
+main { max-width: 760px; margin: 0 auto; padding: 12px 16px; }
+
+nav {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 2;
+  display: flex; background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+nav a {
+  flex: 1; text-align: center; padding: 10px 0 12px;
+  color: var(--muted); font-size: 13px; font-weight: 500;
+}
+nav a svg { display: block; margin: 0 auto 2px; width: 22px; height: 22px; }
+nav a.active { color: var(--link); }
+
+.list { display: flex; flex-direction: column; gap: 8px; }
+.card {
+  display: block; background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+}
+a.card:active { background: var(--code-bg); }
+.row { display: flex; align-items: baseline; gap: 8px; }
+.row .grow { flex: 1; min-width: 0; }
+.name { font-weight: 600; overflow-wrap: anywhere; }
+.desc { color: var(--muted); font-size: 14px; margin-top: 2px; overflow-wrap: anywhere; }
+.meta { color: var(--muted); font-size: 13px; margin-top: 6px;
+        display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.ver { color: var(--muted); font-size: 13px; white-space: nowrap; }
+
+.bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden;
+       margin-top: 8px; background: var(--border); }
+.bar span { display: block; height: 100%; }
+
+.chip {
+  display: inline-block; border-radius: 10px; padding: 1px 8px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  border: 1px solid currentColor;
+}
+.st-accepted { color: var(--st-accepted); }
+.st-new { color: var(--st-new); }
+.st-under-review, .st-needs-review-ack, .st-rfc { color: var(--st-review); }
+.st-changes-requested { color: var(--st-changes); }
+.st-rejected, .st-not-applicable { color: var(--st-rejected); }
+.st-other { color: var(--st-other); }
+
+.tabs { display: flex; gap: 6px; overflow-x: auto; margin: 4px 0 12px; }
+.tabs button {
+  border: 1px solid var(--border); background: var(--surface);
+  border-radius: 16px; padding: 4px 12px; cursor: pointer; flex: none;
+}
+.tabs button.on { background: var(--accent); color: var(--accent-text);
+                  border-color: var(--accent); }
+
+.section { font-size: 13px; font-weight: 600; color: var(--muted);
+           text-transform: uppercase; letter-spacing: 0.04em;
+           margin: 16px 2px 8px; }
+
+.patch { cursor: pointer; }
+.patch .seq { color: var(--muted); font-variant-numeric: tabular-nums;
+              min-width: 22px; }
+.ncomments { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.ncomments.some { color: var(--link); font-weight: 600; }
+.comments { margin-top: 10px; border-top: 1px solid var(--border);
+            padding-top: 10px; display: flex; flex-direction: column;
+            gap: 14px; cursor: auto; }
+.who { font-size: 13px; font-weight: 600; }
+.who .when { color: var(--muted); font-weight: 400; margin-left: 6px; }
+
+.mail {
+  font: 13px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 6px;
+}
+.mail .q { color: var(--quote); border-left: 2px solid var(--quote-bar);
+           padding-left: 6px; display: block; }
+.mail details { margin: 2px 0; }
+.mail summary { color: var(--link); cursor: pointer; font-family: system-ui, sans-serif;
+                font-size: 12px; list-style: none; padding: 2px 0; }
+.mail summary::-webkit-details-marker { display: none; }
+
+.review { margin-top: 8px; }
+.notes { background: var(--code-bg); border-radius: 8px; padding: 10px 12px; }
+
+.empty, .error { text-align: center; color: var(--muted); padding: 40px 16px; }
+.error { color: var(--st-rejected); }
+.spinner { text-align: center; color: var(--muted); padding: 40px 0; }
+
+.log { background: var(--code-bg); border-radius: 8px; padding: 10px;
+       max-height: 50vh; overflow: auto; }
+.btn {
+  background: var(--accent); color: var(--accent-text); border: 0;
+  border-radius: 8px; padding: 8px 14px; cursor: pointer; font-weight: 600;
+}
+.btn:disabled { opacity: 0.5; }
+input.search {
+  width: 100%; padding: 9px 12px; border-radius: 10px; font: inherit;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  margin-bottom: 8px;
+}
+.section:empty { display: none; }
+input[type=password] {
+  width: 100%; padding: 10px; border-radius: 8px; font: inherit;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  margin: 8px 0;
+}
+.extlink { font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <button class="back" id="back" hidden aria-label="Back">&#8249;</button>
+  <h1 id="title">patman</h1>
+  <button id="sync" title="Sync status"><span class="dot"></span><span id="sync-text">sync</span></button>
+</header>
+<main id="main"><div class="spinner">Loading…</div></main>
+<nav>
+  <a href="#/series" data-tab="series">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Series</a>
+  <a href="#/reviews" data-tab="reviews">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Reviews</a>
+  <a href="#/todo" data-tab="todo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg>Todo</a>
+</nav>
+<script>
+'use strict';
+
+// Token handling: a ?token=... in the URL is remembered, then removed
+// from the address bar so it does not end up in screenshots or history
+const TOKEN_KEY = 'patman-token';
+function getToken() {
+  try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; }
+}
+function setToken(tok) {
+  try { localStorage.setItem(TOKEN_KEY, tok); } catch (e) { /* ignore */ }
+}
+(function () {
+  const params = new URLSearchParams(location.search);
+  if (params.has('token')) {
+    setToken(params.get('token'));
+    history.replaceState(null, '', location.pathname + location.hash);
+  }
+})();
+
+class AuthError extends Error {}
+
+async function api(path, opts = {}) {
+  const headers = {};
+  const tok = getToken();
+  if (tok) headers.Authorization = 'Bearer ' + tok;
+  const resp = await fetch('api/' + path, { ...opts, headers });
+  if (resp.status === 401) throw new AuthError('Token needed');
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok && resp.status !== 409) {
+    throw new Error(data.error || `HTTP ${resp.status}`);
+  }
+  return data;
+}
+
+// Small DOM helper: h('div', {class: 'x'}, child, 'text', ...)
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'class') el.className = v;
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid === null || kid === undefined || kid === false) continue;
+    el.append(kid instanceof Node ? kid : String(kid));
+  }
+  return el;
+}
+
+// Parse a database time (local, 'YYYY-MM-DD HH:MM:SS') or a patchwork
+// time (UTC, 'YYYY-MM-DDTHH:MM:SS')
+function parseTime(str, utc) {
+  if (!str) return null;
+  const iso = str.replace(' ', 'T');
+  return new Date(utc && !/[zZ+]/.test(iso.slice(10)) ? iso + 'Z' : iso);
+}
+
+function ago(date) {
+  if (!date || isNaN(date)) return '';
+  const secs = (Date.now() - date.getTime()) / 1000;
+  const future = secs < 0;
+  const s = Math.abs(secs);
+  let txt;
+  if (s < 90) txt = 'just now';
+  else if (s < 3600) txt = `${Math.round(s / 60)}m`;
+  else if (s < 86400) txt = `${Math.round(s / 3600)}h`;
+  else if (s < 86400 * 14) txt = `${Math.round(s / 86400)}d`;
+  else if (s < 86400 * 60) txt = `${Math.round(s / 86400 / 7)}w`;
+  else txt = date.toLocaleDateString();
+  if (txt === 'just now' || txt.includes('/') || txt.includes('.')) return txt;
+  return future ? `in ${txt}` : `${txt} ago`;
+}
+
+// Order and colours for patch states
+const STATE_ORDER = ['accepted', 'changes-requested', 'under-review',
+                     'needs-review-ack', 'rfc', 'new', 'deferred',
+                     'superseded', 'rejected', 'not-applicable', 'unknown'];
+const KNOWN_STATES = new Set(['accepted', 'new', 'under-review',
+  'needs-review-ack', 'rfc', 'changes-requested', 'rejected',
+  'not-applicable']);
+function stClass(state) {
+  return 'st-' + (KNOWN_STATES.has(state) ? state : 'other');
+}
+function sortedStates(states) {
+  return Object.entries(states || {}).sort(
+    (a, b) => STATE_ORDER.indexOf(a[0]) - STATE_ORDER.indexOf(b[0]));
+}
+function stateBar(states, count) {
+  if (!count) return null;
+  return h('div', { class: 'bar' }, sortedStates(states).map(([st, n]) =>
+    h('span', { class: stClass(st), title: `${n} ${st}`,
+                style: `width:${100 * n / count}%;background:currentColor` })));
+}
+function stateChips(states) {
+  return sortedStates(states).map(([st, n]) =>
+    h('span', { class: `chip ${stClass(st)}` }, `${n} ${st}`));
+}
+function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
+
+// Render an email body, with quoted lines dimmed and long runs of
+// quoted text folded away
+function renderMail(text) {
+  const out = h('div', { class: 'mail' });
+  const lines = (text || '').replace(/\s+$/, '').split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].startsWith('>')) {
+      let j = i;
+      while (j < lines.length && (lines[j].startsWith('>') ||
+             (lines[j] === '' && j + 1 < lines.length &&
+              lines[j + 1].startsWith('>')))) j++;
+      const run = lines.slice(i, j);
+      const quote = (ls) => h('span', { class: 'q' }, ls.join('\n'));
+      if (run.length > 6) {
+        // Keep the last few lines visible since they give the context
+        // for the reply that follows
+        const hidden = run.slice(0, -3);
+        out.append(h('details', {},
+          h('summary', {}, `▸ ${hidden.length} quoted lines`), quote(hidden)));
+        out.append(quote(run.slice(-3)));
+      } else {
+        out.append(quote(run));
+      }
+      i = j;
+    } else {
+      let j = i;
+      while (j < lines.length && !lines[j].startsWith('>')) j++;
+      out.append(lines.slice(i, j).join('\n') + '\n');
+      i = j;
+    }
+  }
+  return out;
+}
+
+const main = document.getElementById('main');
+const titleEl = document.getElementById('title');
+const backBtn = document.getElementById('back');
+backBtn.addEventListener('click', () => history.back());
+
+function setView(title, tab, back, ...content) {
+  titleEl.textContent = title;
+  backBtn.hidden = !back;
+  for (const a of document.querySelectorAll('nav a')) {
+    a.classList.toggle('active', a.dataset.tab === tab);
+  }
+  main.replaceChildren(...content.flat().filter((c) => c !== null && c !== undefined && c !== false));
+}
+
+function showError(err, tab) {
+  if (err instanceof AuthError) {
+    const input = h('input', { type: 'password', placeholder: 'Token',
+                               autocomplete: 'current-password' });
+    const save = () => { setToken(input.value.trim()); route(); refreshSync(); };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+    setView('patman', tab, false, h('div', { class: 'card' },
+      h('div', { class: 'name' }, 'This server needs a token'),
+      h('div', { class: 'desc' },
+        "Enter the token given to 'patman serve --token'"),
+      input, h('button', { class: 'btn', onclick: save }, 'Save')));
+    return;
+  }
+  setView('patman', tab, false, h('div', { class: 'error' }, String(err.message || err)));
+}
+
+// --- Series ---
+
+// A search box and optional filter chips above a list of cards. Each item
+// is {card, text, groups} where text is searched and groups lists the
+// filters the item belongs to
+function filteredList(key, items, filters) {
+  let current = filters ? filters[0][0] : null;
+  try {
+    const saved = localStorage.getItem(`patman-filter-${key}`);
+    if (filters && filters.some(([id]) => id === saved)) current = saved;
+  } catch (e) { /* ignore */ }
+  const search = h('input', { type: 'search', class: 'search',
+                              placeholder: 'Search', 'aria-label': 'Search' });
+  const count = h('div', { class: 'section' });
+  const empty = h('div', { class: 'empty', hidden: true }, 'Nothing matches');
+  const chips = filters ? h('div', { class: 'tabs' }) : null;
+  const update = () => {
+    const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = 0;
+    for (const it of items) {
+      const ok = (!current || it.groups.includes(current)) &&
+                 words.every((w) => it.text.includes(w));
+      it.card.hidden = !ok;
+      shown += ok;
+    }
+    count.textContent = `${shown} of ${items.length}`;
+    empty.hidden = shown > 0;
+    if (chips) {
+      chips.replaceChildren(...filters.map(([id, label]) => h('button', {
+        class: id === current ? 'on' : '',
+        onclick: () => {
+          current = id;
+          try { localStorage.setItem(`patman-filter-${key}`, id); }
+          catch (e) { /* ignore */ }
+          update();
+        } }, label)));
+    }
+  };
+  for (const it of items) it.text = it.text.toLowerCase();
+  search.addEventListener('input', update);
+  update();
+  return [search, chips, count, h('div', { class: 'list' }, items.map((it) => it.card)),
+          empty];
+}
+
+// Patchwork series IDs increase over time, so give a good recency order
+function linkNum(link) { return parseInt(link, 10) || 0; }
+
+const FINAL_STATES = new Set(['accepted', 'rejected', 'superseded',
+                              'not-applicable']);
+
+async function viewSeriesList() {
+  const list = await api('series');
+  const items = list.filter((s) => s.version !== null);
+  if (!items.length) {
+    return setView('Series', 'series', false,
+                   h('div', { class: 'empty' }, 'No series yet'));
+  }
+  items.sort((a, b) => (b.sent || '').localeCompare(a.sent || '') ||
+                       linkNum(b.link) - linkNum(a.link));
+  setView('Series', 'series', false, ...filteredList('series', items.map((s) => {
+    const comments = s.num_comments + s.cover_num_comments;
+    const final = Object.entries(s.states).every(([st]) => FINAL_STATES.has(st));
+    const card = h('a', { class: 'card', href: `#/series/${s.id}` },
+      h('div', { class: 'row' },
+        h('div', { class: 'grow name' }, s.name),
+        h('div', { class: 'ver' }, `v${s.version}`)),
+      s.desc && h('div', { class: 'desc' }, s.desc),
+      stateBar(s.states, s.count),
+      h('div', { class: 'meta' },
+        h('span', {}, `${s.states.accepted || 0}/${s.count} accepted`),
+        comments ? h('span', { class: 'ncomments some' },
+                     plural(comments, 'comment')) : null,
+        s.sent && h('span', {}, `sent ${ago(parseTime(s.sent))}`),
+        !s.link && h('span', {}, 'not sent')));
+    const groups = ['all'];
+    if (s.link && s.count && !final) groups.push('active');
+    return { card, text: `${s.name} ${s.desc || ''}`, groups };
+  }), [['active', 'Active'], ['all', 'All']]));
+}
+
+function commentToggle(card, kind, itemId, ups) {
+  let box = null;
+  return async (ev) => {
+    if (ev.target.closest('a, .comments')) return;
+    if (box) { box.remove(); box = null; return; }
+    box = h('div', { class: 'comments' }, h('div', { class: 'ver' }, 'Loading…'));
+    card.append(box);
+    try {
+      const q = ups ? `?ups=${encodeURIComponent(ups)}` : '';
+      const comments = await api(`comments/${kind}/${itemId}${q}`);
+      box.replaceChildren(...(comments.length ? comments.map((c) =>
+        h('div', {},
+          h('div', { class: 'who' }, c.name || c.email || 'Unknown',
+            h('span', { class: 'when' }, ago(parseTime(c.date, true)))),
+          renderMail(c.content))) : [h('div', { class: 'ver' }, 'No comments')]));
+    } catch (err) {
+      box.replaceChildren(h('div', { class: 'error' }, err.message));
+    }
+  };
+}
+
+async function viewSeries(id, wantVer) {
+  const ser = await api(`series/${id}`);
+  const pw = ser.patchwork_url;
+  const versions = ser.versions;
+  const sv = versions.find((v) => v.version === wantVer) || versions[0];
+  const tabs = versions.length > 1 ? h('div', { class: 'tabs' }, versions.map((v) =>
+    h('button', { class: v === sv ? 'on' : '',
+                  onclick: () => { location.replace(`#/series/${id}/${v.version}`); } },
+      `v${v.version}`))) : null;
+
+  const cards = [];
+  if (sv.cover_id) {
+    const card = h('div', { class: 'card patch' },
+      h('div', { class: 'row' },
+        h('div', { class: 'grow name' }, 'Cover letter'),
+        h('span', { class: 'ncomments' + (sv.cover_num_comments ? ' some' : '') },
+          plural(sv.cover_num_comments, 'comment'))),
+      sv.cover_name && h('div', { class: 'desc' }, sv.cover_name),
+      pw && h('div', { class: 'meta' },
+        h('a', { class: 'extlink', href: `${pw}/cover/${sv.cover_id}/`,
+                 target: '_blank', rel: 'noopener' }, 'Open in patchwork ↗')));
+    card.addEventListener('click', commentToggle(card, 'cover', sv.cover_id, ser.upstream));
+    cards.push(card);
+  }
+  for (const p of sv.patches) {
+    const card = h('div', { class: 'card patch' },
+      h('div', { class: 'row' },
+        h('span', { class: 'seq' }, p.seq),
+        h('div', { class: 'grow' }, p.subject),
+        h('span', { class: 'ncomments' + (p.num_comments ? ' some' : '') },
+          p.num_comments ? `💬 ${p.num_comments}` : '')),
+      h('div', { class: 'meta' },
+        p.state && h('span', { class: `chip ${stClass(p.state)}` }, p.state),
+        pw && p.patch_id && h('a', { class: 'extlink',
+          href: `${pw}/patch/${p.patch_id}/`, target: '_blank', rel: 'noopener' },
+          'patchwork ↗')));
+    if (p.patch_id) {
+      card.addEventListener('click', commentToggle(card, 'patch', p.patch_id, ser.upstream));
+    }
+    cards.push(card);
+  }
+  setView(ser.name, 'series', true,
+    h('div', { class: 'card' },
+      h('div', { class: 'name' }, ser.desc || ser.name),
+      h('div', { class: 'meta' },
+        h('span', {}, `v${sv.version}`),
+        ser.upstream && h('span', {}, ser.upstream),
+        sv.link ? h('span', {}, `series ${sv.link}`) : h('span', {}, 'no link'),
+        sv.archive_tag && h('span', {}, 'archived')),
+      h('div', { class: 'meta' }, stateChips(sv.states))),
+    tabs,
+    h('div', { class: 'section' },
+      `${sv.patches.length} patch${sv.patches.length === 1 ? '' : 'es'}`),
+    h('div', { class: 'list' }, cards));
+}
+
+// --- Reviews ---
+
+const REVIEW_STATUS = {
+  new: 'not drafted', draft: 'draft', sent: 'sent', replied: 'replied',
+  deleted: 'deleted',
+};
+
+async function viewReviewList() {
+  const list = await api('reviews');
+  if (!list.length) {
+    return setView('Reviews', 'reviews', false,
+      h('div', { class: 'empty' }, "No reviews yet: try 'patman review'"));
+  }
+  setView('Reviews', 'reviews', false, ...filteredList('reviews', list.map((r) => ({
+    text: `${r.name} ${r.desc || ''}`,
+    groups: [],
+    card: h('a', { class: 'card', href: `#/reviews/${r.id}` },
+      h('div', { class: 'row' },
+        h('div', { class: 'grow name' }, r.desc || r.name),
+        r.version && h('div', { class: 'ver' }, `v${r.version}`)),
+      h('div', { class: 'meta' },
+        h('span', {}, `${r.approved}/${r.num_reviews} approved`),
+        Object.entries(r.statuses).map(([st, n]) =>
+          h('span', {}, `${n} ${REVIEW_STATUS[st] || st}`)),
+        r.timestamp && h('span', {}, ago(parseTime(r.timestamp))))) }))));
+}
+
+async function viewReview(id, wantVer) {
+  const ser = await api(`reviews/${id}`);
+  const versions = ser.versions;
+  const sv = versions.find((v) => v.version === wantVer) || versions[0];
+  const tabs = versions.length > 1 ? h('div', { class: 'tabs' }, versions.map((v) =>
+    h('button', { class: v === sv ? 'on' : '',
+                  onclick: () => { location.replace(`#/reviews/${id}/${v.version}`); } },
+      `v${v.version}`))) : null;
+  const reviews = sv.reviews.map((r) => h('div', { class: 'card review' },
+    h('div', { class: 'row' },
+      h('div', { class: 'grow name' }, r.seq ? `Patch ${r.seq}` : 'Cover letter'),
+      h('span', { class: `chip ${r.approved ? 'st-accepted' : 'st-changes-requested'}` },
+        r.approved ? 'Reviewed-by' : 'comments'),
+      h('span', { class: 'ver' }, REVIEW_STATUS[r.status] || r.status || '')),
+    renderMail(r.body)));
+  setView(ser.desc || ser.name, 'reviews', true,
+    h('div', { class: 'card' },
+      h('div', { class: 'name' }, ser.desc || ser.name),
+      h('div', { class: 'meta' },
+        h('span', {}, `v${sv.version}`),
+        ser.upstream && h('span', {}, ser.upstream),
+        sv.link && h('span', {}, `series ${sv.link}`))),
+    tabs,
+    sv.notes && h('div', { class: 'section' }, 'Notes'),
+    sv.notes && h('div', { class: 'notes' }, renderMail(sv.notes)),
+    h('div', { class: 'section' }, plural(reviews.length, 'review')),
+    reviews.length ? h('div', { class: 'list' }, reviews)
+                   : h('div', { class: 'empty' }, 'No reviews for this version'));
+}
+
+// --- Todo ---
+
+async function viewTodo() {
+  const list = await api('todo');
+  if (!list.length) {
+    return setView('Todo', 'todo', false, h('div', { class: 'empty' }, 'Nothing scheduled'));
+  }
+  const due = list.filter((t) => t.due);
+  const later = list.filter((t) => !t.due);
+  const card = (t) => h('a', { class: 'card', href: `#/series/${t.series_id}` },
+    h('div', { class: 'row' },
+      h('div', { class: 'grow name' }, t.name),
+      h('span', { class: `chip ${t.due ? 'st-changes-requested' : 'st-other'}` },
+        t.due ? `due ${ago(parseTime(t.timestamp))}`.replace('due just now', 'due now')
+              : ago(parseTime(t.timestamp)))),
+    t.desc && h('div', { class: 'desc' }, t.desc));
+  setView('Todo', 'todo', false,
+    due.length ? h('div', { class: 'section' }, 'Due') : null,
+    due.length ? h('div', { class: 'list' }, due.map(card)) : null,
+    later.length ? h('div', { class: 'section' }, 'Scheduled') : null,
+    later.length ? h('div', { class: 'list' }, later.map(card)) : null);
+}
+
+// --- Sync ---
+
+const syncBtn = document.getElementById('sync');
+const syncText = document.getElementById('sync-text');
+let syncState = null;
+let syncTimer = null;
+
+function syncOk(state) {
+  return state.results.every((r) => r.returncode === 0);
+}
+
+async function refreshSync() {
+  const wasRunning = syncState && syncState.running;
+  try {
+    syncState = await api('sync');
+  } catch (err) {
+    syncBtn.className = 'bad';
+    syncText.textContent = 'offline';
+    return;
+  }
+  const st = syncState;
+  syncBtn.className = st.running ? 'running' : !st.finished ? '' :
+                      syncOk(st) ? 'ok' : 'bad';
+  syncText.textContent = st.running ? 'syncing' :
+    st.finished ? ago(parseTime(st.finished)) : 'sync';
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(refreshSync, st.running ? 3000 : 60000);
+  if (location.hash === '#/sync') viewSync();
+  else if (wasRunning && !st.running) route();
+}
+
+async function startSync() {
+  await api('sync', { method: 'POST' });
+  await refreshSync();
+}
+
+function viewSync() {
+  const st = syncState || { results: [] };
+  const btn = h('button', { class: 'btn', disabled: st.running,
+                            onclick: () => { btn.disabled = true; startSync(); } },
+                st.running ? 'Syncing…' : 'Sync now');
+  setView('Sync', null, true,
+    h('div', { class: 'card' },
+      h('div', { class: 'meta' },
+        h('span', {}, st.interval ? `Every ${st.interval} min` : 'Periodic sync off'),
+        st.review_sync && h('span', {}, 'with review --sync'),
+        st.started && h('span', {}, `last started ${ago(parseTime(st.started))}`)),
+      h('div', { style: 'margin-top:10px' }, btn)),
+    st.results.map((r) => [
+      h('div', { class: 'section' }, `${r.cmd} — ${r.returncode === 0 ? 'ok' : 'exit ' + r.returncode}`),
+      h('div', { class: 'log mail' }, r.output.trim() || '(no output)')]));
+}
+syncBtn.addEventListener('click', () => { location.hash = '#/sync'; });
+
+// --- Routing ---
+
+async function route() {
+  const parts = (location.hash.replace(/^#\/?/, '') || 'series').split('/');
+  const [page, id, ver] = parts;
+  const tab = page === 'sync' ? null : page;
+  try {
+    if (page === 'series' && id) await viewSeries(+id, ver ? +ver : null);
+    else if (page === 'reviews' && id) await viewReview(+id, ver ? +ver : null);
+    else if (page === 'reviews') await viewReviewList();
+    else if (page === 'todo') await viewTodo();
+    else if (page === 'sync') viewSync();
+    else await viewSeriesList();
+  } catch (err) {
+    showError(err, tab);
+  }
+}
+
+window.addEventListener('hashchange', () => { window.scrollTo(0, 0); route(); });
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { refreshSync(); }
+});
+route();
+refreshSync();
+</script>
+</body>
+</html>

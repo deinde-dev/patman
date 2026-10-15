@@ -280,6 +280,13 @@ class TestWebServer(unittest.TestCase, TestCommon):
         status, _ = self.call(srv, 'GET', '/api/todo?token=secret')
         self.assertEqual(200, status)
 
+        # The page itself does not need the token, since it asks for it
+        status, text = self.call(srv, 'GET', '/')
+        self.assertEqual(200, status)
+        self.assertIn('<title>patman</title>', text)
+        status, _ = self.call(srv, 'GET', '/static/manifest.json')
+        self.assertEqual(200, status)
+
     def test_sync_cmds(self):
         """The sync never gathers tags into branches"""
         srv = server.Server(self.cser)
