@@ -23,8 +23,10 @@ API (all responses are JSON):
     GET  /api/reviews                 Series reviewed with 'patman review'
     GET  /api/reviews/<id>            Reviews for each version of one
     GET  /api/todo                    Todo entries from the workflow table
-    GET  /api/sync                    State of the periodic sync
+    GET  /api/sync                    State of the periodic sync, including
+                                      the output so far
     POST /api/sync                    Start a sync now
+    POST /api/sync/cancel             Stop the sync which is running
 """
 
 import asyncio
@@ -33,6 +35,7 @@ from datetime import datetime
 import hmac
 import ipaddress
 import os
+import signal
 import sys
 
 import aiohttp
@@ -335,8 +338,11 @@ class Server:
         self._sleep = asyncio.sleep
         self._sync_lock = asyncio.Lock()
         self._sync_task = None
+        self._sync_proc = None
+        self._sync_cancel = False
         self.sync_state = {
             'running': False,
+            'cancelled': False,
             'interval': sync_interval,
             'review_sync': review_sync,
             'started': None,
@@ -387,7 +393,7 @@ class Server:
         """
         if self.sync_cmds_for_testing is not None:
             return self.sync_cmds_for_testing
-        patman = [sys.executable, '-m', 'patman']
+        patman = [sys.executable, '-m', 'patman', '-v']
         cmds = [patman + ['series', 'gather-all', '-G']]
         if self.review_sync:
             cmds.append(patman + ['review', '--sync'])
@@ -396,8 +402,10 @@ class Server:
     async def run_sync(self):
         """Run the sync commands one after the other
 
-        Output from each command is recorded in sync_state. If a sync is
-        already running, this does nothing.
+        Output from each command is recorded in sync_state as it arrives.
+        If a sync is already running, this does nothing. If the sync is
+        cancelled, the command which is running is stopped and the rest are
+        not run.
 
         Return:
             bool: True if a sync was run, False if one was already running
@@ -406,49 +414,84 @@ class Server:
             return False
         async with self._sync_lock:
             state = self.sync_state
+            self._sync_cancel = False
             state['running'] = True
+            state['cancelled'] = False
             state['started'] = _now_str()
             state['finished'] = None
             state['results'] = []
             try:
                 for cmd in self.get_sync_cmds():
-                    state['results'].append(await self._run_cmd(cmd))
+                    if self._sync_cancel:
+                        break
+                    result = {
+                        'cmd': ' '.join(cmd[1:] if cmd[0] == sys.executable
+                                        else cmd),
+                        'returncode': None,
+                        'output': '',
+                    }
+                    state['results'].append(result)
+                    await self._run_cmd(cmd, result)
             finally:
                 state['running'] = False
+                state['cancelled'] = self._sync_cancel
                 state['finished'] = _now_str()
         return True
 
-    async def _run_cmd(self, cmd):
+    def cancel_sync(self):
+        """Stop the sync which is running, if any
+
+        Return:
+            bool: True if a sync was running, False if not
+        """
+        if not self.sync_state['running']:
+            return False
+        self._sync_cancel = True
+        if self._sync_proc and self._sync_proc.returncode is None:
+            # Stop any child processes too, since they hold the output open
+            tout.info('Sync: cancelling')
+            try:
+                os.killpg(self._sync_proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        return True
+
+    async def _run_cmd(self, cmd, result):
         """Run a single sync command in the git tree
+
+        The output is added to the result as each line arrives, so that a
+        client can show the progress of the sync.
 
         Args:
             cmd (list of str): Command to run
-
-        Return:
-            dict: Information about the command and its output
+            result (dict): Information about the command, updated with its
+                output and return code
         """
         tout.info(f"Sync: running {' '.join(cmd[1:])}")
+        env = review_mod._child_env()  # pylint: disable=W0212
+        env['PYTHONUNBUFFERED'] = '1'
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd, stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
-                cwd=self.cser.topdir,
-                env=review_mod._child_env())  # pylint: disable=W0212
-            out, _ = await proc.communicate()
-            returncode = proc.returncode
-            output = out.decode('utf-8', errors='replace')
+                cwd=self.cser.topdir, env=env, start_new_session=True)
         except OSError as exc:
-            returncode = -1
-            output = str(exc)
-        if returncode:
-            tout.warning(f"Sync: '{' '.join(cmd[1:])}' failed "
-                         f'(code {returncode})')
-        return {
-            'cmd': ' '.join(cmd[1:] if cmd[0] == sys.executable else cmd),
-            'returncode': returncode,
-            'output': output[-MAX_SYNC_OUTPUT:],
-        }
+            result['returncode'] = -1
+            result['output'] = str(exc)
+            return
+        self._sync_proc = proc
+        try:
+            async for line in proc.stdout:
+                output = result['output'] + line.decode('utf-8',
+                                                        errors='replace')
+                result['output'] = output[-MAX_SYNC_OUTPUT:]
+            result['returncode'] = await proc.wait()
+        finally:
+            self._sync_proc = None
+        if result['returncode']:
+            tout.warning(f"Sync: '{result['cmd']}' failed "
+                         f"(code {result['returncode']})")
 
     async def _sync_loop(self):
         """Run a sync every sync_interval minutes, starting straight away"""
@@ -538,6 +581,11 @@ class Server:
         await asyncio.sleep(0)
         return web.json_response(self.sync_state, status=202)
 
+    async def _sync_cancel_post(self, _request):
+        if not self.cancel_sync():
+            return web.json_response(self.sync_state, status=409)
+        return web.json_response(self.sync_state, status=202)
+
     async def _index(self, _request):
         return web.FileResponse(os.path.join(WEB_DIR, 'index.html'))
 
@@ -557,6 +605,7 @@ class Server:
                            self._comments)
         app.router.add_get('/api/sync', self._sync_get)
         app.router.add_post('/api/sync', self._sync_post)
+        app.router.add_post('/api/sync/cancel', self._sync_cancel_post)
         app.router.add_get('/', self._index)
         app.router.add_static('/static', WEB_DIR)
         app.on_startup.append(self._start_background)

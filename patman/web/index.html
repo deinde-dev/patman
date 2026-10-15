@@ -180,6 +180,7 @@ a.card:active { background: var(--code-bg); }
   border-radius: 8px; padding: 8px 14px; cursor: pointer; font-weight: 600;
 }
 .btn:disabled { opacity: 0.5; }
+.btn.danger { background: var(--st-rejected); color: #fff; margin-left: 8px; }
 input.search {
   width: 100%; padding: 9px 12px; border-radius: 10px; font: inherit;
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
@@ -621,7 +622,7 @@ let syncState = null;
 let syncTimer = null;
 
 function syncOk(state) {
-  return state.results.every((r) => r.returncode === 0);
+  return !state.cancelled && state.results.every((r) => r.returncode === 0);
 }
 
 async function refreshSync() {
@@ -639,7 +640,7 @@ async function refreshSync() {
   syncText.textContent = st.running ? 'syncing' :
     st.finished ? ago(parseTime(st.finished)) : 'sync';
   clearTimeout(syncTimer);
-  syncTimer = setTimeout(refreshSync, st.running ? 3000 : 60000);
+  syncTimer = setTimeout(refreshSync, st.running ? 1500 : 60000);
   if (location.hash === '#/sync') viewSync();
   else if (wasRunning && !st.running) route();
 }
@@ -649,21 +650,44 @@ async function startSync() {
   await refreshSync();
 }
 
+async function cancelSync() {
+  await api('sync/cancel', { method: 'POST' });
+  await refreshSync();
+}
+
+// Describe how a sync command ended
+function cmdStatus(r, st) {
+  if (r.returncode === null) return 'running…';
+  if (r.returncode === 0) return 'ok';
+  if (st.cancelled && r === st.results[st.results.length - 1]) return 'cancelled';
+  return 'exit ' + r.returncode;
+}
+
 function viewSync() {
   const st = syncState || { results: [] };
   const btn = h('button', { class: 'btn', disabled: st.running,
                             onclick: () => { btn.disabled = true; startSync(); } },
                 st.running ? 'Syncing…' : 'Sync now');
+  const cancel = st.running && h('button', { class: 'btn danger',
+      onclick: () => { cancel.disabled = true; cancelSync(); } }, 'Cancel');
+  const logs = st.results.map((r) =>
+    h('div', { class: 'log mail' }, r.output.trim() || '(no output yet)'));
   setView('Sync', null, true,
     h('div', { class: 'card' },
       h('div', { class: 'meta' },
         h('span', {}, st.interval ? `Every ${st.interval} min` : 'Periodic sync off'),
         st.review_sync && h('span', {}, 'with review --sync'),
-        st.started && h('span', {}, `last started ${ago(parseTime(st.started))}`)),
-      h('div', { style: 'margin-top:10px' }, btn)),
-    st.results.map((r) => [
-      h('div', { class: 'section' }, `${r.cmd} — ${r.returncode === 0 ? 'ok' : 'exit ' + r.returncode}`),
-      h('div', { class: 'log mail' }, r.output.trim() || '(no output)')]));
+        st.started && h('span', {}, `last started ${ago(parseTime(st.started))}`),
+        st.cancelled && h('span', {}, 'cancelled')),
+      h('div', { style: 'margin-top:10px' }, btn, cancel)),
+    st.results.map((r, i) => [
+      h('div', { class: 'section' }, `${r.cmd} — ${cmdStatus(r, st)}`),
+      logs[i]]));
+  // Follow the output of the command which is running
+  if (st.running && logs.length) {
+    const log = logs[logs.length - 1];
+    log.scrollTop = log.scrollHeight;
+  }
 }
 syncBtn.addEventListener('click', () => { location.hash = '#/sync'; });
 

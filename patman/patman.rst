@@ -1811,8 +1811,8 @@ replies; this needs Gmail access (see `Assisted patch review`_).
 Each series is read from the patchwork server of its upstream, so a server
 which is down only affects its own series.
 
-Tap the sync indicator at the top of the page to see the output of the last
-sync or to start one.
+Tap the sync indicator at the top of the page to follow the output of a sync as
+it runs, to start one or to cancel one.
 
 Running it as a service
 -----------------------

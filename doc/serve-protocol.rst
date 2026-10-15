@@ -210,10 +210,12 @@ the API. It runs these commands in turn:
 The state of the most recent sync:
 
 - ``running`` (bool): true while a sync is running
+- ``cancelled`` (bool): true if the sync was cancelled
 - ``started`` (str or null): when it started
 - ``finished`` (str or null): when it finished
-- ``results`` (list): one object for each command which has finished, with
-  ``cmd``, ``returncode`` and ``output``
+- ``results`` (list): one object for each command which has started, with
+  ``cmd``, ``returncode`` and ``output``, which grows as the command runs;
+  ``returncode`` is null while it runs
 - ``interval`` (int): minutes between syncs, or 0 if they are only run when
   asked
 - ``review_sync`` (bool): true if the sync runs ``patman review --sync``
@@ -223,6 +225,12 @@ The state of the most recent sync:
 
 Start a sync, giving status 202 and the sync state, or 409 and the sync state
 if a sync is already running.
+
+``POST /api/sync/cancel``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Cancel the sync which is running, stopping its command, giving status 202 and
+the sync state, or 409 if there is none.
 
 The page
 --------

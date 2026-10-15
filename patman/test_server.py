@@ -6,6 +6,7 @@
 
 import asyncio
 import os
+import signal
 import sys
 import unittest
 from unittest import mock
@@ -290,7 +291,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
     def test_sync_cmds(self):
         """The sync never gathers tags into branches"""
         srv = server.Server(self.cser)
-        patman = [sys.executable, '-m', 'patman']
+        patman = [sys.executable, '-m', 'patman', '-v']
         self.assertEqual([patman + ['series', 'gather-all', '-G']],
                          srv.get_sync_cmds())
         srv = server.Server(self.cser, review_sync=True)
@@ -352,6 +353,60 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual((202, True), first)
         self.assertEqual(409, second)
         self.assertEqual('hi\n', srv.sync_state['results'][0]['output'])
+
+    def test_sync_progress(self):
+        """Output is visible while a command is still running"""
+        srv = self.make_server()
+        srv.sync_cmds_for_testing = [['sh', '-c', 'echo first; sleep 10']]
+
+        async def _go():
+            task = asyncio.create_task(srv.run_sync())
+            while (not srv.sync_state['results'] or
+                   not srv.sync_state['results'][0]['output']):
+                await asyncio.sleep(0.01)
+            seen = dict(srv.sync_state['results'][0])
+            srv.cancel_sync()
+            await task
+            return seen
+
+        loop = asyncio.new_event_loop()
+        try:
+            seen = loop.run_until_complete(_go())
+        finally:
+            loop.close()
+        self.assertEqual('first\n', seen['output'])
+        self.assertIsNone(seen['returncode'])
+
+    def test_sync_cancel(self):
+        """POST /api/sync/cancel stops the sync and skips later commands"""
+        srv = self.make_server()
+        srv.sync_cmds_for_testing = [['sh', '-c', 'echo start; sleep 10'],
+                                     ['sh', '-c', 'echo never']]
+
+        async def _go():
+            async with TestClient(TestServer(srv.make_app())) as client:
+                resp = await client.post('/api/sync/cancel')
+                idle = resp.status
+                await client.post('/api/sync')
+                while not srv.sync_state['results'][0]['output']:
+                    await asyncio.sleep(0.01)
+                resp = await client.post('/api/sync/cancel')
+                busy = resp.status
+                while srv.sync_state['running']:
+                    await asyncio.sleep(0.01)
+                return idle, busy
+
+        loop = asyncio.new_event_loop()
+        try:
+            idle, busy = loop.run_until_complete(_go())
+        finally:
+            loop.close()
+        self.assertEqual((409, 202), (idle, busy))
+        state = srv.sync_state
+        self.assertTrue(state['cancelled'])
+        self.assertEqual(1, len(state['results']))
+        self.assertEqual('start\n', state['results'][0]['output'])
+        self.assertEqual(-signal.SIGTERM, state['results'][0]['returncode'])
 
     def test_periodic_sync(self):
         """The periodic sync starts with the server and runs repeatedly"""
