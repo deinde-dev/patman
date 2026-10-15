@@ -19,6 +19,8 @@ Changed
 ~~~~~~~
 - Patchwork requests are retried when the connection is reset or the server
   returns a 502, 503 or 504 status.
+- ``series gather-all`` reads each series from the patchwork server of its
+  upstream, and updates the series it can read even if others fail.
 
 0.3.3 - 2026-10-12
 ------------------

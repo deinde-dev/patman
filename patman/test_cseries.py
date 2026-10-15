@@ -3256,6 +3256,7 @@ Date:   .*
             with terminal.capture() as (out, _):
                 yield cser, pwork
             self.assertEqual(
+                'Reading 2 series from https://my-fake-url\n'
                 "Syncing 'first' v3\n"
                 "Syncing 'second' v2\n"
                 '\n'
@@ -3269,6 +3270,8 @@ Date:   .*
                 yield cser, pwork
             lines = out.getvalue().splitlines()
             itr = iter(lines)
+            self.assertEqual('Reading 2 series from https://my-fake-url',
+                             next(itr))
             self.assertEqual("Syncing 'first' v3", next(itr))
             self.assertEqual('  1 i2c: I2C things', next(itr))
             self.assertEqual(
@@ -3328,6 +3331,8 @@ Date:   .*
                 yield cser, pwork
             lines = out.getvalue().splitlines()
             itr = iter(lines)
+            self.assertEqual('Reading 5 series from https://my-fake-url',
+                             next(itr))
             self.assertEqual("Syncing 'first' v1", next(itr))
             self.assertEqual('  1 i2c: I2C things', next(itr))
             self.assertEqual(
@@ -3505,6 +3510,76 @@ Date:   .*
                       pwork=pwork)
 
         self.assertFalse(next(cor))
+
+    def setup_gather_two_servers(self):
+        """Set up 'first' on a second patchwork server which is down
+
+        'first' has upstream 'other', whose patchwork server raises an error
+        for every request. 'second' has no upstream.
+
+        Return: tuple:
+            Cseries: New Cseries object
+            Patchwork: Patchwork object for the normal server
+            Patchwork: Patchwork object for the server which is down
+        """
+        cser, pwork = self.setup_second(False)
+
+        def _down(_subpath):
+            raise ValueError('Server is down')
+
+        bad = Patchwork.for_testing(_down)
+        bad.url = 'https://other-pw'
+        with terminal.capture():
+            cser.link_set('first', 1, f'{self.SERIES_ID_FIRST_V3}', True)
+            cser.link_auto(pwork, 'second', 2, True)
+            cser.upstream_add('other', 'https://other-repo',
+                              patchwork_url='https://other-pw')
+            cser.set_upstream('first', 'other')
+        return cser, pwork, bad
+
+    def test_series_gather_all_servers(self):
+        """Gather series from each upstream's patchwork server"""
+        cser, pwork, bad = self.setup_gather_two_servers()
+        with mock.patch.object(cser, '_make_patchwork',
+                               return_value=bad) as make:
+            with terminal.capture() as (out, err):
+                with self.assertRaises(ValueError) as exc:
+                    cser.gather_all(pwork, False, False, False, False)
+        make.assert_called_once_with('https://other-pw')
+        self.assertEqual('Cannot read 1 series from patchwork',
+                         str(exc.exception))
+        self.assertEqual(
+            "Cannot read 'first' v1 from https://other-pw: ValueError: "
+            'Server is down', err.getvalue().strip())
+
+        # 'second' is still read and updated
+        itr = iter(out.getvalue().splitlines())
+        self.assertEqual('Reading 1 series from https://other-pw', next(itr))
+        self.assertEqual('Reading 1 series from https://my-fake-url',
+                         next(itr))
+        self.assertEqual("Syncing 'second' v2", next(itr))
+        self.assertEqual('', next(itr))
+        self.assertEqual(
+            '3 patches and 1 cover letter updated, 0 missing links '
+            '(9 requests)', next(itr))
+        self.assert_finished(itr)
+
+    def test_series_gather_all_default_ups(self):
+        """Series with no upstream are read from the default upstream"""
+        cser, pwork, bad = self.setup_gather_two_servers()
+        with terminal.capture():
+            cser.upstream_set_default('other')
+        with mock.patch.object(cser, '_make_patchwork', return_value=bad):
+            with terminal.capture() as (out, err):
+                with self.assertRaises(ValueError) as exc:
+                    cser.gather_all(pwork, False, False, False, False)
+        self.assertEqual('Reading 2 series from https://other-pw',
+                         out.getvalue().splitlines()[0])
+        self.assertEqual(
+            'Cannot read any of 2 series from https://other-pw: ValueError: '
+            'Server is down', err.getvalue().strip())
+        self.assertEqual('Cannot read 2 series from patchwork',
+                         str(exc.exception))
 
     def _check_second(self, itr, show_all):
         """Check output from a 'progress' command

@@ -10,6 +10,7 @@ from collections import OrderedDict, defaultdict
 import os
 import re
 
+import aiohttp
 import pygit2
 
 from u_boot_pylib import command
@@ -88,6 +89,20 @@ def _add_change_tag(message, version, text, cover=False):
     if trailers:
         out += [''] + trailers
     return '\n'.join(out) + '\n'
+
+
+def _describe_error(exc):
+    """Describe an error from reading patchwork
+
+    Args:
+        exc (Exception): Error raised
+
+    Return:
+        str: Description, e.g. 'ValueError: Could not read URL'
+    """
+    if isinstance(exc, asyncio.TimeoutError):
+        return 'Timed out'
+    return f'{type(exc).__name__}: {exc}'
 
 
 class Cseries(cser_helper.CseriesHelper):
@@ -1553,17 +1568,46 @@ class Cseries(cser_helper.CseriesHelper):
     def gather_all(self, pwork, show_comments, show_cover_comments,
                    sync_all_versions, gather_tags, dry_run=False):
         to_fetch, missing = self._get_fetch_dict(sync_all_versions)
+        groups = self._group_by_patchwork(pwork, to_fetch)
+        for pwk, fetch in groups:
+            tout.info(f'Reading {len(fetch)} series from {pwk.url}')
 
         loop = asyncio.get_event_loop()
-        result, requests = loop.run_until_complete(self._do_series_sync_all(
-                pwork, to_fetch))
+        outcomes = loop.run_until_complete(self._sync_groups(groups))
+
+        # Collect the results, skipping any series which could not be read
+        results = {}
+        requests = 0
+        failed = 0
+        for (pwk, fetch), (result, count) in zip(groups, outcomes):
+            requests += count
+            errors = []
+            for (svid, sync), item in zip(fetch.items(), result):
+                if not isinstance(item, BaseException):
+                    results[svid] = item
+                elif isinstance(item, (aiohttp.ClientError, OSError,
+                                       asyncio.TimeoutError, ValueError)):
+                    errors.append((sync, item))
+                else:
+                    raise item
+            if len(fetch) > 1 and len(errors) == len(fetch):
+                tout.error(f'Cannot read any of {len(fetch)} series from '
+                           f'{pwk.url}: {_describe_error(errors[0][1])}')
+            else:
+                for sync, exc in errors:
+                    tout.error(f"Cannot read '{sync.series_name}' "
+                               f'v{sync.version} from {pwk.url}: '
+                               f'{_describe_error(exc)}')
+            failed += len(errors)
 
         with terminal.pager():
             tot_updated = 0
             tot_cover = 0
             add_newline = False
-            for (svid, sync), (cover, patches) in zip(to_fetch.items(),
-                                                      result):
+            for svid, sync in to_fetch.items():
+                if svid not in results:
+                    continue
+                cover, patches = results[svid]
                 if add_newline:
                     tout.info('')
                 tout.info(f"Syncing '{sync.series_name}' v{sync.version}")
@@ -1584,6 +1628,8 @@ class Cseries(cser_helper.CseriesHelper):
             if not dry_run:
                 self.commit()
                 for svid, sync in to_fetch.items():
+                    if svid not in results:
+                        continue
                     if self.check_applied(svid, sync.series_name, sync.version):
                         applied.append(sync.series_name)
                 if applied:
@@ -1591,6 +1637,8 @@ class Cseries(cser_helper.CseriesHelper):
             else:
                 self.rollback()
                 tout.info('Dry run completed')
+        if failed:
+            raise ValueError(f'Cannot read {failed} series from patchwork')
 
     def upstream_add(self, name, url, project=None, pwork=None,
                      patchwork_url=None, identity=None, series_to=None,

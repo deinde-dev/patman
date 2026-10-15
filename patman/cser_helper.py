@@ -1536,25 +1536,86 @@ class CseriesHelper:
     async def _sync_all(self, client, pwork, to_fetch):
         """Sync all series status from patchwork
 
-        Args:
-            pwork (Patchwork): Patchwork object to use
-            sync_all_versions (bool): True to sync all versions of a series,
-                False to sync only the latest version
-            gather_tags (bool): True to gather review/test tags
+        A failure to read one series does not affect the others.
 
-        Return: list of tuple:
-            COVER object, or None if none or not read_cover_comments
-            list of PATCH objects
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            pwork (Patchwork): Patchwork object to use
+            to_fetch (OrderedDict): Things to fetch, from _get_fetch_dict()
+
+        Return: tuple:
+            list: For each series, either a tuple:
+                COVER object, or None if none or not read_cover_comments
+                list of PATCH objects
+              or the exception raised while reading that series
+            int: Number of requests made
         """
         with pwork.collect_stats() as stats:
             tasks = [pwork.series_get_state(client, sync.link, True, True)
                      for sync in to_fetch.values() if sync.link]
-            result = await asyncio.gather(*tasks)
+            result = await asyncio.gather(*tasks, return_exceptions=True)
         return result, stats.request_count
 
-    async def _do_series_sync_all(self, pwork, to_fetch):
+    def _make_patchwork(self, url):
+        """Create a Patchwork object for a server
+
+        Args:
+            url (str): URL of the patchwork server
+
+        Return:
+            Patchwork: New object
+        """
+        return patchwork.Patchwork(url)
+
+    def _group_by_patchwork(self, pwork, to_fetch):
+        """Split the series to fetch by the patchwork server holding them
+
+        Each series is read from the patchwork server of its upstream. A
+        series with no upstream, or whose upstream has no patchwork URL, is
+        read from the server of the default upstream, or from pwork if that
+        has no URL either.
+
+        Args:
+            pwork (Patchwork): Patchwork object to use when nothing else is
+                set
+            to_fetch (OrderedDict): Things to fetch, from _get_fetch_dict()
+
+        Return:
+            list of tuple:
+                Patchwork: Patchwork object to use
+                OrderedDict: The part of to_fetch to read from it
+        """
+        sdict = self.db.series_get_dict_by_id(include_archived=True)
+        default = self.db.upstream_get_default()
+        fallback = ((default and self.db.upstream_get_patchwork_url(default))
+                    or pwork.url)
+        pworks = {pwork.url: pwork}
+        groups = OrderedDict()
+        for svid, sync in to_fetch.items():
+            ser = sdict.get(sync.series_id)
+            url = None
+            if ser and ser.upstream:
+                url = self.db.upstream_get_patchwork_url(ser.upstream)
+            url = url or fallback
+            if url not in pworks:
+                pworks[url] = self._make_patchwork(url)
+            groups.setdefault(url, OrderedDict())[svid] = sync
+        return [(pworks[url], fetch) for url, fetch in groups.items()]
+
+    async def _sync_groups(self, groups):
+        """Read the series state from each patchwork server
+
+        The servers are read at the same time.
+
+        Args:
+            groups (list of tuple): Groups to read, from _group_by_patchwork()
+
+        Return:
+            list of tuple: For each group, the tuple returned by _sync_all()
+        """
         async with aiohttp.ClientSession() as client:
-            return await self._sync_all(client, pwork, to_fetch)
+            return await asyncio.gather(
+                *[self._sync_all(client, pwk, fetch) for pwk, fetch in groups])
 
     def _progress_one(self, ser, show_all_versions, list_patches,
                       state_totals, use_metadata=True):

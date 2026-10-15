@@ -1808,6 +1808,9 @@ series gather`` yourself when you are ready to pick up the tags. The ``-r``
 flag also runs ``patman review --sync`` to track sent review drafts and
 replies; this needs Gmail access (see `Assisted patch review`_).
 
+Each series is read from the patchwork server of its upstream, so a server
+which is down only affects its own series.
+
 Tap the sync indicator at the top of the page to see the output of the last
 sync or to start one.
 
