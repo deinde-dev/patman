@@ -44,6 +44,9 @@ COVER = namedtuple('cover', 'id,num_comments,name,comments')
 # Number of retries
 RETRIES = 3
 
+# HTTP status codes which suggest that a request may work if tried again
+RETRY_STATUS = (502, 503, 504)
+
 # Max concurrent request
 MAX_CONCURRENT = 50
 
@@ -210,16 +213,27 @@ class Patchwork:
             for i in range(RETRIES + 1):
                 try:
                     async with client.get(full_url) as response:
+                        if response.status in RETRY_STATUS and i < RETRIES:
+                            # The server is overloaded, so try again later
+                            await asyncio.sleep(i + 1)
+                            continue
                         if response.status != 200:
                             raise ValueError(
-                                f"Could not read URL '{full_url}'")
+                                f"Could not read URL '{full_url}' "
+                                f'(status {response.status})')
                         result = await response.json()
                         # print('- done', full_url)
                         return result
                     break
-                except aiohttp.client_exceptions.ServerDisconnectedError:
+                except aiohttp.ClientConnectorError:
+                    # The server cannot be reached, so don't retry
+                    raise
+                except (aiohttp.ServerDisconnectedError,
+                        aiohttp.ClientOSError):
+                    # The server may drop or reset connections when busy
                     if i == RETRIES:
                         raise
+                    await asyncio.sleep(i + 1)
 
     @staticmethod
     def for_testing(func):

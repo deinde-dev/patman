@@ -15,6 +15,11 @@ Added
   syncing with patchwork periodically. Its JSON API is described in
   ``doc/serve-protocol.rst``.
 
+Changed
+~~~~~~~
+- Patchwork requests are retried when the connection is reset or the server
+  returns a 502, 503 or 504 status.
+
 0.3.3 - 2026-10-12
 ------------------
 
