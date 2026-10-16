@@ -11,6 +11,8 @@ import sys
 import unittest
 from unittest import mock
 
+import aiohttp
+from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from u_boot_pylib import terminal
@@ -18,6 +20,7 @@ from patman import cmdline
 from patman import control
 from patman import cseries
 from patman.database import Pcommit
+from patman import patchwork
 from patman.patchwork import Patchwork
 from patman import server
 from patman.test_common import TestCommon
@@ -696,6 +699,46 @@ class TestWebServer(unittest.TestCase, TestCommon):
         status, data = self.call(srv, 'GET', '/api/inbox?ups=xx')
         self.assertEqual(404, status)
         self.assertIn("No patchwork project for upstream 'xx'", data['error'])
+
+    def test_patchwork_retry(self):
+        """Patchwork requests are retried when the server is slow or busy"""
+        calls = []
+        real_sleep = asyncio.sleep
+
+        async def handler(request):
+            calls.append(request.path)
+            if len(calls) == 1:
+                await real_sleep(1)
+            if len(calls) == 2:
+                return web.Response(status=502)
+            return web.json_response({'ok': len(calls)})
+
+        app = web.Application()
+        app.router.add_get('/api/1.2/{tail:.*}', handler)
+
+        async def _go():
+            async with TestServer(app) as tserver:
+                pwork = Patchwork(str(tserver.make_url('')).rstrip('/'),
+                                  show_progress=False)
+                async with aiohttp.ClientSession() as client:
+                    return await pwork._request(client, 'patches/1/')
+
+        loop = asyncio.new_event_loop()
+        try:
+            with mock.patch.object(patchwork, 'REQUEST_TIMEOUT', 0.2), \
+                    mock.patch.object(asyncio, 'sleep',
+                                      side_effect=self._no_sleep(asyncio.sleep)):
+                self.assertEqual({'ok': 3}, loop.run_until_complete(_go()))
+        finally:
+            loop.close()
+        self.assertEqual(3, len(calls))
+
+    @staticmethod
+    def _no_sleep(real_sleep):
+        """Make retry delays short, without affecting other sleeps"""
+        async def fake(secs, *args):
+            await real_sleep(min(secs, 0.01) if secs >= 1 else secs, *args)
+        return fake
 
     def test_upstreams(self):
         """Upstreams with a patchwork server are listed"""

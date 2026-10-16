@@ -54,7 +54,8 @@ status codes:
   used when a request is not valid, e.g. a missing field or a bad value
 - 409: the request conflicts with the current state, e.g. starting a sync while
   one is running
-- 502: patchwork could not be reached; the message starts with ``Patchwork:``
+- 502: patchwork could not be reached or did not respond in time; the message
+  starts with ``Patchwork:``
 
 The sync and job endpoints give their usual response with status 409, rather
 than an error object.

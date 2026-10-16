@@ -47,6 +47,9 @@ RETRIES = 3
 # HTTP status codes which suggest that a request may work if tried again
 RETRY_STATUS = (502, 503, 504)
 
+# Seconds to wait for a request to complete before trying again
+REQUEST_TIMEOUT = 30
+
 # Max concurrent request
 MAX_CONCURRENT = 50
 
@@ -212,7 +215,9 @@ class Patchwork:
             # print('full_url', full_url)
             for i in range(RETRIES + 1):
                 try:
-                    async with client.get(full_url) as response:
+                    async with client.get(
+                            full_url, timeout=aiohttp.ClientTimeout(
+                                total=REQUEST_TIMEOUT)) as response:
                         if response.status in RETRY_STATUS and i < RETRIES:
                             # The server is overloaded, so try again later
                             await asyncio.sleep(i + 1)
@@ -229,8 +234,9 @@ class Patchwork:
                     # The server cannot be reached, so don't retry
                     raise
                 except (aiohttp.ServerDisconnectedError,
-                        aiohttp.ClientOSError):
-                    # The server may drop or reset connections when busy
+                        aiohttp.ClientOSError, asyncio.TimeoutError):
+                    # The server may drop, reset or stall connections when
+                    # busy
                     if i == RETRIES:
                         raise
                     await asyncio.sleep(i + 1)
