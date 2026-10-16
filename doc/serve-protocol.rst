@@ -17,13 +17,16 @@ Overview
 The API is under ``/api/``. Each response is a JSON value, encoded in UTF-8,
 and each request which takes a body expects a JSON object.
 
-Your own series are read from the patman database in the git tree. Reviews made
-with ``patman review`` are in the same database. Comments on patches and cover
-letters are not stored, so these are read from patchwork when asked for.
+Your own series are read from the patman database in the git tree. Reviews of
+other people's series are read from the review database if there is one
+(``--review-db-dir`` or the ``review_db_dir`` setting), otherwise from the same
+database; upstreams always come from the main database. Comments on patches and
+cover letters are not stored, so these are read from patchwork when asked for.
 
 Series IDs are those of the patman database: ``/api/series/<id>`` takes the ID
-of one of your series and ``/api/reviews/<id>`` the ID of a reviewed series.
-IDs from patchwork, such as a patch or cover-letter ID, are named as such.
+of one of your series and ``/api/reviews/<id>`` the ID of a reviewed series, in
+the review database. IDs from patchwork, such as a patch or cover-letter ID,
+are named as such.
 
 Times are local, in the form ``YYYY-MM-DD HH:MM:SS``, except where they come
 from patchwork or email, which give their own form.
@@ -202,7 +205,8 @@ server starts and then every so many minutes; one can also be started through
 the API. It runs these commands in turn:
 
 - ``patman series gather-all -G``
-- ``patman review --sync``, if the server is given ``-r``
+- ``patman review --sync``, if the server is given ``-r``, passing on any
+  ``--review-db-dir``
 
 ``GET /api/sync``
 ~~~~~~~~~~~~~~~~~

@@ -1790,6 +1790,8 @@ The options are:
 - ``-s``, ``--sync [MINUTES]``: sync with patchwork every MINUTES minutes
   (default 60); see below
 - ``-r``, ``--review-sync``: also run ``patman review --sync`` in each sync
+- ``--review-db-dir DIR``: read reviews from a separate database (the
+  ``review_db_dir`` setting)
 
 Keeping the status up to date
 -----------------------------
@@ -1867,6 +1869,18 @@ git operations still run against the current repo. For instance::
     export PATMAN_DB_DIR=~/u-boot
     cd ~/some-other-tree
     patman review -s my-series
+
+Reviews of other people's series can be kept in a separate database, so they
+do not mix with your own series. Set ``review_db_dir`` in the ``[settings]``
+section of ``~/.patman`` (or use ``--review-db-dir``) to the directory which
+holds it::
+
+    [settings]
+    review_db_dir: ~/dev/u-boot-review
+
+``patman review`` then stores its reviews there, while upstreams and their
+patchwork servers are still read from the main database. ``patman serve``
+shows the reviews from the same place.
 
 The connection is opened in WAL mode (``journal_mode=WAL``,
 ``synchronous=NORMAL``) with a 30-second busy timeout, which lets multiple

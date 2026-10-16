@@ -3511,6 +3511,33 @@ Date:   .*
 
         self.assertFalse(next(cor))
 
+    def test_review_db_dir(self):
+        """'review --review-db-dir' keeps reviews in a separate database"""
+        cser = self.get_cser()
+        with terminal.capture():
+            cser.upstream_add('us', 'https://us-repo')
+            cser.upstream_set_default('us')
+        cser.close_database()
+        rdir = os.path.join(self.tmpdir, 'reviews')
+        os.mkdir(rdir)
+        args = cmdline.parse_args(['review', '--sync', '--review-db-dir', rdir],
+                                  config_fname=False)
+        seen = {}
+
+        def fake_review(args, pwork, rcser):
+            seen['path'] = rcser.db.db_path
+            seen['topdir'] = rcser.topdir
+            seen['ups'] = args.upstream
+            return 0
+
+        with mock.patch.object(review, 'do_review', side_effect=fake_review):
+            self.assertEqual(0, control.do_review(args, self.tmpdir))
+        self.assertEqual(os.path.join(rdir, '.patman.db'), seen['path'])
+        self.assertEqual(self.tmpdir, seen['topdir'])
+
+        # The default upstream is only in the main database
+        self.assertEqual('us', seen['ups'])
+
     def setup_gather_two_servers(self):
         """Set up 'first' on a second patchwork server which is down
 

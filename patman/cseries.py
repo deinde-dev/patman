@@ -111,14 +111,17 @@ class Cseries(cser_helper.CseriesHelper):
     This class handles database read/write as well as operations in a git
     directory to update series information.
     """
-    def __init__(self, topdir=None, colour=terminal.COLOR_IF_TERMINAL):
+    def __init__(self, topdir=None, colour=terminal.COLOR_IF_TERMINAL,
+                 db_dir=None):
         """Set up a new Cseries
 
         Args:
             topdir (str): Top-level directory of the repo
             colour (terminal.enum): Whether to enable ANSI colour or not
+            db_dir (str or None): Directory holding the database, or None to
+                use PATMAN_DB_DIR or else topdir
         """
-        super().__init__(topdir, colour)
+        super().__init__(topdir, colour, db_dir)
 
     def add(self, branch_name, desc=None, mark=False, allow_unmarked=False,
             end=None, use_commit=False, force_version=False, ups=None,

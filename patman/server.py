@@ -313,6 +313,8 @@ class Server:
 
     Properties:
         cser (Cseries): Open cseries instance
+        rcser (Cseries): Open cseries instance holding the reviews, which is
+            cser unless reviews are kept in a separate database
         pw_url (str or None): Patchwork URL to use when a series has no
             upstream with its own URL
         sync_interval (int): Minutes between syncs, 0 to disable
@@ -326,8 +328,9 @@ class Server:
     """
     # pylint: disable=R0913,R0917
     def __init__(self, cser, pw_url=None, sync_interval=0, review_sync=False,
-                 token=None):
+                 token=None, rcser=None):
         self.cser = cser
+        self.rcser = rcser or cser
         self.pw_url = pw_url
         self.sync_interval = sync_interval
         self.review_sync = review_sync
@@ -385,6 +388,16 @@ class Server:
             self._pworks[url] = Patchwork(url, show_progress=False)
         return self._pworks[url]
 
+    def _review_db_args(self):
+        """Get the arguments which select the review database
+
+        Return:
+            list of str: Arguments for a 'patman review' command
+        """
+        if self.rcser is self.cser or not self.rcser.db_dir:
+            return []
+        return ['--review-db-dir', self.rcser.db_dir]
+
     def get_sync_cmds(self):
         """Get the commands to run for a sync
 
@@ -396,7 +409,8 @@ class Server:
         patman = [sys.executable, '-m', 'patman', '-v']
         cmds = [patman + ['series', 'gather-all', '-G']]
         if self.review_sync:
-            cmds.append(patman + ['review', '--sync'])
+            cmds.append(patman + ['review', '--sync'] +
+                        self._review_db_args())
         return cmds
 
     async def run_sync(self):
@@ -548,10 +562,10 @@ class Server:
         return web.json_response(data)
 
     async def _review_list(self, _request):
-        return web.json_response(get_review_list(self.cser))
+        return web.json_response(get_review_list(self.rcser))
 
     async def _review_detail(self, request):
-        data = get_review_detail(self.cser, int(request.match_info['idnum']))
+        data = get_review_detail(self.rcser, int(request.match_info['idnum']))
         data['patchwork_url'] = self.get_pw_url(data['upstream'])
         return web.json_response(data)
 
@@ -640,7 +654,8 @@ def is_loopback(host):
 
 
 # pylint: disable=R0913,R0917
-def serve(cser, host, port, pw_url, sync_interval, review_sync, token):
+def serve(cser, host, port, pw_url, sync_interval, review_sync, token,
+          rcser=None):
     """Run the web server until interrupted
 
     Args:
@@ -651,11 +666,13 @@ def serve(cser, host, port, pw_url, sync_interval, review_sync, token):
         sync_interval (int): Minutes between syncs, 0 to disable
         review_sync (bool): True to run 'review --sync' as part of a sync
         token (str or None): Token which clients must provide, or None
+        rcser (Cseries or None): Open cseries instance holding the reviews,
+            or None if they are in the main database
     """
     if not token and not is_loopback(host):
         tout.warning(f'Listening on {host} with no --token: anyone who can '
                      'reach this port can read your series and reviews')
-    server = Server(cser, pw_url, sync_interval, review_sync, token)
+    server = Server(cser, pw_url, sync_interval, review_sync, token, rcser)
     query = f'?token={token}' if token else ''
     tout.notice(f'Serving on http://{host}:{port}/{query}')
     if sync_interval:

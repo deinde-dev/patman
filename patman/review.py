@@ -2750,6 +2750,8 @@ def _build_review_command(args, link):
     cmd += ['review', '-s', str(link), '--any-state']
     if getattr(args, 'upstream', None):
         cmd += ['-U', args.upstream]
+    if getattr(args, 'review_db_dir', None):
+        cmd += ['--review-db-dir', args.review_db_dir]
     if getattr(args, 'reviewer', None):
         cmd += ['--reviewer', args.reviewer]
     if getattr(args, 'base_branch', None):

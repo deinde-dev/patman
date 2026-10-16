@@ -438,6 +438,7 @@ def do_review(args, test_db=None, pwork=None, cser=None):
 
     if not cser:
         cser = cseries.Cseries(test_db)
+    review_db_dir = getattr(args, 'review_db_dir', None)
     try:
         cser.open_database()
 
@@ -450,7 +451,19 @@ def do_review(args, test_db=None, pwork=None, cser=None):
             pwork = _setup_patchwork(
                 cser, pwork, ups, args.patchwork_url)
 
-        return review_mod.do_review(args, pwork, cser)
+        if not review_db_dir:
+            return review_mod.do_review(args, pwork, cser)
+
+        # Upstreams are only held in the main database, so note the default
+        # one before switching to the review database
+        if not args.upstream:
+            args.upstream = cser.db.upstream_get_default()
+        rcser = cseries.Cseries(cser.topdir, db_dir=review_db_dir)
+        try:
+            rcser.open_database()
+            return review_mod.do_review(args, pwork, rcser)
+        finally:
+            rcser.close_database()
     finally:
         cser.close_database()
 
@@ -464,11 +477,17 @@ def do_serve(args, test_db=None):
             use the normal one
     """
     cser = cseries.Cseries(test_db)
+    rcser = None
     try:
         cser.open_database()
+        if args.review_db_dir:
+            rcser = cseries.Cseries(cser.topdir, db_dir=args.review_db_dir)
+            rcser.open_database()
         server.serve(cser, args.host, args.port, args.patchwork_url,
-                     args.sync_interval, args.review_sync, args.token)
+                     args.sync_interval, args.review_sync, args.token, rcser)
     finally:
+        if rcser:
+            rcser.close_database()
         cser.close_database()
 
 

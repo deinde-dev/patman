@@ -217,6 +217,35 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(['old review'],
                          [r['body'] for r in data['versions'][1]['reviews']])
 
+    def test_review_db(self):
+        """Reviews can be read from a separate database"""
+        rdir = os.path.join(self.tmpdir, 'rev')
+        os.mkdir(rdir)
+        rcser = cseries.Cseries(self.tmpdir, terminal.COLOR_NEVER,
+                                db_dir=rdir)
+        with terminal.capture():
+            rcser.open_database()
+        try:
+            rdb = rcser.db
+            series_id = rdb.series_add('rev', 'In the review db', None)
+            rdb.series_set_source(series_id, 'review')
+            svid = rdb.ser_ver_add(series_id, 1, link='123')
+            rdb.review_add(svid, 1, 'Looks good', True, '2026-10-01 10:00:00')
+            rdb.commit()
+            self.add_series('mine', 'In the main db', {1: [('x', 'new', 7, 0)]},
+                            source='review')
+
+            srv = server.Server(self.cser, review_sync=True, rcser=rcser)
+            _, data = self.call(srv, 'GET', '/api/reviews')
+            self.assertEqual(['In the review db'], [r['desc'] for r in data])
+            _, data = self.call(srv, 'GET', f'/api/reviews/{series_id}')
+            self.assertEqual('Looks good',
+                             data['versions'][0]['reviews'][0]['body'])
+            self.assertEqual(['--review-db-dir', rdir],
+                             srv.get_sync_cmds()[1][-2:])
+        finally:
+            rcser.close_database()
+
     def test_todo(self):
         """Todos are listed with whether they are due yet"""
         ser_id, _ = self.add_series('video', 'Mine', {1: []})

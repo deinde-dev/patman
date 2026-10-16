@@ -84,12 +84,15 @@ class CseriesHelper:
     This class handles database read/write as well as operations in a git
     directory to update series information.
     """
-    def __init__(self, topdir=None, colour=terminal.COLOR_IF_TERMINAL):
+    def __init__(self, topdir=None, colour=terminal.COLOR_IF_TERMINAL,
+                 db_dir=None):
         """Set up a new CseriesHelper
 
         Args:
             topdir (str): Top-level directory of the repo
             colour (terminal.enum): Whether to enable ANSI colour or not
+            db_dir (str or None): Directory holding the database, or None to
+                use PATMAN_DB_DIR or else topdir
 
         Properties:
             gitdir (str): Git directory (typically topdir + '/.git')
@@ -104,6 +107,7 @@ class CseriesHelper:
             loop (asyncio event loop): Loop used for Patchwork operations
         """
         self.topdir = topdir
+        self.db_dir = db_dir
         self.gitdir = None
         self.db = None
         self.col = terminal.Color(colour)
@@ -125,7 +129,8 @@ class CseriesHelper:
         # git operations still run against the current repo. Use 'or' (not
         # os.environ.get(key, default)) so an empty PATMAN_DB_DIR='' falls
         # back to topdir rather than producing '/.patman.db'
-        db_dir = os.environ.get('PATMAN_DB_DIR') or self.topdir
+        db_dir = (self.db_dir or os.environ.get('PATMAN_DB_DIR') or
+                  self.topdir)
         fname = os.path.join(os.path.expanduser(db_dir), '.patman.db')
 
         # For the first instance, start it up with the expected schema

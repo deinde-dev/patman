@@ -644,6 +644,11 @@ def add_review_subparser(subparsers):
         help='Recreate Gmail drafts from the stored reviews even when a '
              'draft already exists, to recover after an error')
     review.add_argument(
+        '--review-db-dir', type=str, default=None, metavar='DIR',
+        help='Directory holding a separate database for reviews (the '
+             "'review_db_dir' setting); upstreams are still read from the "
+             'main database')
+    review.add_argument(
         '--gmail-account', type=str, default=None,
         help='Gmail account to create drafts in (e.g. user@gmail.com)')
     review.add_argument(
@@ -752,6 +757,10 @@ def add_serve_subparser(subparsers):
         '-r', '--review-sync', action='store_true',
         help="Also run 'review --sync' each time, to track sent review "
              'drafts and replies (needs Gmail)')
+    serve.add_argument(
+        '--review-db-dir', type=str, default=None, metavar='DIR',
+        help='Directory holding a separate database for reviews (the '
+             "'review_db_dir' setting)")
     serve.add_argument(
         '-t', '--token', default=None,
         help='Token which clients must provide to use the API; use this '
