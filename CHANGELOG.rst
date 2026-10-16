@@ -43,6 +43,8 @@ Changed
   with ``--patchwork-timeout`` or the ``patchwork_timeout`` setting.
 - ``series gather-all`` reads each series from the patchwork server of its
   upstream, and updates the series it can read even if others fail.
+- ``review`` applies a series to the upstream's ``main`` branch, if it has
+  one, rather than ``master``.
 
 Fixed
 ~~~~~

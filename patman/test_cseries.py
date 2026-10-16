@@ -7513,12 +7513,24 @@ class TestGetUpstreamBranch(unittest.TestCase):
         """When next exists but has no commits ahead, master is chosen."""
         args = Namespace(base_branch=None, upstream='us')
         with mock.patch('patman.review.gitutil.ref_exists',
-                        return_value=True), \
+                        side_effect=lambda ref, _=None: ref != 'us/main'), \
              mock.patch('patman.review.gitutil.count_revs',
                         return_value=0):
             self.assertEqual(
                 'us/master',
                 review._get_upstream_branch(args, self._cser()))
+
+    def test_main_preferred_to_master(self):
+        """When the upstream has a main branch, it is used, not master."""
+        args = Namespace(base_branch=None, upstream='us')
+        with mock.patch('patman.review.gitutil.ref_exists',
+                        return_value=True), \
+             mock.patch('patman.review.gitutil.count_revs',
+                        return_value=0) as count:
+            self.assertEqual(
+                'us/main',
+                review._get_upstream_branch(args, self._cser()))
+        self.assertEqual('us/main..us/next', count.call_args.args[1])
 
     def test_next_missing_falls_back_to_master(self):
         """When next does not exist at all, master is chosen."""

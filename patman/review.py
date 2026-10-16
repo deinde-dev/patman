@@ -2736,21 +2736,40 @@ def _do_revise(args, pwork, cser, link):
     return 0
 
 
+def _main_branch(ups, git_dir=None):
+    """Get the main branch of an upstream
+
+    U-Boot's main branch is 'main', having been 'master'. Use whichever the
+    remote has, preferring 'main', since 'master' may be left behind.
+
+    Args:
+        ups (str): Upstream name, which is also the git remote
+        git_dir (str or None): Directory containing the git repo, or None
+            for the current directory
+
+    Returns:
+        str: Branch ref, e.g. 'us/main'
+    """
+    ref = f'{ups}/main'
+    return ref if gitutil.ref_exists(ref, git_dir) else f'{ups}/master'
+
+
 def _get_upstream_branch(args, cser):
     """Determine the base branch for applying patches
 
     Honours --base-branch if the user supplied one. Otherwise prefers
-    '<upstream>/next' when it has commits ahead of '<upstream>/master',
-    falling back to '<upstream>/master' when next is empty (e.g. just
-    after a release, when next has been merged into master and has not
-    yet been reopened for the next cycle).
+    '<upstream>/next' when it has commits ahead of the main branch
+    ('<upstream>/main', or '<upstream>/master' if there is no main),
+    falling back to the main branch when next is empty (e.g. just after a
+    release, when next has been merged into main and has not yet been
+    reopened for the next cycle).
 
     Args:
         args (Namespace): Command-line arguments
         cser (Cseries): Open cseries instance
 
     Returns:
-        str: Base branch ref, e.g. 'us/next' or 'us/master'
+        str: Base branch ref, e.g. 'us/next' or 'us/main'
     """
     if args.base_branch:
         return args.base_branch
@@ -2759,13 +2778,13 @@ def _get_upstream_branch(args, cser):
         ups = cser.db.upstream_get_default()
     if ups:
         next_branch = f'{ups}/next'
-        master_branch = f'{ups}/master'
+        main_branch = _main_branch(ups)
         if gitutil.ref_exists(next_branch):
             ahead = gitutil.count_revs(
-                None, f'{master_branch}..{next_branch}')
+                None, f'{main_branch}..{next_branch}')
             if ahead:
                 return next_branch
-        return master_branch
+        return main_branch
     return 'origin/master'
 
 
