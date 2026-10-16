@@ -5,6 +5,7 @@
 """Tests for the 'patman serve' web server"""
 
 import asyncio
+import json
 import os
 import signal
 import sys
@@ -704,6 +705,81 @@ class TestWebServer(unittest.TestCase, TestCommon):
         second = srv.get_job(2).state
         self.assertTrue(second['cancelled'])
         self.assertEqual([], second['results'])
+
+    def test_resume_jobs(self):
+        """Jobs which do not finish are run again when the server restarts"""
+        fname = os.path.join(self.tmpdir, 'jobs.json')
+        flag = os.path.join(self.tmpdir, 'flag')
+        srv = self.make_server(jobs_fname=fname)
+        cmds = iter([
+            ['sh', '-c', f'echo busy; [ -e {flag} ] || sleep 10'],
+            ['sh', '-c', 'echo cancel; sleep 10'],
+            ['echo', 'done']])
+        srv.get_patman_cmd = lambda *args: next(cmds)
+
+        def read_jobs():
+            with open(fname, encoding='utf-8') as inf:
+                return json.load(inf)
+
+        async def wait_output(job):
+            while not job.state['results'] or \
+                    not job.state['results'][0]['output']:
+                await asyncio.sleep(0.01)
+
+        async def _go():
+            async with TestClient(TestServer(srv.make_app())) as client:
+                for target in '123':
+                    await client.post('/api/review', json={'target': target})
+                await wait_output(srv.get_job(1))
+                saved = [job['title'] for job in read_jobs()]
+
+                # Stop the first job as if the server were stopping, then
+                # cancel the second
+                os.killpg(srv.get_job(1).proc.pid,
+                          signal.SIGTERM)
+                await wait_output(srv.get_job(2))
+                await client.post('/api/jobs/2/cancel')
+                while any(job.active for job in srv.get_jobs()):
+                    await asyncio.sleep(0.01)
+                return saved
+
+        loop = asyncio.new_event_loop()
+        try:
+            with terminal.capture():
+                saved = loop.run_until_complete(_go())
+        finally:
+            loop.close()
+        self.assertEqual(['Review series 1', 'Review series 2',
+                          'Review series 3'], saved)
+        self.assertEqual(
+            [{'kind': 'review', 'title': 'Review series 1',
+              'cmds': [['sh', '-c', f'echo busy; [ -e {flag} ] || sleep 10']],
+              'resumed': 0}], read_jobs())
+
+        # A new server runs the first job again
+        with open(flag, 'w', encoding='utf-8'):
+            pass
+        srv = self.make_server(jobs_fname=fname)
+        with terminal.capture() as (out, _):
+            self.run_jobs(srv, [])
+        self.assertIn("Resuming job 'Review series 1'", out.getvalue())
+        job = srv.get_jobs()[0].state
+        self.assertEqual(('Review series 1', 1, 0, 'busy\n'),
+                         (job['title'], job['resumed'],
+                          job['results'][0]['returncode'],
+                          job['results'][0]['output']))
+        self.assertEqual([], read_jobs())
+
+        # A job is not resumed too often
+        with open(fname, 'w', encoding='utf-8') as outf:
+            json.dump([{'kind': 'review', 'title': 'Bad', 'cmds': [['false']],
+                        'resumed': server.MAX_RESUMES}], outf)
+        srv = self.make_server(jobs_fname=fname)
+        with terminal.capture() as (_, err):
+            self.run_jobs(srv, [])
+        self.assertIn("Not resuming job 'Bad' again", err.getvalue())
+        self.assertEqual([], srv.get_jobs())
+        self.assertEqual([], read_jobs())
 
     def test_inbox(self):
         """The inbox lists recent series, marking those already reviewed"""

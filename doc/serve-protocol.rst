@@ -159,6 +159,9 @@ A job runs one or more commands in the git tree, such as a sync or a review:
   - ``output`` (str): output so far, with stderr mixed in, keeping only the
     last 20000 characters
 
+- ``resumed`` (int): number of times the job has been run again after the
+  server stopped before it finished; see `Resuming jobs`_
+
 Your series
 -----------
 
@@ -427,6 +430,18 @@ A job.
 
 Cancel a job which is queued or running, stopping its command and any processes
 it started, giving status 202 and the Job, or 409 if it has finished.
+
+Resuming jobs
+~~~~~~~~~~~~~
+
+Jobs which have not finished, other than syncs, are recorded in
+``.patman-serve-jobs.json`` next to the database, as a list of objects with
+``kind``, ``title``, ``cmds`` (the commands, each a list of arguments) and
+``resumed``. The file is replaced in one step each time a job is added or
+finishes. A job counts as unfinished if it is queued or running, or if a
+command was stopped by the server stopping, rather than by cancelling the job.
+When the server starts, it runs each of these again as a new job, from the
+start, unless it has already been resumed three times.
 
 The page
 --------

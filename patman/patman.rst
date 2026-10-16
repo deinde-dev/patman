@@ -1902,6 +1902,11 @@ Commands started from the page, such as reviews, run as jobs, one at a time in
 the order they are started, along with the syncs. The Jobs tab shows each job
 with its output as it runs, and lets you cancel it.
 
+Jobs which are waiting or running are recorded in ``.patman-serve-jobs.json``
+next to the database. If the server stops before a job finishes, for example
+because the service is restarted, the job is run again from the start when the
+server next starts. A job is resumed at most three times.
+
 Running it as a service
 -----------------------
 

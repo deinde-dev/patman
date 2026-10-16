@@ -16,6 +16,7 @@ Added
   ``doc/serve-protocol.rst``.
 - ``patman serve`` can start reviews, scans for new versions and redrafts,
   which run one at a time as jobs, with their output shown on the page.
+- ``patman serve`` resumes the jobs which had not finished when it stopped.
 - The ``patman serve`` page has an inbox of recent series on patchwork,
   marking those already reviewed.
 - The ``patman serve`` page shows the commit message, diff and comments of

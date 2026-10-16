@@ -1162,6 +1162,7 @@ async function viewJobs() {
           h('span', { class: `chip ${cls}` }, text)),
         h('div', { class: 'meta' },
           h('span', {}, `#${j.id}`),
+          j.resumed > 0 && h('span', {}, 'resumed after a restart'),
           j.started && h('span', {}, `started ${ago(parseTime(j.started))}`),
           j.finished && h('span', {}, `finished ${ago(parseTime(j.finished))}`)));
     })));

@@ -56,6 +56,7 @@ from collections import Counter, OrderedDict
 from datetime import datetime
 import hmac
 import ipaddress
+import json
 import os
 import re
 import signal
@@ -79,6 +80,14 @@ MAX_JOB_OUTPUT = 20000
 
 # Maximum number of jobs to remember
 MAX_JOBS = 20
+
+# File, next to the database, holding the jobs which have not finished, so
+# that they can be resumed when the server restarts
+JOBS_FNAME = '.patman-serve-jobs.json'
+
+# Maximum number of times to resume a job, in case it is the job which is
+# causing the server to stop
+MAX_RESUMES = 3
 
 # Number of series in each page of the inbox
 INBOX_PAGE = 50
@@ -570,7 +579,8 @@ class Job:
         proc (asyncio.subprocess.Process or None): Command which is running
         state (dict): State of the job, as provided by the API
     """
-    def __init__(self, idnum, kind, title, cmds):
+    # pylint: disable=R0913,R0917
+    def __init__(self, idnum, kind, title, cmds, resumed=0):
         """Set up a new job
 
         Args:
@@ -578,6 +588,8 @@ class Job:
             kind (str): Kind of job
             title (str): Description of the job, for display
             cmds (list of list of str): Commands to run
+            resumed (int): Number of times the job has been resumed after
+                the server stopped while it was waiting or running
         """
         self.idnum = idnum
         self.kind = kind
@@ -594,12 +606,29 @@ class Job:
             'started': None,
             'finished': None,
             'results': [],
+            'resumed': resumed,
         }
 
     @property
     def active(self):
         """True if the job is waiting to run, or running"""
         return not self.state['finished']
+
+    @property
+    def interrupted(self):
+        """True if a command was stopped part-way, other than by cancelling
+
+        This happens when the server stops while the job is running, since
+        the command is stopped too
+        """
+        return not self.cancel and any(
+            res['returncode'] is None or res['returncode'] < 0
+            for res in self.state['results'])
+
+    @property
+    def unfinished(self):
+        """True if the job should be run again when the server restarts"""
+        return self.active or self.interrupted
 
 
 # pylint: disable=R0902
@@ -619,16 +648,19 @@ class Server:
             all upstreams, for testing
         sync_cmds_for_testing (list of list of str or None): Commands to
             run for a sync, for testing
+        jobs_fname (str or None): File holding the jobs which have not
+            finished, or None to not keep them
     """
     # pylint: disable=R0913,R0917
     def __init__(self, cser, pw_url=None, sync_interval=0, review_sync=False,
-                 token=None, rcser=None):
+                 token=None, rcser=None, jobs_fname=None):
         self.cser = cser
         self.rcser = rcser or cser
         self.pw_url = pw_url
         self.sync_interval = sync_interval
         self.review_sync = review_sync
         self.token = token
+        self.jobs_fname = jobs_fname
         self.pwork_for_testing = None
         self.sync_cmds_for_testing = None
         self._pworks = {}
@@ -726,17 +758,65 @@ class Server:
         asyncio.create_task(self.run_job(job))
         return job
 
-    def _new_job(self, kind, title, cmds):
+    def _new_job(self, kind, title, cmds, resumed=0):
         """Create a job and remember it, dropping old jobs if needed"""
         self._last_job += 1
-        job = Job(self._last_job, kind, title, cmds)
+        job = Job(self._last_job, kind, title, cmds, resumed)
         self._jobs[job.idnum] = job
         for old in list(self._jobs.values()):
             if len(self._jobs) <= MAX_JOBS:
                 break
             if not old.active:
                 del self._jobs[old.idnum]
+        self.save_jobs()
         return job
+
+    def save_jobs(self):
+        """Write out the jobs which should run again if the server restarts
+
+        Syncs are not included, since a sync runs when the server starts
+        anyway. The file is replaced in one step, so that it is complete
+        even if the server stops while writing it.
+        """
+        if not self.jobs_fname:
+            return
+        jobs = [{'kind': job.kind, 'title': job.state['title'],
+                 'cmds': job.cmds, 'resumed': job.state['resumed']}
+                for job in self._jobs.values()
+                if job.kind != 'sync' and job.unfinished]
+        tmp = f'{self.jobs_fname}.tmp'
+        with open(tmp, 'w', encoding='utf-8') as outf:
+            json.dump(jobs, outf, indent=1)
+        os.replace(tmp, self.jobs_fname)
+
+    def resume_jobs(self):
+        """Start the jobs which had not finished when the server stopped
+
+        Return:
+            list of Job: Jobs which were started
+        """
+        if not self.jobs_fname or not os.path.exists(self.jobs_fname):
+            return []
+        try:
+            with open(self.jobs_fname, encoding='utf-8') as inf:
+                saved = json.load(inf)
+        except (OSError, ValueError) as exc:
+            tout.warning(f"Cannot read jobs from '{self.jobs_fname}': {exc}")
+            return []
+        jobs = []
+        for item in saved:
+            title = item['title']
+            resumed = item.get('resumed', 0) + 1
+            if resumed > MAX_RESUMES:
+                tout.warning(f"Not resuming job '{title}' again: it has "
+                             f'been resumed {MAX_RESUMES} times')
+                continue
+            tout.notice(f"Resuming job '{title}'")
+            job = self._new_job(item['kind'], title, item['cmds'], resumed)
+            asyncio.create_task(self.run_job(job))
+            jobs.append(job)
+        self.save_jobs()
+        return jobs
 
     def get_job(self, idnum):
         """Get a job by its number
@@ -793,6 +873,7 @@ class Server:
                 state['running'] = False
                 state['cancelled'] = job.cancel
                 state['finished'] = _now_str()
+                self.save_jobs()
 
     @staticmethod
     def _cmd_label(cmd):
@@ -930,7 +1011,8 @@ class Server:
             await self._sleep(self.sync_interval * 60)
 
     async def _start_background(self, _app):
-        """Start the periodic sync, if enabled"""
+        """Resume any unfinished jobs, then start the periodic sync"""
+        self.resume_jobs()
         if self.sync_interval:
             self._sync_task = asyncio.create_task(self._sync_loop())
 
@@ -1279,7 +1361,9 @@ def serve(cser, host, port, pw_url, sync_interval, review_sync, token,
     if not token and not is_loopback(host):
         tout.warning(f'Listening on {host} with no --token: anyone who can '
                      'reach this port can read your series and reviews')
-    server = Server(cser, pw_url, sync_interval, review_sync, token, rcser)
+    jobs_fname = os.path.join(os.path.dirname(cser.db.db_path), JOBS_FNAME)
+    server = Server(cser, pw_url, sync_interval, review_sync, token, rcser,
+                    jobs_fname)
     query = f'?token={token}' if token else ''
     tout.notice(f'Serving on http://{host}:{port}/{query}')
     if sync_interval:
