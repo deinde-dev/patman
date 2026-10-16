@@ -15,6 +15,7 @@ sessions.
 import base64
 from collections import namedtuple
 import os
+import re
 from email.header import Header, decode_header
 from email.mime.text import MIMEText
 from email.utils import formataddr, getaddresses
@@ -632,60 +633,273 @@ def fetch_thread_replies(service, thread_id, after_msg_id):
     return replies
 
 
-def sync_drafts(service, reviews):
-    """Check if review drafts have been sent or deleted
+def subject_key(subject):
+    """Split a subject into its words, version and patch number
 
-    For each review that has a draft_id, checks if the draft still
-    exists. If gone, checks the sent folder for a matching message.
+    The words are taken after any 'Re:' and bracketed prefixes, from which the
+    version and patch number are taken, e.g. '[PATCH v2 03/15]' or
+    '[v2,3/15]'
+
+    Args:
+        subject (str): Subject, e.g. 'Re: [PATCH v2 2/5] video: Add it'
+
+    Returns:
+        tuple:
+            str: Normalised subject, e.g. 'video add it'
+            int: Version, 1 if not given
+            str or None: Patch number, e.g. '2/5', if given
+    """
+    subject = subject or ''
+    version, index = 1, None
+    while True:
+        match = re.match(r'\s*(re:|\[([^]]*)\])\s*', subject, re.I)
+        if not match:
+            break
+        for tok in re.split(r'[\s,]+', match.group(2) or ''):
+            ver = re.fullmatch(r'v(\d+)', tok, re.I)
+            num = re.fullmatch(r'(\d+)/(\d+)', tok)
+            if ver:
+                version = int(ver.group(1))
+            elif num:
+                index = f'{int(num.group(1))}/{int(num.group(2))}'
+        subject = subject[match.end():]
+    return _norm(subject), version, index
+
+
+def same_subject(first, second):
+    """Check whether two subjects are about the same patch
+
+    Args:
+        first (str): First subject
+        second (str): Second subject
+
+    Returns:
+        bool: True if they have the same words and version, and the same
+            patch number if both have one
+    """
+    words1, ver1, num1 = subject_key(first)
+    words2, ver2, num2 = subject_key(second)
+    return (words1 == words2 and ver1 == ver2 and
+            (not num1 or not num2 or num1 == num2))
+
+
+def norm_subject(subject):
+    """Reduce an email or patch subject to its words, for comparing
+
+    Args:
+        subject (str): Subject, e.g. 'Re: [PATCH v2 2/5] video: Add it'
+
+    Returns:
+        str: Normalised subject, e.g. 'video add it'
+    """
+    return subject_key(subject)[0]
+
+
+def _norm(text):
+    """Reduce text to lower-case words separated by single spaces"""
+    return ' '.join(re.findall(r"[\w']+", (text or '').lower()))
+
+
+# A message we sent with the same subject as a draft, but not its text, is
+# only taken as our response to the same patch within this many days
+SUBJECT_DAYS = 14
+
+# Lines which appear in many emails, so do not identify a message
+RE_COMMON_LINE = re.compile(
+    r"^(>|(hi|hello|dear|regards|thanks|cheers)\b|on .* wrote:$|"
+    r"[\w-]+-by:)", re.I)
+
+
+def _key_lines(body):
+    """Get the lines of a message which are not quoted, normalised
+
+    Args:
+        body (str): Message text
+
+    Returns:
+        list of str: Lines, with quoted and empty lines left out
+    """
+    return [_norm(line) for line in (body or '').splitlines()
+            if line.strip() and not line.startswith('>') and _norm(line)]
+
+
+def search_phrase(body):
+    """Pick a distinctive phrase from a message, for searching
+
+    Quoted text, greetings, sign-offs and tags are left out, since they
+    appear in many messages.
+
+    Args:
+        body (str): Message text
+
+    Returns:
+        str or None: Up to eight words from the longest remaining line, or
+            None if there is no suitable line
+    """
+    best = ''
+    for line in (body or '').splitlines():
+        line = line.strip()
+        if line and not RE_COMMON_LINE.match(line) and len(line) > len(best):
+            best = line
+    words = _norm(best).split()
+    return ' '.join(words[:8]) if len(words) >= 4 else None
+
+
+def _pick_sent(msgs, item, phrase):
+    """Pick the message we sent in response to what a draft replies to
+
+    Our messages with the same subject (including the version and patch
+    number), sent after the draft was created, are considered. One
+    containing the draft's distinctive phrase is preferred; otherwise the
+    earliest, if sent within SUBJECT_DAYS, is taken, since we often write our
+    own reply rather than sending the draft. Without a subject, only a message
+    containing the phrase (or every line, for a draft with no phrase) will
+    do.
+
+    Args:
+        msgs (list of dict): Gmail messages, in full format, oldest first
+        item: Draft being looked for (see sync_drafts())
+        phrase (str or None): Distinctive phrase from the draft
+
+    Returns:
+        tuple or None: (message, text) if found
+    """
+    earliest = None
+    for msg in msgs:
+        if 'SENT' not in msg.get('labelIds', []):
+            continue
+        if item.since and int(msg.get('internalDate', 0)) / 1000 < item.since:
+            continue
+        payload = msg.get('payload', {})
+        hdrs = {hdr['name'].lower(): hdr['value']
+                for hdr in payload.get('headers', [])}
+        if item.subject and not same_subject(hdrs.get('subject'),
+                                             item.subject):
+            continue
+        text = _extract_body(payload)
+        if not text:
+            continue
+        sent = _norm(text)
+        if phrase and phrase in sent:
+            return msg, text
+        if not phrase:
+            lines = _key_lines(item.body)
+            if lines and all(line in sent for line in lines):
+                return msg, text
+        if (item.subject and not earliest and
+                (not item.since or int(msg.get('internalDate', 0)) / 1000 <
+                 item.since + SUBJECT_DAYS * 86400)):
+            earliest = msg, text
+    return earliest
+
+
+def _find_sent(service, item, thread_id):
+    """Find the message we sent in response to what a draft replies to
+
+    If the draft's thread is known, our messages there are checked.
+    Otherwise the sent folder is searched, from the date the draft was
+    created, for a distinctive phrase from it and for its subject.
 
     Args:
         service (googleapiclient.discovery.Resource): Gmail API service
-        reviews (list of Review): Review records with draft_id set
+        item: Draft being looked for (see sync_drafts())
+        thread_id (str or None): Gmail thread of the draft, if known
 
     Returns:
-        tuple: (sent, deleted) where:
-            sent (dict): Map of review ID to (body, msg_id, thread_id)
-            deleted (list): List of review IDs whose drafts were
-                deleted without sending
+        tuple or None: (body, Gmail message ID, thread ID) if found
+    """
+    phrase = search_phrase(item.body)
+    if thread_id:
+        thread = service.users().threads().get(
+            userId='me', id=thread_id, format='full').execute()
+        msgs = thread.get('messages', [])
+    else:
+        ids = []
+        for term in (phrase, norm_subject(item.subject)):
+            if not term:
+                continue
+            query = 'in:sent'
+            if item.after:
+                query += f' after:{item.after}'
+            res = service.users().messages().list(
+                userId='me', q=f'{query} "{term}"', maxResults=10).execute()
+            ids += [info['id'] for info in res.get('messages', [])
+                    if info['id'] not in ids]
+        msgs = sorted((service.users().messages().get(
+                           userId='me', id=msg_id, format='full').execute()
+                       for msg_id in ids),
+                      key=lambda msg: int(msg.get('internalDate', 0)))
+    found = _pick_sent(msgs, item, phrase)
+    if not found:
+        return None
+    msg, text = found
+    return text, msg['id'], msg.get('threadId')
+
+
+def sync_drafts(service, items):
+    """Check whether drafts have been sent or deleted
+
+    The thread of each draft which still exists is noted, so that the
+    message we send can be found there later. Our message may be the draft
+    itself or one we wrote instead, so it is looked for (see _find_sent())
+    even while the draft exists, if the item asks for this. A draft which
+    has gone, with no message from us, was deleted without being sent.
+
+    Args:
+        service (googleapiclient.discovery.Resource): Gmail API service
+        items (list): Drafts to check, each with these attributes:
+            idnum (int): ID of the record holding the draft
+            draft_id (str): Gmail draft ID
+            body (str): Text of the draft
+            thread_id (str or None): Gmail thread of the draft, if known
+            subject (str or None): Subject of the email being replied to,
+                if known; our message must have the same subject
+            after (str or None): Date the draft was created, as YYYY/MM/DD
+            since (float or None): Time the draft was created, in seconds
+                since the epoch; our message must be later than this
+            check_sent (bool): True to look for our message even if the
+                draft still exists
+
+    Returns:
+        tuple:
+            dict: Drafts which were sent, or answered with a message we
+                wrote: key (int): idnum, value: tuple (body, Gmail message
+                ID, thread ID)
+            list of int: idnum of each draft deleted without being sent
+            dict: Threads of drafts which still exist, where newly found:
+                key (int): idnum, value (str): Gmail thread ID
     """
     sent = {}
     deleted = []
+    threads = {}
 
-    for rev in reviews:
-        if not rev.draft_id:
+    for item in items:
+        if not item.draft_id:
+            continue
+        thread_id = item.thread_id
+        exists = False
+        try:
+            draft = service.users().drafts().get(
+                userId='me', id=item.draft_id, format='minimal').execute()
+            exists = True
+            found_id = draft.get('message', {}).get('threadId')
+            if found_id and found_id != thread_id:
+                threads[item.idnum] = found_id
+                thread_id = found_id
+        except Exception:  # pylint: disable=W0718
+            pass
+        if exists and not item.check_sent:
             continue
 
-        # Check if the draft still exists
         try:
-            service.users().drafts().get(
-                userId='me', id=rev.draft_id).execute()
-            # Draft still exists — not sent yet
+            found = _find_sent(service, item, thread_id)
+        except Exception as exc:  # pylint: disable=W0718
+            tout.warning(f'Cannot check whether draft {item.draft_id} was '
+                         f'sent: {exc}')
             continue
-        except Exception:
-            pass
+        if found:
+            sent[item.idnum] = found
+        elif not exists:
+            deleted.append(item.idnum)
 
-        # Draft is gone — check if it was sent by looking for a
-        # sent message with matching subject and timestamp
-        found = False
-        try:
-            results = service.users().messages().list(
-                userId='me', q='in:sent is:sent',
-                maxResults=50).execute()
-            for msg_info in results.get('messages', []):
-                msg = service.users().messages().get(
-                    userId='me', id=msg_info['id'],
-                    format='full').execute()
-                payload = msg.get('payload', {})
-                body = _extract_body(payload)
-                if body and rev.body[:50] in body:
-                    sent[rev.idnum] = (body, msg_info['id'],
-                                       msg.get('threadId'))
-                    found = True
-                    break
-        except Exception:
-            pass
-
-        if not found:
-            deleted.append(rev.idnum)
-
-    return sent, deleted
+    return sent, deleted, threads

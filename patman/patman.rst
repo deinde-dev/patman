@@ -1671,13 +1671,25 @@ This:
 - Detects which drafts have been sent and records the final email
   content in the database (for context when reviewing future versions)
 - Detects deleted drafts (review not sent)
-- Refines the voice profile if the sent text differs from the draft
+- Refines the voice profile if the sent text differs from the draft,
+  for up to three reviews written in the last two weeks
 - Records replies to your reviews, from the patch author or other
   reviewers, in reviews sent in the last 90 days
 - Suggests a response to each new reply when one is needed (e.g.
   answering questions, pushing back on objections, or conceding
   gracefully), or notes that none is needed
 - Detects when a draft response has been sent
+
+A review counts as sent once you have sent a message about the same patch
+(the same subject, version and patch number) after the review was written,
+whether that is the draft itself or a reply you wrote instead. The message is
+looked for in the Gmail thread of the draft, which is noted each time
+``--sync`` runs while the draft is pending, or else by searching your sent
+mail for a distinctive phrase from the review or for the patch's subject. A
+message which only shares the subject must be sent within 14 days of the
+review. Pending drafts are checked like this for reviews from the last 90
+days; older ones are only checked to see whether the draft has gone. A review
+is only marked as deleted if its draft has gone and no such message is found.
 
 Only messages which reply to your review are recorded; other messages in
 the same thread, and your own, are ignored.

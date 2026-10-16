@@ -1919,11 +1919,73 @@ def _do_learn_voice(args, pwork):
     return 0 if learn_voice_sync(vp) else 1
 
 
+# Number of drafts to check before saving progress
+SYNC_CHUNK = 50
+
+# Only refine the voice profile from reviews written in this many days, and
+# from at most this many reviews in each sync
+VOICE_DAYS = 14
+MAX_VOICE_REFINE = 3
+
+
+def _gmail_date(timestamp):
+    """Get the day before a timestamp, for use in a Gmail 'after:' search
+
+    Args:
+        timestamp (str or None): ISO timestamp, e.g. '2026-03-30T07:57:15'
+
+    Returns:
+        str or None: Date, e.g. '2026/03/29', or None if there is none
+    """
+    try:
+        when = datetime.fromisoformat(timestamp)
+    except (TypeError, ValueError):
+        return None
+    return (when - timedelta(days=1)).strftime('%Y/%m/%d')
+
+
+def _epoch(timestamp):
+    """Convert a timestamp to seconds since the epoch
+
+    Args:
+        timestamp (str or None): ISO timestamp, in local time
+
+    Returns:
+        float or None: Seconds since the epoch, or None if there is none
+    """
+    try:
+        return datetime.fromisoformat(timestamp).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def _review_subject(db, rev):
+    """Get the subject of the patch or cover letter which a review is about
+
+    Args:
+        db (Database): Database holding the review
+        rev (Review): Review record
+
+    Returns:
+        str or None: Subject, or None if not known
+    """
+    if not rev.seq:
+        svr = db.ser_ver_get_by_id(rev.svid)
+        title = svr.name or db.series_get_info(svr.series_id)[1]
+        return f'[v{svr.version}] {title}' if title else None
+    for pcm in db.pcommit_get_list(rev.svid):
+        if pcm.seq == rev.seq - 1:
+            return pcm.subject
+    return None
+
+
 def _sync_drafts(service, cser):
     """Sync draft status with Gmail
 
-    Detects sent and deleted drafts, updates the database, and refines the voice
-    profile if sent text differs from the draft.
+    Detects sent and deleted drafts, and updates the database. Notes the
+    thread of each draft which is still pending, so that it can be found
+    there once sent. Refines the voice profile if the sent text of a recent
+    review differs from the draft.
 
     Args:
         service: Gmail API service
@@ -1932,32 +1994,51 @@ def _sync_drafts(service, cser):
     Returns:
         bool: True if there were drafts to sync
     """
-    reviews_with_drafts = cser.db.review_get_by_status('draft')
-
-    if not reviews_with_drafts:
+    db = cser.db
+    reviews = db.review_get_by_status('draft')
+    if not reviews:
         tout.notice('No pending drafts to sync')
         return False
 
-    sent, deleted = gmail.sync_drafts(service, reviews_with_drafts)
-    draft_bodies = {r.idnum: r.body for r in reviews_with_drafts}
-    for review_id, (body, msg_id, thread_id) in sent.items():
-        cser.db.review_set_sent(review_id, body, msg_id, thread_id)
-        tout.notice(f'Review {review_id}: sent')
+    recent = (datetime.now() - timedelta(days=VOICE_DAYS)).isoformat()
+    cutoff = (datetime.now() - timedelta(days=REPLY_DAYS)).isoformat()
+    total_sent = total_deleted = refined = 0
+    for start in range(0, len(reviews), SYNC_CHUNK):
+        chunk = reviews[start:start + SYNC_CHUNK]
+        sent, deleted, threads = gmail.sync_drafts(service, [
+            SimpleNamespace(idnum=rev.idnum, draft_id=rev.draft_id,
+                            body=rev.body, thread_id=rev.gmail_thread_id,
+                            subject=_review_subject(db, rev),
+                            after=_gmail_date(rev.timestamp),
+                            since=_epoch(rev.timestamp),
+                            check_sent=(rev.timestamp or '') >= cutoff)
+            for rev in chunk])
+        by_id = {rev.idnum: rev for rev in chunk}
+        for review_id, (body, msg_id, thread_id) in sent.items():
+            db.review_set_sent(review_id, body, msg_id, thread_id)
+            tout.notice(f'Review {review_id}: sent')
+            draft = by_id[review_id]
+            if (body.strip() != draft.body.strip() and
+                    (draft.timestamp or '') >= recent and
+                    refined < MAX_VOICE_REFINE):
+                tout.notice(f'Review {review_id}: edits detected, '
+                            'refining voice...')
+                refine_voice_sync(draft.body, body)
+                refined += 1
+        for review_id in deleted:
+            db.review_set_deleted(review_id)
+            tout.notice(f'Review {review_id}: deleted (not sent)')
+        for review_id, thread_id in threads.items():
+            db.review_set_thread(review_id, thread_id)
+        cser.commit()
+        total_sent += len(sent)
+        total_deleted += len(deleted)
 
-        draft = draft_bodies.get(review_id, '')
-        if draft and body.strip() != draft.strip():
-            tout.notice(f'Review {review_id}: edits detected, '
-                        'refining voice...')
-            refine_voice_sync(draft, body)
-    for review_id in deleted:
-        cser.db.review_set_deleted(review_id)
-        tout.notice(f'Review {review_id}: deleted (not sent)')
-    pending = len(reviews_with_drafts) - len(sent) - len(deleted)
+    pending = len(reviews) - total_sent - total_deleted
     if pending:
         tout.notice(f'{pending} draft(s) still pending')
-    if sent or deleted:
-        tout.notice(f'Synced {len(sent)} sent, {len(deleted)} deleted')
-    cser.commit()
+    if total_sent or total_deleted:
+        tout.notice(f'Synced {total_sent} sent, {total_deleted} deleted')
     return True
 
 
@@ -2114,9 +2195,12 @@ def _sync_reply_drafts(service, cser):
     drafts = cser.db.reply_get_by_status([database.REPLY_DRAFT])
     if not drafts:
         return
-    sent, deleted = gmail.sync_drafts(service, [
+    sent, deleted, _ = gmail.sync_drafts(service, [
         SimpleNamespace(idnum=rep.idnum, draft_id=rep.draft_id,
-                        body=rep.response) for rep in drafts])
+                        body=rep.response, thread_id=None,
+                        subject=rep.subject, after=None, since=None,
+                        check_sent=False)
+        for rep in drafts])
     for reply_id, (body, _, _) in sent.items():
         cser.db.reply_set_response(reply_id, body, database.REPLY_SENT)
         tout.notice(f'Reply {reply_id}: response sent')

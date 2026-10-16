@@ -1473,6 +1473,16 @@ class Database:  # pylint:disable=R0904
             'UPDATE review SET body = ?, approved = ? WHERE id = ?',
             (body, 1 if approved else 0, review_id))
 
+    def review_set_thread(self, review_id, thread_id):
+        """Note the Gmail thread holding the draft of a review
+
+        Args:
+            review_id (int): Review record ID
+            thread_id (str): Gmail thread ID
+        """
+        self.execute('UPDATE review SET gmail_thread_id = ? WHERE id = ?',
+                     (thread_id, review_id))
+
     def review_set_replied(self, review_id):
         """Mark a review as having received a reply
 

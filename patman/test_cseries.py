@@ -5686,7 +5686,7 @@ Date:   .*
         # Once the draft is sent, the response is recorded as sent
         with mock.patch.object(gmail, 'sync_drafts',
                                return_value=({reply.idnum: ('Sent text', 'm9',
-                                                            't1')}, [])), \
+                                                            't1')}, [], {})), \
                 terminal.capture():
             review._sync_reply_drafts(draft_svc, cser)
         reply = db.reply_get(reply.idnum)
@@ -5711,6 +5711,139 @@ Date:   .*
         # Deleting the review deletes its replies
         db.review_delete_for_version(svid)
         self.assertEqual([], db.reply_get_by_status(['skip']))
+
+    def test_gmail_sync_drafts(self):
+        """Our messages in response to drafts are found reliably"""
+        review_text = ('Hi Fred,\n\nOn Mon, Fred wrote:\n> code\n\n'
+                       'Please use a helper for the colour mode checks here.\n'
+                       '\nRegards,\nSimon')
+        self.assertEqual('please use a helper for the colour mode',
+                         gmail.search_phrase(review_text))
+        self.assertIsNone(gmail.search_phrase(
+            'Reviewed-by: Simon Glass <sjg@chromium.org>'))
+        self.assertEqual(('video add it', 2, '2/5'), gmail.subject_key(
+            'Re: [PATCH v2 02/5] video: Add it'))
+        self.assertEqual(('video add it', 1, None),
+                         gmail.subject_key('Re: [PATCH] video: Add it'))
+        self.assertTrue(gmail.same_subject('[RFC,v2,3/5] video: Add it',
+                                           'Re: [PATCH RFC v2 03/5] Video: '
+                                           'add it'))
+        self.assertFalse(gmail.same_subject('[v2,3/5] video: Add it',
+                                            'Re: [PATCH v3 3/5] video: Add it'))
+        self.assertFalse(gmail.same_subject('[v2,3/5] video: Add it',
+                                            'Re: [PATCH v2 4/5] video: Add it'))
+
+        def msg(msg_id, subject, body, when, sent=True, thread='t1'):
+            out = self.gmail_msg(msg_id, {'Subject': subject}, body,
+                                 sent=sent)
+            out['threadId'] = thread
+            out['internalDate'] = str(when * 1000)
+            return out
+
+        thread = [
+            msg('p1', '[PATCH 1/2] video: Add it', 'patch', 100, sent=False),
+            msg('old', 'Re: [PATCH 1/2] video: Add it', 'Earlier', 150),
+            msg('s1', 'Re: [PATCH 2/2] video: Other', 'Something', 300),
+            msg('s2', 'Re: [PATCH 1/2] video: Add it', 'My own words', 400),
+            msg('s3', 'Re: [PATCH 1/2] video: Add it', 'Later', 500),
+            msg('v2', 'Re: [PATCH v2 4/4] video: Fourth', 'Next version', 600),
+            msg('s4', 'Re: [PATCH 3/4] video: Third', 'Much later',
+                200 + 15 * 86400),
+        ]
+        service = mock.MagicMock()
+        users = service.users.return_value
+
+        def get_draft(userId, id, format):  # pylint: disable=W0622,W0613
+            req = mock.MagicMock()
+            if id.startswith('pending'):
+                req.execute.return_value = {'message': {'threadId': 't1'}}
+            else:
+                req.execute.side_effect = ValueError('not found')
+            return req
+
+        users.drafts.return_value.get.side_effect = get_draft
+        users.threads.return_value.get.return_value.execute.return_value = {
+            'messages': thread}
+        found = msg('f1', 'Re: [PATCH] net: Fix it',
+                    'Edited.\n\n' + review_text, 400, thread='t2')
+        users.messages.return_value.list.return_value.execute.return_value = {
+            'messages': [{'id': 'f1'}]}
+        users.messages.return_value.get.return_value.execute.return_value = \
+            found
+
+        def item(idnum, draft_id, thread_id, subject, check_sent=True,
+                 body='Draft text'):
+            return types.SimpleNamespace(
+                idnum=idnum, draft_id=draft_id, body=body,
+                thread_id=thread_id, subject=subject, after='2026/10/01',
+                since=200, check_sent=check_sent)
+
+        sent, deleted, threads = gmail.sync_drafts(service, [
+            # Draft still there, but we wrote our own reply in its thread
+            item(1, 'pending1', None, '[1/2] video: Add it'),
+            # Draft still there, and not checked for a reply
+            item(2, 'pending2', 't1', '[1/2] video: Add it', False),
+            # Draft gone; we sent a rewritten reply
+            item(3, 'gone3', 't1', '[1/2] video: Add it'),
+            # Draft gone and thread unknown, so search the sent mail
+            item(4, 'gone4', None, 'net: Fix it', body=review_text),
+            # Draft gone, with no reply on this patch
+            item(5, 'gone5', 't1', '[3/3] video: Not sent'),
+            # Draft gone; our only reply was to a later version
+            item(6, 'gone6', 't1', '[4/4] video: Fourth'),
+            # Draft gone; our only reply on the patch came much later
+            item(7, 'gone7', 't1', '[3/4] video: Third'),
+        ])
+        self.assertEqual({1: 't1'}, threads)
+        self.assertEqual({1: ('My own words', 's2', 't1'),
+                          3: ('My own words', 's2', 't1'),
+                          4: ('Edited.\n\n' + review_text, 'f1', 't2')},
+                         sent)
+        self.assertEqual([5, 6, 7], deleted)
+        queries = [call.kwargs['q'] for call in
+                   users.messages.return_value.list.call_args_list]
+        self.assertEqual(
+            ['in:sent after:2026/10/01 '
+             '"please use a helper for the colour mode"',
+             'in:sent after:2026/10/01 "net fix it"'], queries)
+
+    def test_review_sync_drafts(self):
+        """Review drafts are synced, with limited voice refinement"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'Fred series', None)
+        db.series_set_source(sid, 'review')
+        svid = db.ser_ver_add(sid, 1, link='123')
+        db.pcommit_add_list(svid, [Pcommit(None, seq, f'[{seq + 1}/6] subj',
+                                           None, None, None, None, None)
+                                   for seq in range(6)])
+        now = datetime.now().isoformat()
+        rids = []
+        for seq in range(1, 7):
+            rid = db.review_add(svid, seq, f'review {seq}', False,
+                                now if seq < 6 else '2020-01-01T00:00:00')
+            db.review_set_draft_id(rid, f'd{seq}')
+            rids.append(rid)
+        db.commit()
+
+        def fake_sync(_service, items):
+            self.assertEqual('[1/6] subj', items[0].subject)
+            sent = {item.idnum: (f'edited {item.idnum}', f'm{item.idnum}',
+                                 't1') for item in items[1:]}
+            return sent, [], {items[0].idnum: 't5'}
+
+        with mock.patch.object(gmail, 'sync_drafts', side_effect=fake_sync), \
+                mock.patch.object(review, 'refine_voice_sync') as refine, \
+                terminal.capture() as (out, _):
+            review._sync_drafts(None, cser)
+        self.assertIn('Synced 5 sent, 0 deleted', out.getvalue())
+        self.assertIn('1 draft(s) still pending', out.getvalue())
+        self.assertEqual(3, refine.call_count)
+        first = db.review_get(rids[0])
+        self.assertEqual(('draft', 't5'), (first.status, first.gmail_thread_id))
+        self.assertEqual(('sent', 'edited %d' % rids[5]),
+                         (db.review_get(rids[5]).status,
+                          db.review_get(rids[5]).body))
 
     def test_review_needs_draft(self):
         """Sent reviews are never drafted again; -i selects the patches"""

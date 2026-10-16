@@ -46,6 +46,9 @@ Fixed
 - Reviews which have been sent are not drafted again by ``review -d``,
   ``--scan`` or ``--redraft``, and ``--redraft`` only drafts the patches
   chosen with ``-i``.
+- ``review --sync`` finds sent reviews reliably, including those answered in
+  the thread rather than by sending the draft, and is much faster with many
+  drafts.
 
 0.3.3 - 2026-10-12
 ------------------
