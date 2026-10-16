@@ -283,7 +283,8 @@ reviewed first. Each is an object with:
 A reviewed series with all its versions:
 
 - ``id``, ``name``, ``desc``: as above
-- ``upstream`` (str or null): upstream of the series
+- ``upstream`` (str or null): upstream of the series, or the default upstream
+  if it has none, since ``patman review`` uses that
 - ``patchwork_url`` (str or null): as for ``GET /api/series/<id>``
 - ``project`` (str or null): patchwork project of the upstream
 - ``versions`` (list of Version): newest first, each with ``notes`` (str or

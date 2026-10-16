@@ -1098,6 +1098,10 @@ class Server:
 
     async def _review_detail(self, request):
         data = get_review_detail(self.rcser, int(request.match_info['idnum']))
+        # 'patman review' uses the default upstream when none is given, so
+        # a series reviewed that way is on its patchwork server
+        data['upstream'] = (data['upstream'] or
+                            self.cser.db.upstream_get_default())
         data['patchwork_url'] = self.get_pw_url(data['upstream'])
         proj = self.cser.project_get(data['upstream'])
         data['project'] = proj[2] if proj else None

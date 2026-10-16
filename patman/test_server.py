@@ -242,6 +242,18 @@ class TestWebServer(unittest.TestCase, TestCommon):
                          [(p['seq'], p['subject'], p['patch_id'])
                           for p in latest['patches']])
 
+    def test_review_default_upstream(self):
+        """A review with no upstream uses the default upstream's patchwork"""
+        self.cser.db.upstream_add('us', 'https://us.git',
+                                  patchwork_url='https://pw.us')
+        self.cser.db.upstream_set_default('us')
+        ser_id, _ = self.add_series('rev', 'Somebody else',
+                                    {1: [('a', 'new', 5, 0)]}, source='review')
+        srv = server.Server(self.cser, pw_url='https://pw.default')
+        _, data = self.call(srv, 'GET', f'/api/reviews/{ser_id}')
+        self.assertEqual(('us', 'https://pw.us'),
+                         (data['upstream'], data['patchwork_url']))
+
     def test_review_db(self):
         """Reviews can be read from a separate database"""
         rdir = os.path.join(self.tmpdir, 'rev')
