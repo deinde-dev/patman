@@ -6400,6 +6400,10 @@ Date:   .*
         self.assertIsNotNone(v2)
         self.assertEqual(v1[0], v2[0])  # linked under the same series
 
+        # The cover letter is recorded, so that it can be shown later
+        svr = cser.db.ser_ver_get_by_id(v2[3])
+        self.assertEqual((9, '[v2,0/1] foo bar'), (svr.cover_id, svr.name))
+
     def test_review_get_previous_skips_gap(self):
         """Test prior-review lookup skips versions that have no reviews"""
         cser = self.get_cser()

@@ -291,6 +291,11 @@ A reviewed series with all its versions:
   null; notes from handling reviews of the series), ``reviews`` (list of
   Review, in order) and ``patches`` (list of Patch, in order)
 
+Series added for review before cover letters were recorded have no
+``cover_id``. For versions with a review of the cover letter, the server looks
+up the series on patchwork and records its cover letter, so this only happens
+once.
+
 Acting on reviews
 -----------------
 

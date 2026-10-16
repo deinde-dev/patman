@@ -2397,6 +2397,11 @@ def _register_series(cser, clean_name, version, link, series_data,
             cser.db.series_set_source(series_id, 'review')
 
         svid = cser.db.ser_ver_add(series_id, version, link=str(link))
+        cover = series_data.get('cover_letter')
+        if cover and cover.get('id'):
+            cser.db.ser_ver_set_info(database.SerVer(
+                svid, None, None, None, cover['id'], 0, cover.get('name'),
+                None, None, None))
 
         patches = series_data.get('patches', [])
         pcommits = []

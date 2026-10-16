@@ -673,6 +673,9 @@ class Server:
         self._sleep = asyncio.sleep
         self._sync_task = None
 
+        # Reviewed versions which patchwork says have no cover letter
+        self._no_cover = set()
+
         # Jobs run one at a time, in the order they are added, since they
         # may all write to the database
         self._job_lock = asyncio.Lock()
@@ -1096,12 +1099,54 @@ class Server:
     async def _review_list(self, _request):
         return web.json_response(get_review_list(self.rcser))
 
+    async def _find_covers(self, data):
+        """Look up the cover letters which reviewed versions lack
+
+        Reviews added before cover-letter IDs were recorded have none, so
+        the cover letter which was reviewed cannot be shown. Read each such
+        version's series from patchwork and record its cover letter, so
+        this only happens once.
+
+        Args:
+            data (dict): Review detail, as from get_review_detail(); the
+                versions' cover_id and cover_name are filled in
+        """
+        todo = [ver for ver in data['versions']
+                if not ver['cover_id'] and ver['link'] and
+                ver['svid'] not in self._no_cover and
+                any(not rev['seq'] for rev in ver['reviews'])]
+        if not todo:
+            return
+        try:
+            pwork = self.get_pwork(data['upstream'])
+        except ValueError:
+            return
+        async with aiohttp.ClientSession() as client:
+            results = await asyncio.gather(
+                *[pwork.get_series(client, ver['link']) for ver in todo],
+                return_exceptions=True)
+        for ver, result in zip(todo, results):
+            if isinstance(result, Exception):
+                tout.warning(f"Cannot read series {ver['link']}: {result}")
+                continue
+            cover = (result or {}).get('cover_letter')
+            if not cover:
+                self._no_cover.add(ver['svid'])
+                continue
+            ver['cover_id'] = cover['id']
+            ver['cover_name'] = cover.get('name')
+            self.rcser.db.ser_ver_set_info(database.SerVer(
+                ver['svid'], None, None, None, cover['id'], 0,
+                cover.get('name'), None, None, None))
+        self.rcser.commit()
+
     async def _review_detail(self, request):
         data = get_review_detail(self.rcser, int(request.match_info['idnum']))
         # 'patman review' uses the default upstream when none is given, so
         # a series reviewed that way is on its patchwork server
         data['upstream'] = (data['upstream'] or
                             self.cser.db.upstream_get_default())
+        await self._find_covers(data)
         data['patchwork_url'] = self.get_pw_url(data['upstream'])
         proj = self.cser.project_get(data['upstream'])
         data['project'] = proj[2] if proj else None

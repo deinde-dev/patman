@@ -118,6 +118,8 @@ class TestWebServer(unittest.TestCase, TestCommon):
                     'date': '2026-10-01T09:00:00', 'submitter': {}}
         if subpath == 'covers/77/comments/':
             return []
+        if subpath == 'series/200/':
+            return {'id': 200, 'cover_letter': {'id': 77, 'name': '[0/2] rev'}}
         raise ValueError(f"Unexpected request '{subpath}'")
 
     def call(self, srv, method, path, **kwargs):
@@ -242,6 +244,17 @@ class TestWebServer(unittest.TestCase, TestCommon):
                          [(p['seq'], p['subject'], p['patch_id'])
                           for p in latest['patches']])
 
+        # The cover letter of the version with a cover-letter review is
+        # looked up once and recorded
+        self.assertEqual(['series/200/'], self.requests)
+        self.assertEqual((77, '[0/2] rev'),
+                         (latest['cover_id'], latest['cover_name']))
+        self.assertEqual(77, db.ser_ver_get_by_id(svids[2]).cover_id)
+        self.assertIsNone(data['versions'][1]['cover_id'])
+        _, data = self.call(srv, 'GET', f'/api/reviews/{ser_id}')
+        self.assertEqual(77, data['versions'][0]['cover_id'])
+        self.assertEqual(['series/200/'], self.requests)
+
     def test_review_default_upstream(self):
         """A review with no upstream uses the default upstream's patchwork"""
         self.cser.db.upstream_add('us', 'https://us.git',
@@ -253,6 +266,22 @@ class TestWebServer(unittest.TestCase, TestCommon):
         _, data = self.call(srv, 'GET', f'/api/reviews/{ser_id}')
         self.assertEqual(('us', 'https://pw.us'),
                          (data['upstream'], data['patchwork_url']))
+
+    def test_review_no_cover(self):
+        """A version without a cover letter is only looked up once"""
+        ser_id, svids = self.add_series(
+            'rev', 'Somebody else', {3: [('a', 'new', 5, 0)]},
+            source='review')
+        self.cser.db.review_add(svids[3], 0, 'Cover comments', False,
+                                '2026-10-01 10:00:00')
+        self.cser.db.commit()
+        srv = self.make_server()
+        srv.pwork_for_testing = Patchwork.for_testing(
+            lambda subpath: self.requests.append(subpath) or {'id': 300})
+        for _ in range(2):
+            _, data = self.call(srv, 'GET', f'/api/reviews/{ser_id}')
+            self.assertIsNone(data['versions'][0]['cover_id'])
+        self.assertEqual(['series/300/'], self.requests)
 
     def test_review_db(self):
         """Reviews can be read from a separate database"""
