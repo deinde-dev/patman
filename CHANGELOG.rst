@@ -20,7 +20,8 @@ Added
 - The ``patman serve`` page has an inbox of recent series on patchwork,
   marking those already reviewed.
 - The ``patman serve`` page shows the commit message, diff and comments of
-  each patch and cover letter, also beside its review.
+  each patch and cover letter, also beside its review, and the code around
+  each chunk of a diff.
 - Reviews which have not been sent can be edited on the ``patman serve`` page.
 - The ``patman serve`` page shows replies to reviews, and a response can be
   edited and drafted there.

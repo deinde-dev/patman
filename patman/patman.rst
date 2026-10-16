@@ -1907,6 +1907,14 @@ Each patch and cover letter can be read on the page: tap 'Read' on a series, a
 patch name in a review, or a patch in the inbox to see the commit message, the
 diff (with a summary of the files changed) and the comments on patchwork.
 
+To see the code around a chunk of a diff, tap '5 more' above or below it, as
+often as needed, or 'All' to fill the gap. Tap a file's name, or 'Whole file',
+to see all of the file, with line numbers, at that point. The code is read from
+the git repo where the server runs, using the blobs named in the diff's 'index'
+line, so it is only available if the repo has them: the file as it is before
+the patch is there if the series is based on a commit the repo has, and the
+file with the patch applied is there once the series has been reviewed.
+
 Reviewing from the page
 -----------------------
 

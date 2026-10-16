@@ -152,6 +152,19 @@ a.card:active { background: var(--code-bg); }
 .diff .del { background: rgba(248, 81, 73, 0.16); }
 .diff .hunk { color: var(--link); }
 .diff .file { font-weight: 700; margin-top: 8px; }
+.diff .file a { color: var(--link); text-decoration: none; }
+.diff .ctx { background: var(--surface); }
+.diff .expand { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline;
+                position: sticky; left: 0; padding: 3px 10px; color: var(--muted);
+                font: 12px system-ui, sans-serif; white-space: normal; }
+.diff .expand button { font: inherit; color: var(--link); background: none; border: 0;
+                       padding: 2px 0; cursor: pointer; }
+.diff .expand a { color: var(--link); text-decoration: none; }
+.diff .expand span { display: inline; padding: 0; min-width: 0; }
+.diff .expand .error { padding: 0; text-align: left; }
+.src .ln { display: inline-block; text-align: right; margin-right: 1.5ch;
+           color: var(--muted); font-style: normal; user-select: none; }
+.diff .target { background: rgba(210, 153, 34, 0.22); }
 .files { font-size: 13px; }
 .files .row { padding: 2px 0; }
 .files .n { font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -618,39 +631,205 @@ function diffLine(line) {
   return h('span', { class: cls }, line || ' ');
 }
 
-// Count the lines added and removed in each file of a diff
-function diffStat(lines) {
-  const files = [];
+// Number of lines of source to show each time the gap next to a chunk of
+// a diff is widened
+const CONTEXT_LINES = 5;
+
+// A blob hash from a diff, or null if it is all zeros (no file)
+function realBlob(oid) { return /[^0]/.test(oid) ? oid : null; }
+
+// Parse a chunk's '@@' line, giving the first and last line on each side
+function chunkRange(line) {
+  const m = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+  if (!m) return null;
+  const side = (start, count) => {
+    const n = count === undefined ? 1 : +count;
+    const first = n ? +start : +start + 1;
+    return { first, last: first + n - 1 };
+  };
+  return { old: side(m[1], m[2]), new: side(m[3], m[4]) };
+}
+
+// Pick out each file in a diff: its name, the lines added and removed, its
+// blobs before and after the change and where its first chunk starts. The
+// result is keyed by the index of the file's 'diff --git' line
+function diffFiles(lines) {
+  const files = new Map();
   let cur = null;
-  for (const line of lines) {
-    const m = line.match(/^diff --git a\/(.*) b\//);
-    if (m) { cur = { name: m[1], add: 0, del: 0 }; files.push(cur); }
-    else if (cur && line.startsWith('+') && !line.startsWith('+++')) cur.add++;
-    else if (cur && line.startsWith('-') && !line.startsWith('---')) cur.del++;
-  }
+  lines.forEach((line, idx) => {
+    const m = line.match(/^diff --git a\/.* b\/(.*)/);
+    if (m) {
+      cur = { name: m[1], add: 0, del: 0, old: null, new: null, at: null };
+      files.set(idx, cur);
+      return;
+    }
+    if (!cur) return;
+    const ix = !cur.at && line.match(/^index ([0-9a-f]+)\.\.([0-9a-f]+)/);
+    if (ix) {
+      cur.old = realBlob(ix[1]);
+      cur.new = realBlob(ix[2]);
+    } else if (line.startsWith('@@')) {
+      const r = chunkRange(line);
+      if (r && !cur.at) cur.at = { old: r.old.first, new: r.new.first };
+    } else if (line.startsWith('+') && !line.startsWith('+++')) cur.add++;
+    else if (line.startsWith('-') && !line.startsWith('---')) cur.del++;
+  });
   return files;
+}
+
+// Files read from the git repo, keyed by the blob hashes asked for
+const blobs = new Map();
+
+// Read a file from the git repo, preferring its version after the change
+function getBlob(file) {
+  const hashes = [file.new, file.old].filter(Boolean);
+  const key = hashes.join(',');
+  if (!blobs.has(key)) {
+    const got = api(`blob?${hashes.map((oid) => `hash=${oid}`).join('&')}`)
+      .then((b) => ({ hash: b.hash, isNew: b.hash === file.new,
+                      lines: b.text ? b.text.replace(/\n$/, '').split('\n') : [] }));
+    got.catch(() => blobs.delete(key));
+    blobs.set(key, got);
+  }
+  return blobs.get(key);
+}
+
+// Link to the page showing the whole of a file in a diff, at a line given
+// for each side
+function fileHref(file, at) {
+  at = at || { old: 1, new: 1 };
+  return `#/file/${file.new || '-'}/${file.old || '-'}/${at.new}/${at.old}/` +
+    encodeURIComponent(file.name);
+}
+
+// The source lines in the gap before or after a chunk of a diff, shown a
+// few at a time. The gap starts at line 'lo' (on each side) and has 'count'
+// lines, or runs to the end of the file if that is null. 'after' is true if
+// there is a chunk above the gap and 'before' if there is one below it
+function diffGap(file, lo, count, after, before) {
+  if (count === 0) return [];
+  const top = h('div', {});
+  const bottom = h('div', {});
+  const bar = h('div', { class: 'expand' });
+  let src = null;
+  let ntop = 0;
+  let nbottom = 0;
+  const left = () => (src ? src.count - ntop - nbottom : count);
+  // The line of the chunk below the gap, else the last one shown above it
+  const near = () => {
+    const n = before ? count : Math.max(ntop - 1, 0);
+    return { old: lo.old + n, new: lo.new + n };
+  };
+  const srcLine = (n) => h('span', { class: 'ctx' }, ` ${src.lines[n - 1]}`);
+  const draw = () => {
+    const n = left();
+    if (n === 0) { bar.remove(); return; }
+    const btn = (label, add, sub) => h('button', { onclick: () => widen(add, sub) }, label);
+    const first = src ? src.first : (file.new ? lo.new : lo.old);
+    bar.replaceChildren(...[
+      after && btn(`↓ ${CONTEXT_LINES} more`, CONTEXT_LINES, 0),
+      before && btn(`↑ ${CONTEXT_LINES} more`, 0, CONTEXT_LINES),
+      n !== null && n > CONTEXT_LINES && btn(`All ${n}`, n, 0),
+      h('a', { href: fileHref(file, near()) }, 'Whole file'),
+      n !== null && h('span', {}, `${plural(n, 'line')} from ${first + ntop}`),
+    ].filter(Boolean));
+  };
+  // Show more lines below the chunk above (ntop) or above the one below
+  const widen = async (addTop, addBottom) => {
+    if (!src) {
+      try {
+        const b = await getBlob(file);
+        const first = b.isNew ? lo.new : lo.old;
+        src = { lines: b.lines, first,
+                count: count ?? Math.max(0, b.lines.length - first + 1) };
+      } catch (err) {
+        bar.replaceChildren(h('span', { class: 'error' }, err.message));
+        return;
+      }
+    }
+    for (let i = Math.min(addTop, left()); i > 0; i--) {
+      top.append(srcLine(src.first + ntop));
+      ntop++;
+    }
+    for (let i = Math.min(addBottom, left()); i > 0; i--) {
+      nbottom++;
+      bottom.prepend(srcLine(src.first + src.count - nbottom));
+    }
+    draw();
+  };
+  draw();
+  return [top, bar, bottom];
 }
 
 function renderDiff(diff) {
   const lines = diff.replace(/\n$/, '').split('\n');
-  const files = diffStat(lines);
+  const files = diffFiles(lines);
   const box = h('div', { class: 'diff' });
-  const show = (n) => box.replaceChildren(...lines.slice(0, n).map(diffLine));
+  const show = (limit) => {
+    const out = [];
+    let file = null;
+    let prev = null;  // last line on each side of the chunk above
+    // Gaps are only shown for a changed file, since the diff of a new or
+    // removed file holds all of it
+    const gaps = () => file && file.old && file.new;
+    const next = () => (prev ? { old: prev.old + 1, new: prev.new + 1 } : { old: 1, new: 1 });
+    lines.slice(0, limit).forEach((line, idx) => {
+      if (files.has(idx)) {
+        if (gaps() && prev) out.push(diffGap(file, next(), null, true, false));
+        file = files.get(idx);
+        prev = null;
+        out.push(h('span', { class: 'file' }, file.old || file.new
+          ? h('a', { href: fileHref(file, file.at) }, line) : line));
+        return;
+      }
+      const r = file && line.startsWith('@@') && chunkRange(line);
+      if (r) {
+        const lo = next();
+        if (gaps()) out.push(diffGap(file, lo, r.old.first - lo.old, !!prev, true));
+        prev = { old: r.old.last, new: r.new.last };
+      }
+      out.push(diffLine(line));
+    });
+    if (limit >= lines.length && gaps() && prev) {
+      out.push(diffGap(file, next(), null, true, false));
+    }
+    box.replaceChildren(...out.flat());
+  };
   show(DIFF_LINES);
   const more = lines.length > DIFF_LINES && h('div', { class: 'actions' },
     h('button', { class: 'btn light small', onclick: (ev) => {
       show(lines.length);
       ev.target.remove();
     } }, `Show all ${lines.length} lines`));
-  const add = files.reduce((n, f) => n + f.add, 0);
-  const del = files.reduce((n, f) => n + f.del, 0);
+  const stats = [...files.values()];
+  const add = stats.reduce((n, f) => n + f.add, 0);
+  const del = stats.reduce((n, f) => n + f.del, 0);
   return [
-    h('div', { class: 'section' }, `${plural(files.length, 'file')}, +${add} -${del}`),
-    files.length > 1 && h('div', { class: 'card files' }, files.map((f) =>
+    h('div', { class: 'section' }, `${plural(stats.length, 'file')}, +${add} -${del}`),
+    stats.length > 1 && h('div', { class: 'card files' }, stats.map((f) =>
       h('div', { class: 'row' }, h('div', { class: 'grow' }, f.name),
         h('span', { class: 'n plus' }, `+${f.add}`),
         h('span', { class: 'n minus' }, `-${f.del}`)))),
     box, more];
+}
+
+// Show the whole of a file from a diff, from the git repo, at a line
+async function viewFile(newOid, oldOid, newLine, oldLine, name) {
+  const b = await getBlob({ new: newOid === '-' ? null : newOid,
+                            old: oldOid === '-' ? null : oldOid });
+  const target = b.isNew ? newLine : oldLine;
+  const width = `${String(b.lines.length).length}ch`;
+  const rows = b.lines.map((text, i) => h('span', { class: i + 1 === target ? 'target' : null },
+    h('i', { class: 'ln', style: `width:${width}` }, i + 1), text));
+  setView(name.split('/').pop(), null, true,
+    h('div', { class: 'card' },
+      h('div', { class: 'name' }, name),
+      h('div', { class: 'meta' },
+        h('span', {}, b.isNew ? 'with the patch applied' : 'before the patch'),
+        h('span', {}, plural(b.lines.length, 'line')),
+        h('span', {}, `blob ${b.hash}`))),
+    h('div', { class: 'diff src' }, rows));
+  if (rows[target - 1]) rows[target - 1].scrollIntoView({ block: 'center' });
 }
 
 function renderComments(comments) {
@@ -1308,6 +1487,10 @@ async function route() {
     else if (page === 'inbox') await viewInbox();
     else if ((page === 'patch' || page === 'cover') && id) {
       await viewMail(page, +id, ver ? decodeURIComponent(ver) : null);
+    }
+    else if (page === 'file' && parts.length === 6) {
+      await viewFile(parts[1], parts[2], +parts[3], +parts[4],
+                     decodeURIComponent(parts[5]));
     }
     else if (page === 'jobs' && id) await viewJob(+id);
     else if (page === 'jobs') await viewJobs();
