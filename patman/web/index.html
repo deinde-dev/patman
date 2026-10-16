@@ -144,6 +144,19 @@ a.card:active { background: var(--code-bg); }
            text-transform: uppercase; letter-spacing: 0.04em;
            margin: 16px 2px 8px; }
 
+.diff { font: 12px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        white-space: pre; overflow-x: auto; background: var(--code-bg);
+        border-radius: 8px; padding: 8px 0; }
+.diff span { display: block; padding: 0 10px; min-width: max-content; }
+.diff .add { background: rgba(46, 160, 67, 0.16); }
+.diff .del { background: rgba(248, 81, 73, 0.16); }
+.diff .hunk { color: var(--link); }
+.diff .file { font-weight: 700; margin-top: 8px; }
+.files { font-size: 13px; }
+.files .row { padding: 2px 0; }
+.files .n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.files .plus { color: var(--st-accepted); }
+.files .minus { color: var(--st-rejected); }
 .section.cmd { text-transform: none; letter-spacing: 0;
                font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
 .patch { cursor: pointer; }
@@ -525,9 +538,11 @@ async function viewSeries(id, wantVer) {
         h('span', { class: 'ncomments' + (sv.cover_num_comments ? ' some' : '') },
           plural(sv.cover_num_comments, 'comment'))),
       sv.cover_name && h('div', { class: 'desc' }, sv.cover_name),
-      pw && h('div', { class: 'meta' },
-        h('a', { class: 'extlink', href: `${pw}/cover/${sv.cover_id}/`,
-                 target: '_blank', rel: 'noopener' }, 'Open in patchwork ↗')));
+      h('div', { class: 'meta' },
+        h('a', { class: 'extlink', href: mailHref('cover', sv.cover_id, ser.upstream) },
+          'Read'),
+        pw && h('a', { class: 'extlink', href: `${pw}/cover/${sv.cover_id}/`,
+                       target: '_blank', rel: 'noopener' }, 'Open in patchwork ↗')));
     card.addEventListener('click', commentToggle(card, 'cover', sv.cover_id, ser.upstream));
     cards.push(card);
   }
@@ -540,6 +555,8 @@ async function viewSeries(id, wantVer) {
           p.num_comments ? `💬 ${p.num_comments}` : '')),
       h('div', { class: 'meta' },
         p.state && h('span', { class: `chip ${stClass(p.state)}` }, p.state),
+        p.patch_id && h('a', { class: 'extlink',
+          href: mailHref('patch', p.patch_id, ser.upstream) }, 'Read'),
         pw && p.patch_id && h('a', { class: 'extlink',
           href: `${pw}/patch/${p.patch_id}/`, target: '_blank', rel: 'noopener' },
           'patchwork ↗')));
@@ -561,6 +578,98 @@ async function viewSeries(id, wantVer) {
     h('div', { class: 'section' },
       `${sv.patches.length} patch${sv.patches.length === 1 ? '' : 'es'}`),
     h('div', { class: 'list' }, cards));
+}
+
+// --- Patches ---
+
+// Number of diff lines to show before asking
+const DIFF_LINES = 1500;
+
+function diffLine(line) {
+  let cls = null;
+  if (line.startsWith('diff --git')) cls = 'file';
+  else if (line.startsWith('+++') || line.startsWith('---')) cls = null;
+  else if (line.startsWith('+')) cls = 'add';
+  else if (line.startsWith('-')) cls = 'del';
+  else if (line.startsWith('@@')) cls = 'hunk';
+  return h('span', { class: cls }, line || ' ');
+}
+
+// Count the lines added and removed in each file of a diff
+function diffStat(lines) {
+  const files = [];
+  let cur = null;
+  for (const line of lines) {
+    const m = line.match(/^diff --git a\/(.*) b\//);
+    if (m) { cur = { name: m[1], add: 0, del: 0 }; files.push(cur); }
+    else if (cur && line.startsWith('+') && !line.startsWith('+++')) cur.add++;
+    else if (cur && line.startsWith('-') && !line.startsWith('---')) cur.del++;
+  }
+  return files;
+}
+
+function renderDiff(diff) {
+  const lines = diff.replace(/\n$/, '').split('\n');
+  const files = diffStat(lines);
+  const box = h('div', { class: 'diff' });
+  const show = (n) => box.replaceChildren(...lines.slice(0, n).map(diffLine));
+  show(DIFF_LINES);
+  const more = lines.length > DIFF_LINES && h('div', { class: 'actions' },
+    h('button', { class: 'btn light small', onclick: (ev) => {
+      show(lines.length);
+      ev.target.remove();
+    } }, `Show all ${lines.length} lines`));
+  const add = files.reduce((n, f) => n + f.add, 0);
+  const del = files.reduce((n, f) => n + f.del, 0);
+  return [
+    h('div', { class: 'section' }, `${plural(files.length, 'file')}, +${add} -${del}`),
+    files.length > 1 && h('div', { class: 'card files' }, files.map((f) =>
+      h('div', { class: 'row' }, h('div', { class: 'grow' }, f.name),
+        h('span', { class: 'n plus' }, `+${f.add}`),
+        h('span', { class: 'n minus' }, `-${f.del}`)))),
+    box, more];
+}
+
+function renderComments(comments) {
+  return comments.length ? comments.map((c) =>
+    h('div', { class: 'card' },
+      h('div', { class: 'who' }, c.name || c.email || 'Unknown',
+        h('span', { class: 'when' }, ago(parseTime(c.date, true)))),
+      renderMail(c.content))) : [h('div', { class: 'empty' }, 'No comments')];
+}
+
+// Link to the page for a patch or cover letter
+function mailHref(kind, id, ups) {
+  return `#/${kind}/${id}${ups ? '/' + encodeURIComponent(ups) : ''}`;
+}
+
+async function viewMail(kind, id, ups) {
+  const q = ups ? `?ups=${encodeURIComponent(ups)}` : '';
+  const m = await api(`${kind}/${id}${q}`);
+  const comments = h('div', { class: 'list' },
+                     h('div', { class: 'spinner' }, 'Loading comments…'));
+  const ser = m.series[0];
+  setView(m.name, null, true,
+    h('div', { class: 'card' },
+      h('div', { class: 'name' }, m.name),
+      h('div', { class: 'meta' },
+        m.state && h('span', { class: `chip ${stClass(m.state)}` }, m.state),
+        m.submitter && h('span', {}, m.submitter),
+        m.date && h('span', {}, ago(parseTime(m.date, true))),
+        ser && h('span', {}, `series ${ser.id} v${ser.version}`)),
+      m.web_url && h('div', { class: 'actions' },
+        h('a', { class: 'btn light small', href: m.web_url, target: '_blank',
+                 rel: 'noopener' }, 'patchwork ↗'))),
+    h('div', { class: 'section' }, kind === 'patch' ? 'Commit message' : 'Cover letter'),
+    h('div', { class: 'card' }, renderMail(m.content)),
+    m.diff && renderDiff(m.diff),
+    h('div', { class: 'section' }, 'Comments'),
+    comments);
+  try {
+    comments.replaceChildren(...renderComments(await api(`comments/${kind}/${id}${q}`)));
+  } catch (err) {
+    comments.replaceChildren(h('div', { class: 'error' }, err.message));
+  }
 }
 
 // --- Reviews ---
@@ -633,8 +742,14 @@ async function viewReview(id, wantVer) {
                                      { version: sv.version, seqs });
   const reviewCard = (r) => {
     const card = h('div', { class: 'card review' });
+    const pat = r.seq ? (sv.patches || []).find((p) => p.seq === r.seq) : null;
+    const itemId = r.seq ? pat && pat.patch_id : sv.cover_id;
+    const label = r.seq ? `Patch ${r.seq}` : 'Cover letter';
     const header = h('div', { class: 'row' },
-      h('div', { class: 'grow name' }, r.seq ? `Patch ${r.seq}` : 'Cover letter'),
+      h('div', { class: 'grow name' }, itemId
+        ? h('a', { href: mailHref(r.seq ? 'patch' : 'cover', itemId, ser.upstream) },
+            label, pat ? h('span', { class: 'desc' }, ` ${pat.subject}`) : null)
+        : label),
       h('span', { class: `chip ${r.approved ? 'st-accepted' : 'st-changes-requested'}` },
         r.approved ? 'Reviewed-by' : 'comments'),
       h('span', { class: 'ver' }, REVIEW_STATUS[r.status] || r.status || ''));
@@ -750,13 +865,12 @@ async function viewReviewForm() {
 // Pages of the inbox read so far, so 'Load more' can add to them
 let inbox = null;
 
-function inboxDetails(s, ups, pw) {
+function inboxDetails(s, ups) {
   return h('div', { class: 'comments' },
     h('div', { class: 'list' }, s.patches.map((p, i) => h('div', { class: 'row' },
       h('span', { class: 'seq' }, i + 1),
       h('div', { class: 'grow' },
-        pw ? h('a', { href: `${pw}/patch/${p.id}/`, target: '_blank', rel: 'noopener' },
-               p.name) : p.name)))),
+        h('a', { href: mailHref('patch', p.id, ups) }, p.name))))),
     h('div', { class: 'actions' },
       confirmButton(s.reviewed ? 'Review again' : 'Review', 'btn small',
         () => startJob('review', { target: String(s.id), ups, drafts: true,
@@ -784,7 +898,7 @@ function inboxCard(s, ups, pw) {
   card.addEventListener('click', (ev) => {
     if (ev.target.closest('a, button, .comments')) return;
     if (box) { box.remove(); box = null; return; }
-    box = inboxDetails(s, ups, pw);
+    box = inboxDetails(s, ups);
     card.append(box);
   });
   const groups = ['all'];
@@ -1006,6 +1120,9 @@ async function route() {
     else if (page === 'reviews' && id) await viewReview(+id, ver ? +ver : null);
     else if (page === 'review' && id === 'new') await viewReviewForm();
     else if (page === 'inbox') await viewInbox();
+    else if ((page === 'patch' || page === 'cover') && id) {
+      await viewMail(page, +id, ver ? decodeURIComponent(ver) : null);
+    }
     else if (page === 'jobs' && id) await viewJob(+id);
     else if (page === 'jobs') await viewJobs();
     else if (page === 'reviews') await viewReviewList();

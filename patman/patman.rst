@@ -1820,6 +1820,13 @@ which is down only affects its own series.
 Tap the sync indicator at the top of the page to follow the output of a sync as
 it runs, to start one or to cancel one.
 
+Reading patches
+---------------
+
+Each patch and cover letter can be read on the page: tap 'Read' on a series, a
+patch name in a review, or a patch in the inbox to see the commit message, the
+diff (with a summary of the files changed) and the comments on patchwork.
+
 Reviewing from the page
 -----------------------
 

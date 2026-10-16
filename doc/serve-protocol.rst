@@ -185,6 +185,27 @@ setting.
 The comments on a patch (``kind`` is ``patch``) or cover letter (``cover``),
 given its patchwork ID: a list of Comment.
 
+``GET /api/patch/<id>``
+~~~~~~~~~~~~~~~~~~~~~~~
+
+A patch, given its patchwork ID:
+
+- ``id`` (int): patchwork ID
+- ``name`` (str): subject
+- ``date`` (str): when it was sent
+- ``submitter`` (str): name or email address of the sender
+- ``state`` (str or null): patchwork state; null for a cover letter
+- ``content`` (str): commit message, or the text of a cover letter
+- ``diff`` (str): the diff; empty for a cover letter
+- ``web_url`` (str): URL of the patch on patchwork
+- ``series`` (list): the series it is in, each with ``id``, ``name`` and
+  ``version``
+
+``GET /api/cover/<id>``
+~~~~~~~~~~~~~~~~~~~~~~~
+
+A cover letter, given its patchwork ID, in the same form as a patch.
+
 ``GET /api/upstreams``
 ~~~~~~~~~~~~~~~~~~~~~~
 
@@ -243,8 +264,8 @@ A reviewed series with all its versions:
 - ``patchwork_url`` (str or null): as for ``GET /api/series/<id>``
 - ``project`` (str or null): patchwork project of the upstream
 - ``versions`` (list of Version): newest first, each with ``notes`` (str or
-  null; notes from handling reviews of the series) and ``reviews`` (list of
-  Review, in order)
+  null; notes from handling reviews of the series), ``reviews`` (list of
+  Review, in order) and ``patches`` (list of Patch, in order)
 
 Acting on reviews
 -----------------

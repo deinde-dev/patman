@@ -20,6 +20,10 @@ API (all responses are JSON):
     GET  /api/series/<id>             All versions of a series with patches
     GET  /api/comments/<kind>/<id>    Comments on a 'patch' or 'cover', read
                                       from patchwork; ?ups=<upstream>
+    GET  /api/patch/<id>              A patch's commit message and diff, read
+                                      from patchwork; ?ups=<upstream>
+    GET  /api/cover/<id>              A cover letter, read from patchwork;
+                                      ?ups=<upstream>
     GET  /api/reviews                 Series reviewed with 'patman review'
     GET  /api/reviews/<id>            Reviews for each version of one
     GET  /api/todo                    Todo entries from the workflow table
@@ -142,6 +146,31 @@ def _review_info(rev):
         'approved': bool(rev.approved),
         'timestamp': rev.timestamp,
         'status': rev.status,
+    }
+
+
+def _mail_info(data):
+    """Pick out the useful fields from a patchwork patch or cover letter
+
+    Args:
+        data (dict): Patch or cover letter as returned by the patchwork API
+
+    Return:
+        dict: Information about the patch or cover letter
+    """
+    submitter = data.get('submitter') or {}
+    return {
+        'id': data.get('id'),
+        'name': data.get('name'),
+        'date': data.get('date'),
+        'submitter': submitter.get('name') or submitter.get('email'),
+        'state': data.get('state'),
+        'content': data.get('content') or '',
+        'diff': data.get('diff') or '',
+        'web_url': data.get('web_url'),
+        'series': [{'id': ser.get('id'), 'name': ser.get('name'),
+                    'version': ser.get('version')}
+                   for ser in data.get('series') or []],
     }
 
 
@@ -304,6 +333,8 @@ def get_review_detail(cser, idnum):
         info['notes'] = svr.notes
         info['reviews'] = [_review_info(rev) for rev in
                            cser.db.review_get_for_version(svr.idnum)]
+        info['patches'] = [_patch_info(pcm) for pcm in sorted(
+            cser.db.pcommit_get_list(svr.idnum), key=lambda pcm: pcm.seq)]
         versions.append(info)
     versions.sort(key=lambda item: item['version'], reverse=True)
     return {'id': idnum, 'name': name, 'desc': desc, 'upstream': ups,
@@ -938,6 +969,16 @@ class Server:
                 comments = await pwork.get_cover_comments(client, item_id)
         return web.json_response([_comment_info(c) for c in comments or []])
 
+    async def _mail(self, request):
+        item_id = int(request.match_info['item_id'])
+        pwork = self.get_pwork(request.query.get('ups') or None)
+        async with aiohttp.ClientSession() as client:
+            if request.match_info['kind'] == 'patch':
+                data = await pwork.get_patch(client, item_id)
+            else:
+                data = await pwork.get_cover(client, item_id)
+        return web.json_response(_mail_info(data))
+
     async def _sync_get(self, _request):
         return web.json_response(self.sync_state)
 
@@ -1106,6 +1147,8 @@ class Server:
         app.router.add_get('/api/todo', self._todo_list)
         app.router.add_get(r'/api/comments/{kind:patch|cover}/{item_id:\d+}',
                            self._comments)
+        app.router.add_get(r'/api/{kind:patch|cover}/{item_id:\d+}',
+                           self._mail)
         app.router.add_get('/api/sync', self._sync_get)
         app.router.add_post('/api/sync', self._sync_post)
         app.router.add_post('/api/sync/cancel', self._sync_cancel_post)

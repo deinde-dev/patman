@@ -96,6 +96,20 @@ class TestWebServer(unittest.TestCase, TestCommon):
                 'web_url': 'https://pw/comment/1/',
                 'headers': {'ignored': 'yes'},
             }]
+        if subpath == 'patches/1234/':
+            return {
+                'id': 1234, 'name': '[1/2] video: Add a driver',
+                'date': '2026-10-01T09:00:00', 'state': 'new',
+                'submitter': {'name': 'Fred', 'email': 'f@b.com'},
+                'content': 'Add a driver\n\nSigned-off-by: Fred',
+                'diff': '--- a/x.c\n+++ b/x.c\n@@ -1 +1 @@\n-old\n+new\n',
+                'web_url': 'https://pw/patch/1234/', 'headers': {'big': 1},
+                'series': [{'id': 99, 'name': 'video', 'version': 2,
+                            'url': 'https://pw/api/series/99/'}],
+            }
+        if subpath == 'covers/77/':
+            return {'id': 77, 'name': '[0/2] video', 'content': 'Cover text',
+                    'date': '2026-10-01T09:00:00', 'submitter': {}}
         if subpath == 'covers/77/comments/':
             return []
         raise ValueError(f"Unexpected request '{subpath}'")
@@ -217,6 +231,9 @@ class TestWebServer(unittest.TestCase, TestCommon):
             latest['reviews'][1])
         self.assertEqual(['old review'],
                          [r['body'] for r in data['versions'][1]['reviews']])
+        self.assertEqual([(1, 'a', 6)],
+                         [(p['seq'], p['subject'], p['patch_id'])
+                          for p in latest['patches']])
 
     def test_review_db(self):
         """Reviews can be read from a separate database"""
@@ -280,6 +297,24 @@ class TestWebServer(unittest.TestCase, TestCommon):
 
         status, _ = self.call(srv, 'GET', '/api/comments/fred/77')
         self.assertEqual(404, status)
+
+    def test_patch(self):
+        """A patch or cover letter can be read from patchwork"""
+        srv = self.make_server()
+        status, data = self.call(srv, 'GET', '/api/patch/1234')
+        self.assertEqual(200, status)
+        self.assertEqual(
+            {'id': 1234, 'name': '[1/2] video: Add a driver',
+             'date': '2026-10-01T09:00:00', 'submitter': 'Fred',
+             'state': 'new', 'content': 'Add a driver\n\nSigned-off-by: Fred',
+             'diff': '--- a/x.c\n+++ b/x.c\n@@ -1 +1 @@\n-old\n+new\n',
+             'web_url': 'https://pw/patch/1234/',
+             'series': [{'id': 99, 'name': 'video', 'version': 2}]}, data)
+
+        status, data = self.call(srv, 'GET', '/api/cover/77')
+        self.assertEqual(200, status)
+        self.assertEqual(('Cover text', '', None),
+                         (data['content'], data['diff'], data['submitter']))
 
     def test_pwork_per_upstream(self):
         """Each upstream uses its own patchwork URL"""
