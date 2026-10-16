@@ -1918,6 +1918,26 @@ holds it::
 patchwork servers are still read from the main database. ``patman serve``
 shows the reviews from the same place.
 
+To move existing reviews into the review database, or back again::
+
+    patman database -n split    # show what would be moved
+    patman database split       # move reviews to the review database
+    patman database join        # move them back to the main database
+
+Series can also be copied from another database, such as one from a
+different machine, with ``patman database merge DIR`` (or the path of the
+database file). Use ``--own`` or ``--reviews`` to copy just one kind of
+series, and ``-R`` to copy into the review database. The other database is
+not changed. Missing upstreams are added to the main database too.
+
+Your own series and series you have reviewed are always kept apart: if a
+series has the same name as one of the other kind, it is left alone and
+reported. When a series is in both databases, its new versions are added,
+but a version which is in both is left alone. When moving, a series which
+cannot be moved completely (for example because it has a version which is
+already in the other database) is left where it is, so nothing is lost. Each database
+which is changed is first backed up to ``.patman.db.bak`` alongside it.
+
 The connection is opened in WAL mode (``journal_mode=WAL``,
 ``synchronous=NORMAL``) with a 30-second busy timeout, which lets multiple
 patman invocations share the database safely: concurrent readers do not block

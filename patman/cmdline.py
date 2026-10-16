@@ -22,6 +22,7 @@ HAS_TESTS = os.path.exists(PATMAN_DIR / "func_test.py")
 
 # Aliases for subcommands
 ALIASES = {
+    'database': ['db'],
     'series': ['s', 'ser'],
     'status': ['st'],
     'patchwork': ['pw'],
@@ -731,6 +732,53 @@ def add_review_subparser(subparsers):
     return review
 
 
+def add_database_subparser(subparsers):
+    """Add the 'database' subparser
+
+    Args:
+        subparsers (argparse action): Subparser parent
+
+    Return:
+        ArgumentParser: database subparser
+    """
+    dbp = subparsers.add_parser(
+        'database', aliases=ALIASES['database'],
+        help='Copy series between databases, e.g. to keep reviews apart')
+    dbp.add_argument(
+        '-n', '--dry-run', action='store_true', dest='dry_run', default=False,
+        help='Show what would be done, without changing anything')
+    dbp.add_argument(
+        '--review-db-dir', type=str, default=None, metavar='DIR',
+        help='Directory holding a separate database for reviews (the '
+             "'review_db_dir' setting)")
+    dbp.defaults_cmds = [
+        ['merge', 'dummy'],
+    ]
+    db_subparsers = dbp.add_subparsers(dest='subcmd')
+
+    merge = db_subparsers.add_parser(
+        'merge', help='Copy series from another database into this one')
+    merge.add_argument(
+        'source',
+        help='Directory holding the .patman.db to copy from, or the file')
+    kind = merge.add_mutually_exclusive_group()
+    kind.add_argument('--own', action='store_true',
+                      help='Copy only your own series, not reviews')
+    kind.add_argument('--reviews', action='store_true',
+                      help='Copy only reviews, not your own series')
+    merge.add_argument(
+        '-R', '--to-review-db', action='store_true',
+        help='Copy into the review database rather than the main one')
+
+    db_subparsers.add_parser(
+        'split', help='Move reviews from the main database to the review '
+        "database (see 'review_db_dir')")
+    db_subparsers.add_parser(
+        'join', help='Move reviews from the review database back to the main '
+        'database')
+    return dbp
+
+
 def add_serve_subparser(subparsers):
     """Add the 'serve' subparser
 
@@ -806,6 +854,7 @@ def setup_parser():
 
     subparsers = parser.add_subparsers(dest='cmd')
     add_send_subparser(subparsers)
+    database = add_database_subparser(subparsers)
     patchwork = add_patchwork_subparser(subparsers)
     review = add_review_subparser(subparsers)
     series = add_series_subparser(subparsers)
@@ -822,6 +871,7 @@ def setup_parser():
 
     parsers = {
         'main': parser,
+        'database': database,
         'review': review,
         'series': series,
         'patchwork': patchwork,
@@ -875,7 +925,8 @@ def parse_args(argv=None, config_fname=None, parsers=None):
             args.cmd = full
         if 'subcmd' in args and args.subcmd in aliases:
             args.subcmd = full
-    if args.cmd in ['series', 'upstream', 'patchwork', 'workflow'] and not args.subcmd:
+    if args.cmd in ['database', 'series', 'upstream', 'patchwork',
+                    'workflow'] and not args.subcmd:
         parser.parse_args([args.cmd, '--help'])
 
     return args

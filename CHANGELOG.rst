@@ -23,6 +23,9 @@ Added
 - Reviews which have not been sent can be edited on the ``patman serve`` page.
 - Reviews of other people's series can be kept in a separate database, given
   by the ``review_db_dir`` setting or ``--review-db-dir``.
+- ``patman database`` (alias ``db``) moves reviews between the main and review
+  databases with ``split`` and ``join``, and copies series from another
+  database with ``merge``.
 
 Changed
 ~~~~~~~
