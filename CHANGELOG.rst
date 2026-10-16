@@ -37,6 +37,8 @@ Added
   creates a Gmail draft of it, threaded as a reply.
 - ``review --revise`` has the agent change the unsent reviews of a series
   following a note, also from the ``patman serve`` page.
+- ``review --send`` sends the Gmail drafts of a series' reviews, also from the
+  ``patman serve`` page.
 
 Changed
 ~~~~~~~

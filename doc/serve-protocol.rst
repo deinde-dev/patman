@@ -325,6 +325,11 @@ Create the Gmail drafts of a reviewed series again. The body may have
 ``version`` (int), defaulting to the latest, and ``seqs`` (list of int), the
 patches to act on, using 0 for the cover letter; the default is all of them.
 
+``POST /api/reviews/<id>/send``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Send the Gmail drafts of a reviewed series. The body is as for ``redraft``.
+
 ``POST /api/reviews/<id>/revise``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

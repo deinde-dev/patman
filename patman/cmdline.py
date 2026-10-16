@@ -645,6 +645,10 @@ def add_review_subparser(subparsers):
         help='Recreate Gmail drafts from the stored reviews even when a '
              'draft already exists, to recover after an error')
     review.add_argument(
+        '--send', action='store_true',
+        help='Send the Gmail drafts of the reviews of the series (with -i, '
+             'only those patches; with -n, just show what would be sent)')
+    review.add_argument(
         '--revise', type=str, metavar='NOTE',
         help='Ask the agent to change the stored reviews of the series as '
              'the note says, e.g. "Drop the comments about style" (with '

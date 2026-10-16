@@ -346,6 +346,34 @@ def delete_draft(service, draft_id):
             raise
 
 
+def send_draft(service, draft_id):
+    """Send a Gmail draft
+
+    The text is read first, since it may have been changed in Gmail after
+    the draft was created.
+
+    Args:
+        service (googleapiclient.discovery.Resource): Gmail API service
+        draft_id (str): ID of the draft to send
+
+    Returns:
+        tuple or None: (body, Gmail message ID, thread ID) of the message
+            sent, or None if the draft no longer exists
+    """
+    from googleapiclient.errors import HttpError
+    try:
+        draft = service.users().drafts().get(
+            userId='me', id=draft_id, format='full').execute()
+    except HttpError as exc:
+        if exc.resp.status == 404:
+            return None
+        raise
+    body = _extract_body(draft.get('message', {}).get('payload', {})) or ''
+    msg = service.users().drafts().send(
+        userId='me', body={'id': draft_id}).execute()
+    return body, msg.get('id'), msg.get('threadId')
+
+
 def _decode_hdr(val):
     """Decode and unfold an email header value
 

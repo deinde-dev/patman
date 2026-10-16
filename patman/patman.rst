@@ -1480,6 +1480,15 @@ the Gmail drafts of the reviews which change::
 The review approves the patch (with a ``Reviewed-by`` tag) if the note says
 the patch is fine, and stops approving it if the note asks for a change.
 
+Once you are happy with the drafts, you can send them without opening Gmail.
+``--send`` sends the Gmail drafts of a series' reviews, the cover letter's
+first, and records each review as sent, with the text which was sent, in
+case you changed it in Gmail. Use ``-i`` to send only some of them, and
+``-n`` to see what would be sent::
+
+    patman review -s 497923 -U us --send -n
+    patman review -s 497923 -U us --send -i 0,2
+
 Use ``--apply-only`` to download and apply patches without running the
 review -- useful for checking that patches apply cleanly.
 
@@ -1921,6 +1930,9 @@ it and say what should change, or tap 'Revise this' under one comment to talk
 about just that part. 'Revise all' at the top applies a note to every unsent
 review of the series, e.g. 'drop the comments about style'. These run ``patman
 review --revise``, updating the Gmail drafts if selected.
+
+'Send' under a review sends its Gmail draft, and 'Send N drafts' at the top
+sends them all; each needs a second tap to confirm.
 
 Replies to reviews
 ------------------

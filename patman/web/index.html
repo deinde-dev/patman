@@ -767,6 +767,7 @@ async function viewReview(id, wantVer) {
                                      { version: sv.version, seqs });
   const revise = (seqs, part, note, drafts, msg) => startJob(`reviews/${id}/revise`,
     { version: sv.version, seqs, part, note, drafts }, msg);
+  const send = (seqs) => startJob(`reviews/${id}/send`, { version: sv.version, seqs });
   const reviewCard = (r) => {
     const card = h('div', { class: 'card review' });
     const pat = r.seq ? (sv.patches || []).find((p) => p.seq === r.seq) : null;
@@ -790,13 +791,15 @@ async function viewReview(id, wantVer) {
           'Edit'),
         h('button', { class: 'btn light small', onclick: () => ask(null) },
           'Revise'),
-        confirmButton('Redraft', 'btn light small', () => redraft([r.seq]))),
+        confirmButton('Redraft', 'btn light small', () => redraft([r.seq])),
+        r.status === 'draft' && confirmButton('Send', 'btn small', () => send([r.seq]))),
       ...(r.replies || []).map(replyBox));
     show();
     return card;
   };
   const reviews = sv.reviews.map(reviewCard);
   const anyUnsent = sv.reviews.some(unsent);
+  const drafts = sv.reviews.filter((r) => r.status === 'draft').length;
   const reviseAll = h('div', {});
   const askAll = () => reviseAll.replaceChildren(h('div', { class: 'card' },
     h('div', { class: 'name' }, 'Revise all the reviews'),
@@ -807,6 +810,8 @@ async function viewReview(id, wantVer) {
     anyUnsent && confirmButton('Redraft all', 'btn light small', () => redraft([])),
     anyUnsent && h('button', { class: 'btn light small', onclick: askAll },
                    'Revise all'),
+    drafts > 0 && confirmButton(drafts === 1 ? 'Send the draft' : `Send ${drafts} drafts`,
+                                'btn small', () => send([])),
     confirmButton('Review again', 'btn light small', () => startJob('review',
       { target: sv.link, ups: ser.upstream, drafts: true, force: true })),
     ser.patchwork_url && h('a', { class: 'btn light small', target: '_blank',

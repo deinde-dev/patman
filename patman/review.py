@@ -2550,6 +2550,94 @@ def _draft_stored_reviews(args, reviews, series_data, pwork, cser):
     create_drafts(ctx, args, review_bodies, review_ids)
 
 
+def _do_stored(args, pwork, cser, link):
+    """Handle --send and --revise, which act on stored reviews
+
+    Args:
+        args (Namespace): Command-line arguments
+        pwork (Patchwork): Configured patchwork instance
+        cser (Cseries): Open cseries instance
+        link (str): Patchwork series link/ID
+
+    Returns:
+        int: 0 on success, 1 on failure
+    """
+    if args.send:
+        return _do_send(args, cser, link)
+    return _do_revise(args, pwork, cser, link)
+
+
+def _do_send(args, cser, link):
+    """Send the Gmail drafts of the reviews of a series
+
+    The cover letter's review is sent first, then the patches' in order.
+    With -i, only those patches' drafts are sent. Each review is recorded as
+    sent, with the text which was sent, since the draft may have been
+    changed in Gmail.
+
+    Args:
+        args (Namespace): Command-line arguments
+        cser (Cseries): Open cseries instance
+        link (str): Patchwork series link/ID
+
+    Returns:
+        int: 0 on success, 1 if any draft could not be sent
+    """
+    existing = cser.db.series_find_by_link(link)
+    if not existing:
+        raise ValueError(f'Series {link} has not been reviewed')
+    _, name, version, svid = existing
+    sel = parse_patch_selection(args.patches)
+    reviews = sorted((rev for rev in cser.db.review_get_for_version(svid)
+                      if rev.status == database.REVIEW_DRAFT and
+                      rev.draft_id and (not sel or rev.seq in sel)),
+                     key=lambda rev: rev.seq)
+    if not reviews:
+        raise ValueError(f"No Gmail drafts to send in '{name}' v{version}")
+    if args.dry_run:
+        for rev in reviews:
+            tout.notice(f'Dry run: would send the review of '
+                        f'{_review_label(rev.seq)}')
+        return 0
+    if not gmail.check_available():
+        return 1
+
+    service = gmail.get_service(getattr(args, 'gmail_account', None))
+    failed = 0
+    for rev in reviews:
+        label = _review_label(rev.seq)
+        try:
+            result = gmail.send_draft(service, rev.draft_id)
+        except Exception as exc:  # pylint: disable=W0718
+            tout.error(f'Cannot send the review of {label}: {exc}')
+            failed += 1
+            continue
+        if not result:
+            tout.warning(f'The draft of the review of {label} has gone; '
+                         'not sent')
+            failed += 1
+            continue
+        body, msg_id, thread_id = result
+        cser.db.review_set_sent(rev.idnum, body or rev.body, msg_id,
+                                thread_id)
+        cser.commit()
+        tout.notice(f'Sent the review of {label}')
+    tout.notice(f'Sent {len(reviews) - failed} of {len(reviews)} review(s)')
+    return 1 if failed else 0
+
+
+def _review_label(seq):
+    """Describe which part of a series a review is for
+
+    Args:
+        seq (int): Patch number, 0 for the cover letter
+
+    Returns:
+        str: e.g. 'patch 2' or 'the cover letter'
+    """
+    return f'patch {seq}' if seq else 'the cover letter'
+
+
 _REVISE_PROMPT = '''You are a U-Boot maintainer. You drafted the code
 reviews in the file below, but they have not been sent yet. The reviewer has
 read them and wants them changed, as described in their note.
@@ -2730,8 +2818,7 @@ def _do_revise(args, pwork, cser, link):
             body = changed[rev.seq]
             cser.db.review_set_body(rev.idnum, body,
                                     'Reviewed-by:' in body)
-            label = f'patch {rev.seq}' if rev.seq else 'the cover letter'
-            tout.notice(f'Revised the review of {label}')
+            tout.notice(f'Revised the review of {_review_label(rev.seq)}')
             print(body)
             print()
     cser.commit()
@@ -3787,8 +3874,8 @@ def do_review(args, pwork, cser):
     elif not link:
         link = search_series(pwork, args.title, getattr(args, 'version', None))
 
-    if getattr(args, 'revise', None):
-        return _do_revise(args, pwork, cser, link)
+    if getattr(args, 'send', False) or getattr(args, 'revise', None):
+        return _do_stored(args, pwork, cser, link)
     return _review_link(args, pwork, cser, link)
 
 

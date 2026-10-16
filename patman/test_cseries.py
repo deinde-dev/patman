@@ -5919,6 +5919,78 @@ Date:   .*
             review._do_revise(args, None, cser, '123')
         self.assertIn('No unsent reviews', str(exc.exception))
 
+    def test_review_send(self):
+        """The Gmail drafts of a series' reviews can be sent"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'Fred series', None)
+        db.series_set_source(sid, 'review')
+        svid = db.ser_ver_add(sid, 1, link='123')
+        ids = {}
+        for seq in (2, 0, 1, 3):
+            ids[seq] = db.review_add(svid, seq, f'Review {seq}', False,
+                                     '2026-10-01T00:00:00')
+        for seq in (0, 1, 2):
+            db.review_set_draft_id(ids[seq], f'd{seq}')
+        db.commit()
+
+        def send(_service, draft_id):
+            if draft_id == 'd1':
+                return None
+            return f'Edited {draft_id}', f'm-{draft_id}', 't1'
+
+        def run(*argv):
+            args = cmdline.parse_args(['review', '-s', '123', '--send',
+                                       *argv], config_fname=False)
+            with mock.patch.object(review.gmail, 'check_available',
+                                   return_value=True), \
+                    mock.patch.object(review.gmail, 'get_service'), \
+                    mock.patch.object(review.gmail, 'send_draft',
+                                      side_effect=send) as sender, \
+                    terminal.capture() as (out, err):
+                ret = review._do_send(args, cser, '123')
+            return ret, [call.args[1] for call in sender.call_args_list], \
+                out.getvalue() + err.getvalue()
+
+        # A dry run sends nothing
+        ret, sent, out = run('-n', '-i', '0,2')
+        self.assertEqual((0, []), (ret, sent))
+        self.assertIn('would send the review of the cover letter', out)
+        self.assertIn('would send the review of patch 2', out)
+
+        # The cover letter goes first; a draft which has gone is reported
+        ret, sent, out = run()
+        self.assertEqual((1, ['d0', 'd1', 'd2']), (ret, sent))
+        self.assertIn('The draft of the review of patch 1 has gone', out)
+        self.assertIn('Sent 2 of 3 review(s)', out)
+        rev = db.review_get(ids[2])
+        self.assertEqual(('sent', 'Edited d2', 'm-d2', 't1'),
+                         (rev.status, rev.body, rev.gmail_msg_id,
+                          rev.gmail_thread_id))
+        self.assertEqual('draft', db.review_get(ids[1]).status)
+        self.assertEqual('new', db.review_get(ids[3]).status)
+
+        # Only patch 1's draft is left
+        ret, sent, _ = run()
+        self.assertEqual(['d1'], sent)
+        with self.assertRaises(ValueError) as exc:
+            run('-i', '2')
+        self.assertIn('No Gmail drafts to send', str(exc.exception))
+
+    def test_gmail_send_draft(self):
+        """A draft is read, then sent"""
+        service = mock.MagicMock()
+        drafts = service.users.return_value.drafts.return_value
+        body = base64.urlsafe_b64encode(b'Hi Fred').decode()
+        drafts.get.return_value.execute.return_value = {
+            'message': {'payload': {'mimeType': 'text/plain',
+                                    'body': {'data': body}}}}
+        drafts.send.return_value.execute.return_value = {
+            'id': 'm1', 'threadId': 't1'}
+        self.assertEqual(('Hi Fred', 'm1', 't1'),
+                         gmail.send_draft(service, 'd1'))
+        drafts.send.assert_called_once_with(userId='me', body={'id': 'd1'})
+
     def test_review_find_base(self):
         """The base commit or branch is found in a cover letter"""
         find = review.find_series_base

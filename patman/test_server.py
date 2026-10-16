@@ -600,6 +600,28 @@ class TestWebServer(unittest.TestCase, TestCommon):
         status, _ = self.call(srv, 'POST', '/api/jobs/1/cancel')
         self.assertEqual(409, status)
 
+    def test_send_reviews(self):
+        """The drafts of one review, or all of them, can be sent"""
+        series_id, _ = self.add_series('rev', 'Somebody else',
+                                       {1: [('a', 'new', 5, 0)]}, ups='us',
+                                       source='review')
+        srv = self.make_server()
+        srv.get_patman_cmd = lambda *args: ['echo', *args]
+        path = f'/api/reviews/{series_id}/send'
+        res = self.run_jobs(srv, [
+            ('POST', path, {'seqs': [0]}),
+            ('POST', path, {}),
+            ('POST', path, {'seqs': 'all'}),
+        ])
+        self.assertEqual([202, 202, 404], [status for status, _ in res])
+        self.assertEqual(["Send the cover letter of 'Somebody else' v1",
+                          "Send reviews of 'Somebody else' v1"],
+                         [res[0][1]['title'], res[1][1]['title']])
+        self.assertEqual(
+            ['review -s 100 --send -i 0 -U us', 'review -s 100 --send -U us'],
+            [job.state['results'][0]['output'].strip()
+             for job in reversed(srv.get_jobs())])
+
     def test_revise_review(self):
         """The agent can be asked to change a review, part of one, or all"""
         series_id, _ = self.add_series('rev', 'Somebody else',
