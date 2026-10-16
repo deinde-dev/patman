@@ -1740,10 +1740,18 @@ To see the replies which still need a response, and act on them::
     patman review --replies             # list them, with their IDs
     patman review --suggest-reply 12    # ask the agent (again) for a response
     patman review --draft-reply 12      # create a Gmail draft of it
+    patman review --send-reply 12       # send it
 
 The draft is threaded as a reply to the reply, with a 'Re:' subject, and is
-copied to everyone the reply went to. The response can also be edited, and
-the draft created, from the Reviews tab of ``patman serve``.
+copied to everyone the reply went to. ``--send-reply`` sends the draft as it
+is in Gmail, so any changes made there are kept, and records the text which
+was sent. If the response has no draft yet, or has been changed since the
+draft was created, the draft is created first. If the draft has been deleted
+in Gmail, nothing is sent.
+
+The response can also be edited, drafted and sent from the Reviews tab of
+``patman serve``: tap 'Send' under it, or 'Edit response' then 'Save and
+send'. Both need a second tap to confirm.
 
 Scanning for new versions
 -------------------------
@@ -1951,9 +1959,9 @@ Replies to reviews
 When someone replies to one of your reviews (found by ``review --sync``, so use
 ``serve -r``), the reply is shown below the review, along with any response the
 agent suggests. The Reviews tab has a 'Needs reply' filter. You can edit the
-response, or write one, then create a Gmail draft which is threaded as a reply.
-You can also tap 'Suggest a response' to have the agent suggest one (again), or
-note that no reply is needed.
+response, or write one, then create a Gmail draft which is threaded as a reply,
+or send it. You can also tap 'Suggest a response' to have the agent suggest one
+(again), or note that no reply is needed.
 
 Jobs
 ----

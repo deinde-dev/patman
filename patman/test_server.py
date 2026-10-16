@@ -799,15 +799,18 @@ class TestWebServer(unittest.TestCase, TestCommon):
             ('POST', f'/api/replies/{first}',
              {'response': 'Because of this', 'draft': True}),
             ('POST', f'/api/replies/{first}/suggest', None),
+            ('POST', f'/api/replies/{first}/send', None),
             ('POST', f'/api/replies/{second}', {'response': 'x'}),
+            ('POST', f'/api/replies/{second}/send', None),
             ('POST', '/api/replies/999', {'skip': True}),
         ])
-        self.assertEqual([200, 202, 202, 409, 404],
+        self.assertEqual([200, 202, 202, 202, 409, 409, 404],
                          [status for status, _ in res])
         self.assertEqual(('suggested', 'Because'),
                          (res[0][1]['status'], res[0][1]['response']))
         self.assertEqual(
-            [f'review --draft-reply {first}', f'review --suggest-reply {first}'],
+            [f'review --draft-reply {first}', f'review --suggest-reply {first}',
+             f'review --send-reply {first}'],
             [job.state['results'][0]['output'].strip()
              for job in reversed(srv.get_jobs())])
         self.assertEqual('Because of this', db.reply_get(first).response)

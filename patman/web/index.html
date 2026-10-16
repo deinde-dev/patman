@@ -1083,9 +1083,11 @@ function replyBox(rp) {
       rp.status !== 'sent' && h('div', { class: 'actions' },
         h('button', { class: 'btn light small', onclick: edit },
           rp.response ? 'Edit response' : 'Write a response'),
+        rp.response && confirmButton('Send', 'btn small',
+                                     () => startJob(`replies/${rp.id}/send`, {})),
         rp.response && confirmButton(
           rp.status === 'draft' ? 'Update Gmail draft' : 'Create Gmail draft',
-          'btn small', () => startJob(`replies/${rp.id}`, { draft: true })),
+          'btn light small', () => startJob(`replies/${rp.id}`, { draft: true })),
         confirmButton('Suggest a response', 'btn light small',
                       () => startJob(`replies/${rp.id}/suggest`, {})),
         waiting && h('button', { class: 'btn light small', onclick: async () => {
@@ -1098,7 +1100,7 @@ function replyBox(rp) {
     text.value = rp.response || quoteReply(rp);
     const draft = h('input', { type: 'checkbox', checked: true });
     const msg = h('div', { class: 'msg' });
-    const save = h('button', { class: 'btn small', onclick: async () => {
+    const save = h('button', { class: 'btn light small', onclick: async () => {
       save.disabled = true;
       msg.textContent = '';
       try {
@@ -1115,10 +1117,22 @@ function replyBox(rp) {
         save.disabled = false;
       }
     } }, 'Save');
+    // Sending creates the Gmail draft from the saved response first
+    const send = confirmButton('Save and send', 'btn small', async () => {
+      msg.textContent = '';
+      try {
+        await api(`replies/${rp.id}`, { json: { response: text.value } });
+      } catch (err) {
+        msg.textContent = err.message;
+        return;
+      }
+      startJob(`replies/${rp.id}/send`, {}, msg);
+    });
     box.replaceChildren(h('div', { class: 'who' }, `Response to ${rp.sender}`),
       h('div', { class: 'form' }, text,
-        h('label', { class: 'check' }, draft, 'Create the Gmail draft'),
-        h('div', { class: 'actions' }, save,
+        h('label', { class: 'check' }, draft,
+          rp.status === 'draft' ? 'Update the Gmail draft' : 'Create the Gmail draft'),
+        h('div', { class: 'actions' }, send, save,
           h('button', { class: 'btn light small', onclick: show }, 'Cancel')),
         msg));
     text.focus();

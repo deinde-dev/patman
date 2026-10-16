@@ -54,6 +54,8 @@ API (all responses are JSON):
                                       review; {"response": str, "skip": bool,
                                       "draft": bool}
     POST /api/replies/<id>/suggest    Ask the agent to suggest a response
+    POST /api/replies/<id>/send       Send the response, creating its Gmail
+                                      draft first if needed
 
 Jobs (syncs and reviews) run one at a time, in the order they are started.
 """
@@ -1466,6 +1468,16 @@ class Server:
         return self._review_job(f'Suggest a response to reply {reply.idnum}',
                                 '--suggest-reply', str(reply.idnum))
 
+    async def _reply_send(self, request):
+        reply = self.rcser.db.reply_get(int(request.match_info['idnum']))
+        if reply.status == database.REPLY_SENT:
+            return web.json_response(
+                {'error': 'The response has already been sent'}, status=409)
+        if not (reply.response or '').strip():
+            raise ValueError('There is no response to send')
+        return self._review_job(f'Send the response to reply {reply.idnum}',
+                                '--send-reply', str(reply.idnum))
+
     async def _index(self, _request):
         return web.FileResponse(os.path.join(WEB_DIR, 'index.html'))
 
@@ -1504,6 +1516,8 @@ class Server:
         app.router.add_post(r'/api/review-items/{idnum:\d+}',
                             self._review_item)
         app.router.add_post(r'/api/replies/{idnum:\d+}', self._reply)
+        app.router.add_post(r'/api/replies/{idnum:\d+}/send',
+                            self._reply_send)
         app.router.add_post(r'/api/replies/{idnum:\d+}/suggest',
                             self._reply_suggest)
         app.router.add_get('/', self._index)

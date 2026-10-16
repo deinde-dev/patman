@@ -2211,6 +2211,42 @@ def _draft_response(service, ctx, reply_id, account=None):
     tout.notice(f'Reply {reply_id}: created Gmail draft of the response')
 
 
+def _send_response(service, ctx, reply_id, account=None):
+    """Send our response to a reply
+
+    If the response has no Gmail draft, or has been changed since its draft
+    was created, a new draft is created first. The draft is read just before
+    it is sent, since it may have been changed in Gmail, and the text which
+    is sent is recorded.
+
+    Args:
+        service: Gmail API service
+        ctx (ReviewContext): Review context
+        reply_id (int): ID of the reply
+        account (str or None): Gmail account in use
+
+    Raises:
+        ValueError: There is no response, it has already been sent or its
+            draft has been deleted in Gmail
+    """
+    db = ctx.cser.db
+    reply = db.reply_get(reply_id)
+    if reply.status != database.REPLY_DRAFT or not reply.draft_id:
+        _draft_response(service, ctx, reply_id, account)
+        reply = db.reply_get(reply_id)
+    result = gmail.send_draft(service, reply.draft_id)
+    if not result:
+        db.reply_set_status(reply_id, database.REPLY_SUGGESTED)
+        ctx.cser.commit()
+        raise ValueError(f'The draft of the response to reply {reply_id} '
+                         'has been deleted, so it is not sent')
+    body = result[0]
+    db.reply_set_response(reply_id, body or reply.response,
+                          database.REPLY_SENT)
+    ctx.cser.commit()
+    tout.notice(f'Reply {reply_id}: sent the response')
+
+
 def _sync_reply_drafts(service, cser):
     """Check whether drafts of our responses have been sent or deleted
 
@@ -2277,7 +2313,7 @@ def _list_replies(cser):
 
 
 def _do_reply_cmd(args, cser):
-    """Handle --replies, --suggest-reply and --draft-reply
+    """Handle --replies, --suggest-reply, --draft-reply and --send-reply
 
     Args:
         args (Namespace): Command-line arguments
@@ -2291,12 +2327,15 @@ def _do_reply_cmd(args, cser):
     ctx = _make_reply_ctx(args, cser)
     if args.suggest_reply:
         _suggest_response(ctx, args.suggest_reply)
-    if args.draft_reply:
+    if args.draft_reply or args.send_reply:
         if not gmail.check_available():
             return 1
         account = getattr(args, 'gmail_account', None)
-        _draft_response(gmail.get_service(account), ctx, args.draft_reply,
-                        account)
+        service = gmail.get_service(account)
+        if args.draft_reply:
+            _draft_response(service, ctx, args.draft_reply, account)
+        if args.send_reply:
+            _send_response(service, ctx, args.send_reply, account)
     return 0
 
 
@@ -3848,7 +3887,8 @@ def do_review(args, pwork, cser):
 
     if (getattr(args, 'list_replies', False) or
             getattr(args, 'suggest_reply', None) or
-            getattr(args, 'draft_reply', None)):
+            getattr(args, 'draft_reply', None) or
+            getattr(args, 'send_reply', None)):
         return _do_reply_cmd(args, cser)
 
     if args.relink:

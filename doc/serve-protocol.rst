@@ -394,6 +394,13 @@ giving status 409.
 
 Have the agent suggest a response to a reply, giving status 202 and the Job.
 
+``POST /api/replies/<id>/send``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Send the response to a reply, creating or updating its Gmail draft first if
+needed, giving status 202 and the Job. A response which has been sent gives
+status 409, and there must be a response to send.
+
 Todo
 ----
 

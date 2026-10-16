@@ -24,7 +24,7 @@ Added
   each chunk of a diff.
 - Reviews which have not been sent can be edited on the ``patman serve`` page.
 - The ``patman serve`` page shows replies to reviews, and a response can be
-  edited and drafted there.
+  edited, drafted and sent there.
 - The ``patman serve`` sync fetches the upstreams which reviews use, so that
   reviews apply patches to up-to-date branches.
 - Reviews of other people's series can be kept in a separate database, given
@@ -36,6 +36,8 @@ Added
   those sent in the last 14 days. ``review --replies`` lists them,
   ``--suggest-reply`` asks the agent for a response and ``--draft-reply``
   creates a Gmail draft of it, threaded as a reply.
+- ``review --send-reply`` sends the response to a reply, creating its Gmail
+  draft first if needed.
 - ``review --revise`` has the agent change the unsent reviews of a series
   following a note, also from the ``patman serve`` page.
 - ``review --send`` sends the Gmail drafts of a series' reviews, also from the

@@ -5711,6 +5711,40 @@ Date:   .*
             review._draft_response(draft_svc, ctx, reply.idnum)
         self.assertIn('There is no response', str(exc.exception))
 
+        # Sending a response with no draft creates one first, and records
+        # the text which was sent, which may have been changed in Gmail
+        db.reply_set_response(reply.idnum, 'My answer',
+                              database.REPLY_SUGGESTED)
+        with mock.patch.object(gmail, 'create_draft',
+                               return_value={'id': 'd3'}) as create, \
+                mock.patch.object(gmail, 'delete_draft'), \
+                mock.patch.object(gmail, 'send_draft',
+                                  return_value=('Edited', 'm3', 't3')) as send, \
+                terminal.capture() as (out, _):
+            review._send_response(draft_svc, ctx, reply.idnum)
+        self.assertEqual('My answer', create.call_args[0][3])
+        send.assert_called_once_with(draft_svc, 'd3')
+        self.assertIn('sent the response', out.getvalue())
+        reply = db.reply_get(reply.idnum)
+        self.assertEqual(('sent', 'Edited'), (reply.status, reply.response))
+        with self.assertRaises(ValueError) as exc:
+            review._send_response(draft_svc, ctx, reply.idnum)
+        self.assertIn('has been sent', str(exc.exception))
+
+        # An existing draft is sent as it is; if it has been deleted in
+        # Gmail, nothing is sent
+        db.reply_set_response(reply.idnum, 'Again', database.REPLY_SUGGESTED)
+        db.reply_set_status(reply.idnum, database.REPLY_DRAFT, 'd4')
+        with mock.patch.object(gmail, 'create_draft') as create, \
+                mock.patch.object(gmail, 'send_draft',
+                                  return_value=None) as send:
+            with self.assertRaises(ValueError) as exc:
+                review._send_response(draft_svc, ctx, reply.idnum)
+        self.assertIn('has been deleted', str(exc.exception))
+        create.assert_not_called()
+        send.assert_called_once_with(draft_svc, 'd4')
+        self.assertEqual('suggested', db.reply_get(reply.idnum).status)
+
         # Deleting the review deletes its replies
         db.review_delete_for_version(svid)
         self.assertEqual([], db.reply_get_by_status(['skip']))

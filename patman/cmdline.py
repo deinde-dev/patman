@@ -715,6 +715,10 @@ def add_review_subparser(subparsers):
         help='Create a Gmail draft of the response to a reply, threaded as a '
              'reply to it')
     review.add_argument(
+        '--send-reply', type=int, metavar='ID',
+        help='Send the response to a reply, creating its Gmail draft first if '
+             'needed')
+    review.add_argument(
         '--sync', action='store_true',
         help='Check if review drafts have been sent and record the '
              'final email content')
