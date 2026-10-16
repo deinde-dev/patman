@@ -27,14 +27,25 @@ API (all responses are JSON):
                                       the output so far
     POST /api/sync                    Start a sync now
     POST /api/sync/cancel             Stop the sync which is running
+    GET  /api/upstreams               Upstreams which have a patchwork server
+    GET  /api/jobs                    Background jobs, newest first
+    GET  /api/jobs/<id>               One job, including its output so far
+    POST /api/jobs/<id>/cancel        Stop a job
+    POST /api/review                  Start a review; see parse_review_req()
+    POST /api/review/scan             Run 'review --scan'; {"drafts": bool}
+    POST /api/reviews/<id>/redraft    Recreate Gmail drafts for a reviewed
+                                      series; {"version": n, "seqs": [n...]}
+
+Jobs (syncs and reviews) run one at a time, in the order they are started.
 """
 
 import asyncio
-from collections import Counter
+from collections import Counter, OrderedDict
 from datetime import datetime
 import hmac
 import ipaddress
 import os
+import re
 import signal
 import sys
 
@@ -50,8 +61,11 @@ from patman.workflow import Wtype
 # Directory holding the web page and its assets
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web')
 
-# Maximum amount of output to keep from each sync command
-MAX_SYNC_OUTPUT = 20000
+# Maximum amount of output to keep from each command run by a job
+MAX_JOB_OUTPUT = 20000
+
+# Maximum number of jobs to remember
+MAX_JOBS = 20
 
 def _state_counts(pcommits):
     """Count the patchwork states of a list of patches
@@ -307,6 +321,155 @@ def get_todo_list(cser):
     return out
 
 
+# Patch selection for 'review -i', e.g. '3' or '1,3-5'
+RE_INDEX = re.compile(r'^\d+(-\d+)?(,\d+(-\d+)?)*$')
+
+# Patchwork series or patch in a URL, e.g. '.../series/123/', '?series=123'
+RE_SERIES_URL = re.compile(r'series[=/](\d+)')
+RE_PATCH_URL = re.compile(r'/patch/(\d+)')
+
+
+def _get_int(data, key):
+    """Get an optional positive integer from a request
+
+    Args:
+        data (dict): Request data
+        key (str): Key to read
+
+    Return:
+        int or None: Value, or None if missing
+
+    Raises:
+        ValueError: The value is not a positive integer
+    """
+    val = data.get(key)
+    if val in (None, ''):
+        return None
+    if isinstance(val, bool) or not str(val).isdigit() or not int(val):
+        raise ValueError(f"Invalid {key} '{val}'")
+    return int(val)
+
+
+def parse_review_req(data, upstreams):
+    """Work out the 'patman review' arguments for a review request
+
+    The request is a dict with these keys, all optional except that one of
+    'target' and 'title' is needed:
+        target (str): Patchwork series ID, or the URL of a series or patch
+        title (str): Search for a series by its cover-letter title
+        version (int): Version to review, with 'title'
+        patch (int): Patchwork patch ID, to review just that patch
+        whole (bool): With a patch, review its whole series
+        index (str): Review only these patches, e.g. '1,3-5'
+        ups (str): Upstream whose patchwork server to use
+        drafts (bool): Create Gmail drafts for the reviews
+        force (bool): Review again, even if already reviewed
+
+    Args:
+        data (dict): Request
+        upstreams (list of str): Names of the known upstreams
+
+    Return:
+        tuple:
+            list of str: Arguments for 'patman review'
+            str: Description of the review, for display
+
+    Raises:
+        ValueError: The request is not valid
+    """
+    target = str(data.get('target') or '').strip()
+    title = str(data.get('title') or '').strip()
+    patch = _get_int(data, 'patch')
+    args = []
+    if target:
+        mpatch = RE_PATCH_URL.search(target)
+        mseries = RE_SERIES_URL.search(target)
+        if target.isdigit():
+            args += ['-s', target]
+            desc = f'series {target}'
+        elif mpatch:
+            patch = int(mpatch.group(1))
+        elif mseries:
+            args += ['-s', mseries.group(1)]
+            desc = f'series {mseries.group(1)}'
+        else:
+            raise ValueError(f"Cannot find a series or patch in '{target}'")
+    if patch:
+        args += ['-p', str(patch)]
+        desc = f'patch {patch}'
+        if data.get('whole'):
+            args.append('-w')
+            desc = f'series of patch {patch}'
+    if title:
+        args += ['-S', title]
+        desc = f"'{title}'"
+        version = _get_int(data, 'version')
+        if version:
+            args += ['-V', str(version)]
+    if not args:
+        raise ValueError('Please give a series, patch or title to review')
+    if len([1 for opt in ('-s', '-p', '-S') if opt in args]) != 1:
+        raise ValueError('Please give only one of a series, patch or title')
+    index = str(data.get('index') or '').replace(' ', '')
+    if index:
+        if not RE_INDEX.match(index):
+            raise ValueError(f"Invalid patch selection '{index}'")
+        args += ['-i', index]
+    ups = data.get('ups')
+    if ups:
+        if ups not in upstreams:
+            raise ValueError(f"Unknown upstream '{ups}'")
+        args += ['-U', ups]
+    if data.get('drafts'):
+        args.append('-d')
+    if data.get('force'):
+        args.append('-f')
+    return args, f'Review {desc}'
+
+
+class Job:
+    """A background task which runs patman commands one after the other
+
+    Properties:
+        idnum (int): Job number, starting at 1
+        kind (str): Kind of job, e.g. 'sync' or 'review'
+        cmds (list of list of str): Commands to run
+        cancel (bool): True if the job has been asked to stop
+        proc (asyncio.subprocess.Process or None): Command which is running
+        state (dict): State of the job, as provided by the API
+    """
+    def __init__(self, idnum, kind, title, cmds):
+        """Set up a new job
+
+        Args:
+            idnum (int): Job number
+            kind (str): Kind of job
+            title (str): Description of the job, for display
+            cmds (list of list of str): Commands to run
+        """
+        self.idnum = idnum
+        self.kind = kind
+        self.cmds = cmds
+        self.cancel = False
+        self.proc = None
+        self.state = {
+            'id': idnum,
+            'kind': kind,
+            'title': title,
+            'queued': True,
+            'running': False,
+            'cancelled': False,
+            'started': None,
+            'finished': None,
+            'results': [],
+        }
+
+    @property
+    def active(self):
+        """True if the job is waiting to run, or running"""
+        return not self.state['finished']
+
+
 # pylint: disable=R0902
 class Server:
     """Web server providing patman information as JSON
@@ -324,7 +487,6 @@ class Server:
             all upstreams, for testing
         sync_cmds_for_testing (list of list of str or None): Commands to
             run for a sync, for testing
-        sync_state (dict): State of the most recent sync
     """
     # pylint: disable=R0913,R0917
     def __init__(self, cser, pw_url=None, sync_interval=0, review_sync=False,
@@ -339,19 +501,13 @@ class Server:
         self.sync_cmds_for_testing = None
         self._pworks = {}
         self._sleep = asyncio.sleep
-        self._sync_lock = asyncio.Lock()
         self._sync_task = None
-        self._sync_proc = None
-        self._sync_cancel = False
-        self.sync_state = {
-            'running': False,
-            'cancelled': False,
-            'interval': sync_interval,
-            'review_sync': review_sync,
-            'started': None,
-            'finished': None,
-            'results': [],
-        }
+
+        # Jobs run one at a time, in the order they are added, since they
+        # may all write to the database
+        self._job_lock = asyncio.Lock()
+        self._jobs = OrderedDict()
+        self._last_job = 0
 
     def get_pw_url(self, ups):
         """Get the patchwork URL for an upstream
@@ -406,82 +562,210 @@ class Server:
         """
         if self.sync_cmds_for_testing is not None:
             return self.sync_cmds_for_testing
-        patman = [sys.executable, '-m', 'patman', '-v']
-        cmds = [patman + ['series', 'gather-all', '-G']]
+        cmds = [self.get_patman_cmd('series', 'gather-all', '-G')]
         if self.review_sync:
-            cmds.append(patman + ['review', '--sync'] +
-                        self._review_db_args())
+            cmds.append(self.get_patman_cmd('review', '--sync',
+                                            *self._review_db_args()))
         return cmds
 
-    async def run_sync(self):
-        """Run the sync commands one after the other
+    def get_patman_cmd(self, *args):
+        """Get a command which runs patman in a child process
 
-        Output from each command is recorded in sync_state as it arrives.
-        If a sync is already running, this does nothing. If the sync is
-        cancelled, the command which is running is stopped and the rest are
-        not run.
+        Args:
+            args (list of str): Arguments for patman
 
         Return:
-            bool: True if a sync was run, False if one was already running
+            list of str: Command to run
         """
-        if self._sync_lock.locked():
-            return False
-        async with self._sync_lock:
-            state = self.sync_state
-            self._sync_cancel = False
+        return [sys.executable, '-m', 'patman', '-v', *args]
+
+    def add_job(self, kind, title, cmds):
+        """Add a job and start it once the jobs before it have finished
+
+        Args:
+            kind (str): Kind of job
+            title (str): Description of the job, for display
+            cmds (list of list of str): Commands to run
+
+        Return:
+            Job: New job
+        """
+        job = self._new_job(kind, title, cmds)
+        asyncio.create_task(self.run_job(job))
+        return job
+
+    def _new_job(self, kind, title, cmds):
+        """Create a job and remember it, dropping old jobs if needed"""
+        self._last_job += 1
+        job = Job(self._last_job, kind, title, cmds)
+        self._jobs[job.idnum] = job
+        for old in list(self._jobs.values()):
+            if len(self._jobs) <= MAX_JOBS:
+                break
+            if not old.active:
+                del self._jobs[old.idnum]
+        return job
+
+    def get_job(self, idnum):
+        """Get a job by its number
+
+        Args:
+            idnum (int): Job number
+
+        Return:
+            Job: Job
+
+        Raises:
+            ValueError: The job does not exist
+        """
+        job = self._jobs.get(idnum)
+        if not job:
+            raise ValueError(f'No job {idnum}')
+        return job
+
+    def get_jobs(self):
+        """Get the jobs, newest first
+
+        Return:
+            list of Job: Jobs
+        """
+        return list(reversed(self._jobs.values()))
+
+    async def run_job(self, job):
+        """Run a job's commands one after the other, once it is its turn
+
+        Output from each command is recorded in the job's state as it
+        arrives. If the job is cancelled, the command which is running is
+        stopped and the rest are not run.
+
+        Args:
+            job (Job): Job to run
+        """
+        state = job.state
+        async with self._job_lock:
+            state['queued'] = False
             state['running'] = True
-            state['cancelled'] = False
             state['started'] = _now_str()
-            state['finished'] = None
-            state['results'] = []
             try:
-                for cmd in self.get_sync_cmds():
-                    if self._sync_cancel:
+                for cmd in job.cmds:
+                    if job.cancel:
                         break
                     result = {
-                        'cmd': ' '.join(cmd[1:] if cmd[0] == sys.executable
-                                        else cmd),
+                        'cmd': self._cmd_label(cmd),
                         'returncode': None,
                         'output': '',
                     }
                     state['results'].append(result)
-                    await self._run_cmd(cmd, result)
+                    await self._run_cmd(job, cmd, result)
             finally:
                 state['running'] = False
-                state['cancelled'] = self._sync_cancel
+                state['cancelled'] = job.cancel
                 state['finished'] = _now_str()
-        return True
 
-    def cancel_sync(self):
-        """Stop the sync which is running, if any
+    @staticmethod
+    def _cmd_label(cmd):
+        """Get a short description of a command, for display
+
+        Args:
+            cmd (list of str): Command
 
         Return:
-            bool: True if a sync was running, False if not
+            str: Description, e.g. 'patman series gather-all -G'
         """
-        if not self.sync_state['running']:
+        patman = [sys.executable, '-m', 'patman']
+        if cmd[:3] == patman:
+            cmd = ['patman'] + [arg for arg in cmd[3:4] if arg != '-v'] + \
+                cmd[4:]
+        return ' '.join(cmd)
+
+    def cancel_job(self, job):
+        """Stop a job, whether it is running or waiting to run
+
+        Args:
+            job (Job): Job to stop
+
+        Return:
+            bool: True if the job was stopped, False if it had finished
+        """
+        if not job.active:
             return False
-        self._sync_cancel = True
-        if self._sync_proc and self._sync_proc.returncode is None:
+        job.cancel = True
+        if job.proc and job.proc.returncode is None:
             # Stop any child processes too, since they hold the output open
-            tout.info('Sync: cancelling')
+            tout.info(f'Job {job.idnum}: cancelling')
             try:
-                os.killpg(self._sync_proc.pid, signal.SIGTERM)
+                os.killpg(job.proc.pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
         return True
 
-    async def _run_cmd(self, cmd, result):
-        """Run a single sync command in the git tree
+    def _sync_job(self):
+        """Get the most recent sync job
+
+        Return:
+            Job or None: Job, or None if there has not been a sync
+        """
+        for job in reversed(self._jobs.values()):
+            if job.kind == 'sync':
+                return job
+        return None
+
+    @property
+    def sync_state(self):
+        """dict: State of the most recent sync, with the sync settings"""
+        job = self._sync_job()
+        state = dict(job.state) if job else {
+            'queued': False, 'running': False, 'cancelled': False,
+            'started': None, 'finished': None, 'results': []}
+        state['interval'] = self.sync_interval
+        state['review_sync'] = self.review_sync
+        return state
+
+    def _start_sync(self):
+        """Create a sync job, unless one is already waiting or running
+
+        Return:
+            Job or None: New job, or None if a sync is already active
+        """
+        job = self._sync_job()
+        if job and job.active:
+            return None
+        return self._new_job('sync', 'Sync', self.get_sync_cmds())
+
+    async def run_sync(self):
+        """Run a sync now, waiting for any other job to finish first
+
+        Return:
+            bool: True if a sync was run, False if one was already active
+        """
+        job = self._start_sync()
+        if not job:
+            return False
+        await self.run_job(job)
+        return True
+
+    def cancel_sync(self):
+        """Stop the sync which is running or waiting, if any
+
+        Return:
+            bool: True if a sync was stopped, False if none was active
+        """
+        job = self._sync_job()
+        return bool(job) and self.cancel_job(job)
+
+    async def _run_cmd(self, job, cmd, result):
+        """Run a single command in the git tree
 
         The output is added to the result as each line arrives, so that a
-        client can show the progress of the sync.
+        client can show the progress of the job.
 
         Args:
+            job (Job): Job which is running the command
             cmd (list of str): Command to run
             result (dict): Information about the command, updated with its
                 output and return code
         """
-        tout.info(f"Sync: running {' '.join(cmd[1:])}")
+        tout.info(f"Job {job.idnum}: running {result['cmd']}")
         env = review_mod._child_env()  # pylint: disable=W0212
         env['PYTHONUNBUFFERED'] = '1'
         try:
@@ -494,17 +778,17 @@ class Server:
             result['returncode'] = -1
             result['output'] = str(exc)
             return
-        self._sync_proc = proc
+        job.proc = proc
         try:
             async for line in proc.stdout:
                 output = result['output'] + line.decode('utf-8',
                                                         errors='replace')
-                result['output'] = output[-MAX_SYNC_OUTPUT:]
+                result['output'] = output[-MAX_JOB_OUTPUT:]
             result['returncode'] = await proc.wait()
         finally:
-            self._sync_proc = None
+            job.proc = None
         if result['returncode']:
-            tout.warning(f"Sync: '{result['cmd']}' failed "
+            tout.warning(f"Job {job.idnum}: '{result['cmd']}' failed "
                          f"(code {result['returncode']})")
 
     async def _sync_loop(self):
@@ -567,6 +851,8 @@ class Server:
     async def _review_detail(self, request):
         data = get_review_detail(self.rcser, int(request.match_info['idnum']))
         data['patchwork_url'] = self.get_pw_url(data['upstream'])
+        proj = self.cser.project_get(data['upstream'])
+        data['project'] = proj[2] if proj else None
         return web.json_response(data)
 
     async def _todo_list(self, _request):
@@ -587,9 +873,10 @@ class Server:
         return web.json_response(self.sync_state)
 
     async def _sync_post(self, _request):
-        if self.sync_state['running']:
+        job = self._start_sync()
+        if not job:
             return web.json_response(self.sync_state, status=409)
-        asyncio.create_task(self.run_sync())
+        asyncio.create_task(self.run_job(job))
 
         # Let the sync start, so the response shows it running
         await asyncio.sleep(0)
@@ -599,6 +886,91 @@ class Server:
         if not self.cancel_sync():
             return web.json_response(self.sync_state, status=409)
         return web.json_response(self.sync_state, status=202)
+
+    async def _upstreams(self, _request):
+        out = []
+        for name, (_, is_default, pw_url, *_) in \
+                self.cser.db.upstream_get_dict().items():
+            if pw_url:
+                out.append({'name': name, 'default': bool(is_default),
+                            'patchwork_url': pw_url})
+        return web.json_response(out)
+
+    async def _job_list(self, _request):
+        return web.json_response([job.state for job in self.get_jobs()])
+
+    async def _job_detail(self, request):
+        job = self.get_job(int(request.match_info['idnum']))
+        return web.json_response(job.state)
+
+    async def _job_cancel(self, request):
+        job = self.get_job(int(request.match_info['idnum']))
+        status = 202 if self.cancel_job(job) else 409
+        return web.json_response(job.state, status=status)
+
+    async def _read_json(self, request):
+        """Read the JSON body of a request, which may be empty
+
+        Return:
+            dict: Request data
+
+        Raises:
+            ValueError: The body is not a JSON object
+        """
+        if not request.can_read_body:
+            return {}
+        try:
+            data = await request.json()
+        except ValueError as exc:
+            raise ValueError('Invalid JSON in request') from exc
+        if not isinstance(data, dict):
+            raise ValueError('Request must be a JSON object')
+        return data
+
+    def _review_job(self, title, *args):
+        """Start a job which runs 'patman review'
+
+        Args:
+            title (str): Description of the job
+            args (list of str): Arguments for 'patman review'
+
+        Return:
+            web.Response: Response giving the job state
+        """
+        cmd = self.get_patman_cmd('review', *args, *self._review_db_args())
+        job = self.add_job('review', title, [cmd])
+        return web.json_response(job.state, status=202)
+
+    async def _review_post(self, request):
+        data = await self._read_json(request)
+        args, title = parse_review_req(
+            data, list(self.cser.db.upstream_get_dict()))
+        return self._review_job(title, *args)
+
+    async def _review_scan(self, request):
+        data = await self._read_json(request)
+        args = ['--scan'] + (['-d'] if data.get('drafts') else [])
+        return self._review_job('Scan for new versions', *args)
+
+    async def _redraft(self, request):
+        idnum = int(request.match_info['idnum'])
+        data = await self._read_json(request)
+        name, desc, ups = self.rcser.db.series_get_info(idnum)
+        version = (_get_int(data, 'version') or
+                   self.rcser.db.series_get_max_version(idnum))
+        link = self.rcser.db.ser_ver_get_link(idnum, version)
+        if not link:
+            raise ValueError(f"Series '{name}' v{version} has no link")
+        args = ['-s', str(link), '--redraft']
+        seqs = data.get('seqs') or []
+        if not isinstance(seqs, list) or not all(
+                isinstance(seq, int) and seq >= 0 for seq in seqs):
+            raise ValueError('Invalid seqs')
+        if seqs:
+            args += ['-i', ','.join(str(seq) for seq in sorted(seqs))]
+        if ups:
+            args += ['-U', ups]
+        return self._review_job(f"Redraft '{desc or name}' v{version}", *args)
 
     async def _index(self, _request):
         return web.FileResponse(os.path.join(WEB_DIR, 'index.html'))
@@ -620,6 +992,14 @@ class Server:
         app.router.add_get('/api/sync', self._sync_get)
         app.router.add_post('/api/sync', self._sync_post)
         app.router.add_post('/api/sync/cancel', self._sync_cancel_post)
+        app.router.add_get('/api/upstreams', self._upstreams)
+        app.router.add_get('/api/jobs', self._job_list)
+        app.router.add_get(r'/api/jobs/{idnum:\d+}', self._job_detail)
+        app.router.add_post(r'/api/jobs/{idnum:\d+}/cancel', self._job_cancel)
+        app.router.add_post('/api/review', self._review_post)
+        app.router.add_post('/api/review/scan', self._review_scan)
+        app.router.add_post(r'/api/reviews/{idnum:\d+}/redraft',
+                            self._redraft)
         app.router.add_get('/', self._index)
         app.router.add_static('/static', WEB_DIR)
         app.on_startup.append(self._start_background)

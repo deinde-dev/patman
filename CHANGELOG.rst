@@ -14,6 +14,8 @@ Added
   comments, draft reviews and todos on a mobile-friendly page, optionally
   syncing with patchwork periodically. Its JSON API is described in
   ``doc/serve-protocol.rst``.
+- ``patman serve`` can start reviews, scans for new versions and redrafts,
+  which run one at a time as jobs, with their output shown on the page.
 - Reviews of other people's series can be kept in a separate database, given
   by the ``review_db_dir`` setting or ``--review-db-dir``.
 

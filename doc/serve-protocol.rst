@@ -15,7 +15,8 @@ Overview
 --------
 
 The API is under ``/api/``. Each response is a JSON value, encoded in UTF-8,
-and each request which takes a body expects a JSON object.
+and each request which takes a body expects a JSON object. An empty body is the
+same as ``{}``.
 
 Your own series are read from the patman database in the git tree. Reviews of
 other people's series are read from the review database if there is one
@@ -48,13 +49,14 @@ An error is reported as a JSON object with an ``error`` string, using these
 status codes:
 
 - 401: the token is missing or wrong
-- 404: the thing asked for does not exist, or patchwork does not have it
+- 404: the thing asked for does not exist, or patchwork does not have it; also
+  used when a request is not valid, e.g. a missing field or a bad value
 - 409: the request conflicts with the current state, e.g. starting a sync while
   one is running
 - 502: patchwork could not be reached; the message starts with ``Patchwork:``
 
-The sync endpoints give their usual response with status 409, rather than an
-error object.
+The sync and job endpoints give their usual response with status 409, rather
+than an error object.
 
 A path which does not exist, or the wrong method, gets aiohttp's own 404 or 405
 response, which is plain text.
@@ -114,6 +116,29 @@ A review of one patch, or of the cover letter:
 - ``status`` (str or null): ``new``, ``draft``, ``sent``, ``replied`` or
   ``deleted``
 
+Job
+~~~
+
+A job runs one or more commands in the git tree, such as a sync or a review:
+
+- ``id`` (int): job number, starting at 1 when the server starts
+- ``kind`` (str): ``sync`` or ``review``
+- ``title`` (str): description, e.g. ``Review series 123``
+- ``queued`` (bool): true while waiting for other jobs to finish
+- ``running`` (bool): true while running
+- ``cancelled`` (bool): true if it was cancelled
+- ``started`` (str or null): when it started
+- ``finished`` (str or null): when it finished; null while it is queued or
+  running
+- ``results`` (list): one object for each command which has started:
+
+  - ``cmd`` (str): the command, for display, e.g. ``patman series gather-all
+    -G``
+  - ``returncode`` (int or null): exit code, null while running; negative if it
+    was stopped by a signal, e.g. when cancelled
+  - ``output`` (str): output so far, with stderr mixed in, keeping only the
+    last 20000 characters
+
 Your series
 -----------
 
@@ -158,6 +183,12 @@ setting.
 The comments on a patch (``kind`` is ``patch``) or cover letter (``cover``),
 given its patchwork ID: a list of Comment.
 
+``GET /api/upstreams``
+~~~~~~~~~~~~~~~~~~~~~~
+
+The upstreams which have a patchwork server, each an object with ``name``,
+``default`` (true for the default upstream) and ``patchwork_url``.
+
 Reviews
 -------
 
@@ -183,9 +214,45 @@ A reviewed series with all its versions:
 - ``id``, ``name``, ``desc``: as above
 - ``upstream`` (str or null): upstream of the series
 - ``patchwork_url`` (str or null): as for ``GET /api/series/<id>``
+- ``project`` (str or null): patchwork project of the upstream
 - ``versions`` (list of Version): newest first, each with ``notes`` (str or
   null; notes from handling reviews of the series) and ``reviews`` (list of
   Review, in order)
+
+Acting on reviews
+-----------------
+
+These start a job which runs ``patman review``, responding with status 202 and
+the Job, except where noted.
+
+``POST /api/review``
+~~~~~~~~~~~~~~~~~~~~
+
+Review a series, or part of one. The body has one of ``target``, ``patch`` and
+``title``, with other fields as needed:
+
+- ``target`` (str): a patchwork series ID, or the URL of a series or patch
+- ``patch`` (int): a patchwork patch ID, to review that patch
+- ``title`` (str): words from the cover-letter title, to search for
+- ``version`` (int): with ``title``, the version to review
+- ``whole`` (bool): with a patch, review its whole series
+- ``index`` (str): review only these patches, e.g. ``1,3-5``
+- ``ups`` (str): upstream whose patchwork server to use
+- ``drafts`` (bool): create Gmail drafts of the reviews
+- ``force`` (bool): review the series again
+
+``POST /api/review/scan``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Look for new versions of reviewed series and review them (``patman review
+--scan``). The body may have ``drafts`` (bool) to create Gmail drafts.
+
+``POST /api/reviews/<id>/redraft``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Create the Gmail drafts of a reviewed series again. The body may have
+``version`` (int), defaulting to the latest, and ``seqs`` (list of int), the
+patches to act on, using 0 for the cover letter; the default is all of them.
 
 Todo
 ----
@@ -211,30 +278,52 @@ the API. It runs these commands in turn:
 ``GET /api/sync``
 ~~~~~~~~~~~~~~~~~
 
-The state of the most recent sync:
+A sync runs as a job, one at a time with the other jobs. Its state is the Job
+of the most recent sync, along with:
 
-- ``running`` (bool): true while a sync is running
-- ``cancelled`` (bool): true if the sync was cancelled
-- ``started`` (str or null): when it started
-- ``finished`` (str or null): when it finished
-- ``results`` (list): one object for each command which has started, with
-  ``cmd``, ``returncode`` and ``output``, which grows as the command runs;
-  ``returncode`` is null while it runs
 - ``interval`` (int): minutes between syncs, or 0 if they are only run when
   asked
 - ``review_sync`` (bool): true if the sync runs ``patman review --sync``
+
+Before the first sync there is no Job, so only ``queued``, ``running``,
+``cancelled``, ``started``, ``finished`` and ``results`` are given, along with
+these.
 
 ``POST /api/sync``
 ~~~~~~~~~~~~~~~~~~
 
 Start a sync, giving status 202 and the sync state, or 409 and the sync state
-if a sync is already running.
+if a sync is already queued or running.
 
 ``POST /api/sync/cancel``
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Cancel the sync which is running, stopping its command, giving status 202 and
-the sync state, or 409 if there is none.
+Cancel the sync which is queued or running, stopping its command, giving status
+202 and the sync state, or 409 if there is none.
+
+Jobs
+----
+
+Jobs run one at a time, in the order they are started, since they may all write
+to the database. Each command runs in the git tree, in a process group of its
+own, with no input. The server remembers the 20 most recent jobs, along with
+any which have not finished.
+
+``GET /api/jobs``
+~~~~~~~~~~~~~~~~~
+
+The jobs, newest first, as a list of Job.
+
+``GET /api/jobs/<id>``
+~~~~~~~~~~~~~~~~~~~~~~
+
+A job.
+
+``POST /api/jobs/<id>/cancel``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Cancel a job which is queued or running, stopping its command and any processes
+it started, giving status 202 and the Job, or 409 if it has finished.
 
 The page
 --------
@@ -248,5 +337,5 @@ printed by ``patman serve``, keeps it in the browser's local storage and
 removes it from the URL. It sends the token in an ``Authorization`` header and
 asks for it if a request is refused with status 401.
 
-While a sync is running, the page asks for its state every few seconds to show
-its progress, and otherwise checks the sync state once a minute.
+While a sync or job is running, the page asks for its state every few seconds
+to show its progress, and otherwise checks the sync state once a minute.

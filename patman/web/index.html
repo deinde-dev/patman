@@ -144,6 +144,8 @@ a.card:active { background: var(--code-bg); }
            text-transform: uppercase; letter-spacing: 0.04em;
            margin: 16px 2px 8px; }
 
+.section.cmd { text-transform: none; letter-spacing: 0;
+               font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
 .patch { cursor: pointer; }
 .patch .seq { color: var(--muted); font-variant-numeric: tabular-nums;
               min-width: 22px; }
@@ -180,7 +182,24 @@ a.card:active { background: var(--code-bg); }
   border-radius: 8px; padding: 8px 14px; cursor: pointer; font-weight: 600;
 }
 .btn:disabled { opacity: 0.5; }
-.btn.danger { background: var(--st-rejected); color: #fff; margin-left: 8px; }
+.btn.danger { background: var(--st-rejected); color: #fff; }
+.btn.light { background: var(--surface); color: var(--link);
+             border: 1px solid var(--border); }
+.btn.small { padding: 4px 10px; font-size: 13px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.form label { display: block; font-size: 13px; color: var(--muted);
+              margin: 12px 0 4px; }
+.form input[type=text], .form input[type=number], .form select, .form textarea {
+  width: 100%; padding: 9px 12px; border-radius: 8px; font: inherit;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+}
+.form textarea { font: 13px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+                 min-height: 40vh; resize: vertical; }
+.form .check { display: flex; align-items: center; gap: 8px; margin-top: 12px;
+               color: var(--text); font-size: 15px; }
+.form .check input { width: 18px; height: 18px; }
+.form .msg { margin-top: 10px; color: var(--st-rejected); }
+.hint { color: var(--muted); font-size: 13px; margin-top: 4px; }
 input.search {
   width: 100%; padding: 9px 12px; border-radius: 10px; font: inherit;
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
@@ -207,6 +226,8 @@ input[type=password] {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Series</a>
   <a href="#/reviews" data-tab="reviews">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Reviews</a>
+  <a href="#/jobs" data-tab="jobs">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></svg>Jobs</a>
   <a href="#/todo" data-tab="todo">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg>Todo</a>
 </nav>
@@ -236,6 +257,11 @@ async function api(path, opts = {}) {
   const headers = {};
   const tok = getToken();
   if (tok) headers.Authorization = 'Bearer ' + tok;
+  if (opts.json !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    opts = { method: 'POST', ...opts, body: JSON.stringify(opts.json) };
+    delete opts.json;
+  }
   const resp = await fetch('api/' + path, { ...opts, headers });
   if (resp.status === 401) throw new AuthError('Token needed');
   const data = await resp.json().catch(() => ({}));
@@ -541,13 +567,43 @@ const REVIEW_STATUS = {
   deleted: 'deleted',
 };
 
+// Start a job and show it
+async function startJob(path, data, msg) {
+  try {
+    const job = await api(path, { json: data || {} });
+    location.hash = `#/jobs/${job.id}`;
+  } catch (err) {
+    if (msg) msg.textContent = err.message;
+    else alert(err.message);
+  }
+}
+
+// A button which needs a second tap to confirm
+function confirmButton(label, cls, action) {
+  let armed = null;
+  const btn = h('button', { class: cls, onclick: () => {
+    if (armed) { clearTimeout(armed); armed = null; btn.textContent = label; action(); return; }
+    btn.textContent = 'Tap to confirm';
+    armed = setTimeout(() => { armed = null; btn.textContent = label; }, 3000);
+  } }, label);
+  return btn;
+}
+
+function reviewActions() {
+  return h('div', { class: 'actions', style: 'margin:0 0 12px' },
+    h('a', { class: 'btn', href: '#/review/new' }, '+ Review a series'),
+    confirmButton('Scan for new versions', 'btn light',
+                  () => startJob('review/scan', { drafts: true })));
+}
+
 async function viewReviewList() {
   const list = await api('reviews');
   if (!list.length) {
-    return setView('Reviews', 'reviews', false,
-      h('div', { class: 'empty' }, "No reviews yet: try 'patman review'"));
+    return setView('Reviews', 'reviews', false, reviewActions(),
+      h('div', { class: 'empty' }, 'No reviews yet'));
   }
-  setView('Reviews', 'reviews', false, ...filteredList('reviews', list.map((r) => ({
+  setView('Reviews', 'reviews', false, reviewActions(),
+          ...filteredList('reviews', list.map((r) => ({
     text: `${r.name} ${r.desc || ''}`,
     groups: [],
     card: h('a', { class: 'card', href: `#/reviews/${r.id}` },
@@ -569,26 +625,81 @@ async function viewReview(id, wantVer) {
     h('button', { class: v === sv ? 'on' : '',
                   onclick: () => { location.replace(`#/reviews/${id}/${v.version}`); } },
       `v${v.version}`))) : null;
+  const unsent = (r) => r.status !== 'sent' && r.status !== 'replied';
+  const redraft = (seqs) => startJob(`reviews/${id}/redraft`,
+                                     { version: sv.version, seqs });
   const reviews = sv.reviews.map((r) => h('div', { class: 'card review' },
     h('div', { class: 'row' },
       h('div', { class: 'grow name' }, r.seq ? `Patch ${r.seq}` : 'Cover letter'),
       h('span', { class: `chip ${r.approved ? 'st-accepted' : 'st-changes-requested'}` },
         r.approved ? 'Reviewed-by' : 'comments'),
       h('span', { class: 'ver' }, REVIEW_STATUS[r.status] || r.status || '')),
-    renderMail(r.body)));
+    renderMail(r.body),
+    unsent(r) && h('div', { class: 'actions' },
+      confirmButton('Redraft', 'btn light small', () => redraft([r.seq])))));
+  const anyUnsent = sv.reviews.some(unsent);
+  const actions = sv.link && h('div', { class: 'actions' },
+    anyUnsent && confirmButton('Redraft all', 'btn light small', () => redraft([])),
+    confirmButton('Review again', 'btn light small', () => startJob('review',
+      { target: sv.link, ups: ser.upstream, drafts: true, force: true })),
+    ser.patchwork_url && h('a', { class: 'btn light small', target: '_blank',
+      rel: 'noopener',
+      href: ser.project ? `${ser.patchwork_url}/project/${ser.project}/list/?series=${sv.link}`
+                      : ser.patchwork_url },
+      'patchwork ↗'));
   setView(ser.desc || ser.name, 'reviews', true,
     h('div', { class: 'card' },
       h('div', { class: 'name' }, ser.desc || ser.name),
       h('div', { class: 'meta' },
         h('span', {}, `v${sv.version}`),
         ser.upstream && h('span', {}, ser.upstream),
-        sv.link && h('span', {}, `series ${sv.link}`))),
+        sv.link && h('span', {}, `series ${sv.link}`)),
+      actions),
     tabs,
     sv.notes && h('div', { class: 'section' }, 'Notes'),
     sv.notes && h('div', { class: 'notes' }, renderMail(sv.notes)),
     h('div', { class: 'section' }, plural(reviews.length, 'review')),
     reviews.length ? h('div', { class: 'list' }, reviews)
                    : h('div', { class: 'empty' }, 'No reviews for this version'));
+}
+
+async function viewReviewForm() {
+  const upstreams = await api('upstreams').catch(() => []);
+  const field = (label, input, hint) => [h('label', {}, label), input,
+                                         hint && h('div', { class: 'hint' }, hint)];
+  const check = (label, checked) => {
+    const box = h('input', { type: 'checkbox', checked });
+    return [box, h('label', { class: 'check' }, box, label)];
+  };
+  const target = h('input', { type: 'text', inputmode: 'url',
+                              placeholder: 'e.g. 471234 or a patchwork URL' });
+  const title = h('input', { type: 'text', placeholder: 'Words from the title' });
+  const version = h('input', { type: 'number', min: 1, placeholder: 'Latest' });
+  const index = h('input', { type: 'text', placeholder: 'All', inputmode: 'numeric' });
+  const ups = h('select', {}, upstreams.map((u) =>
+    h('option', { value: u.name, selected: u.default }, `${u.name} (${u.patchwork_url})`)));
+  const [drafts, draftsRow] = check('Create Gmail drafts', true);
+  const [whole, wholeRow] = check('Whole series, for a patch URL', false);
+  const [force, forceRow] = check('Review again if already reviewed', false);
+  const msg = h('div', { class: 'msg' });
+  const submit = h('button', { class: 'btn', onclick: async () => {
+    submit.disabled = true;
+    msg.textContent = '';
+    await startJob('review', {
+      target: target.value, title: title.value, version: version.value,
+      index: index.value, ups: ups.value, drafts: drafts.checked,
+      whole: whole.checked, force: force.checked }, msg);
+    submit.disabled = false;
+  } }, 'Start review');
+  setView('New review', 'reviews', true, h('div', { class: 'card form' },
+    field('Patchwork series or patch', target,
+          'A series ID, or the URL of a series or patch'),
+    field('Or search by cover-letter title', title),
+    field('Version (with a title)', version),
+    field('Patches to review', index, 'e.g. 1,3-5'),
+    upstreams.length > 1 && field('Upstream', ups),
+    draftsRow, wholeRow, forceRow,
+    h('div', { class: 'actions' }, submit), msg));
 }
 
 // --- Todo ---
@@ -655,7 +766,7 @@ async function cancelSync() {
   await refreshSync();
 }
 
-// Describe how a sync command ended
+// Describe how a command in a job ended
 function cmdStatus(r, st) {
   if (r.returncode === null) return 'running…';
   if (r.returncode === 0) return 'ok';
@@ -663,15 +774,38 @@ function cmdStatus(r, st) {
   return 'exit ' + r.returncode;
 }
 
-function viewSync() {
-  const st = syncState || { results: [] };
-  const btn = h('button', { class: 'btn', disabled: st.running,
-                            onclick: () => { btn.disabled = true; startSync(); } },
-                st.running ? 'Syncing…' : 'Sync now');
-  const cancel = st.running && h('button', { class: 'btn danger',
-      onclick: () => { cancel.disabled = true; cancelSync(); } }, 'Cancel');
+// Get the status of a job as [text, chip class]
+function jobStatus(st) {
+  if (st.queued) return st.cancelled ? ['cancelled', 'st-other'] : ['waiting', 'st-other'];
+  if (st.running) return ['running', 'st-under-review'];
+  if (st.cancelled) return ['cancelled', 'st-changes-requested'];
+  return st.results.every((r) => r.returncode === 0) ? ['ok', 'st-accepted']
+                                                    : ['failed', 'st-rejected'];
+}
+
+// Render the output of each command in a job, following the one running
+function jobOutput(st) {
   const logs = st.results.map((r) =>
     h('div', { class: 'log mail' }, r.output.trim() || '(no output yet)'));
+  const follow = () => {
+    if (st.running && logs.length) {
+      const log = logs[logs.length - 1];
+      log.scrollTop = log.scrollHeight;
+    }
+  };
+  return [st.results.flatMap((r, i) => [
+    h('div', { class: 'section cmd' }, `${r.cmd} — ${cmdStatus(r, st)}`), logs[i]]), follow];
+}
+
+function viewSync() {
+  const st = syncState || { results: [] };
+  const active = st.running || st.queued;
+  const btn = h('button', { class: 'btn', disabled: active,
+                            onclick: () => { btn.disabled = true; startSync(); } },
+                st.queued ? 'Waiting…' : st.running ? 'Syncing…' : 'Sync now');
+  const cancel = active && h('button', { class: 'btn danger',
+      onclick: () => { cancel.disabled = true; cancelSync(); } }, 'Cancel');
+  const [output, follow] = jobOutput(st);
   setView('Sync', null, true,
     h('div', { class: 'card' },
       h('div', { class: 'meta' },
@@ -679,15 +813,62 @@ function viewSync() {
         st.review_sync && h('span', {}, 'with review --sync'),
         st.started && h('span', {}, `last started ${ago(parseTime(st.started))}`),
         st.cancelled && h('span', {}, 'cancelled')),
-      h('div', { style: 'margin-top:10px' }, btn, cancel)),
-    st.results.map((r, i) => [
-      h('div', { class: 'section' }, `${r.cmd} — ${cmdStatus(r, st)}`),
-      logs[i]]));
-  // Follow the output of the command which is running
-  if (st.running && logs.length) {
-    const log = logs[logs.length - 1];
-    log.scrollTop = log.scrollHeight;
+      h('div', { class: 'actions' }, btn, cancel)),
+    output);
+  follow();
+}
+
+let jobTimer = null;
+function pollJobs(hash, active) {
+  clearTimeout(jobTimer);
+  if (active) {
+    jobTimer = setTimeout(() => { if (location.hash === hash) route(); }, 1500);
   }
+}
+
+async function viewJobs() {
+  const jobs = await api('jobs');
+  pollJobs('#/jobs', jobs.some((j) => !j.finished));
+  if (!jobs.length) {
+    return setView('Jobs', 'jobs', false, reviewActions(),
+                   h('div', { class: 'empty' }, 'No jobs since the server started'));
+  }
+  setView('Jobs', 'jobs', false, reviewActions(), h('div', { class: 'list' },
+    jobs.map((j) => {
+      const [text, cls] = jobStatus(j);
+      return h('a', { class: 'card', href: `#/jobs/${j.id}` },
+        h('div', { class: 'row' },
+          h('div', { class: 'grow name' }, j.title),
+          h('span', { class: `chip ${cls}` }, text)),
+        h('div', { class: 'meta' },
+          h('span', {}, `#${j.id}`),
+          j.started && h('span', {}, `started ${ago(parseTime(j.started))}`),
+          j.finished && h('span', {}, `finished ${ago(parseTime(j.finished))}`)));
+    })));
+}
+
+async function viewJob(id) {
+  const st = await api(`jobs/${id}`);
+  const active = !st.finished;
+  pollJobs(`#/jobs/${id}`, active);
+  const [text, cls] = jobStatus(st);
+  const cancel = active && h('button', { class: 'btn danger', onclick: async () => {
+    cancel.disabled = true;
+    await api(`jobs/${id}/cancel`, { method: 'POST' });
+    route();
+  } }, 'Cancel');
+  const [output, follow] = jobOutput(st);
+  setView(st.title, 'jobs', true,
+    h('div', { class: 'card' },
+      h('div', { class: 'row' },
+        h('div', { class: 'grow name' }, st.title),
+        h('span', { class: `chip ${cls}` }, text)),
+      h('div', { class: 'meta' },
+        st.started && h('span', {}, `started ${ago(parseTime(st.started))}`),
+        st.finished && h('span', {}, `finished ${ago(parseTime(st.finished))}`)),
+      cancel && h('div', { class: 'actions' }, cancel)),
+    output);
+  follow();
 }
 syncBtn.addEventListener('click', () => { location.hash = '#/sync'; });
 
@@ -700,6 +881,9 @@ async function route() {
   try {
     if (page === 'series' && id) await viewSeries(+id, ver ? +ver : null);
     else if (page === 'reviews' && id) await viewReview(+id, ver ? +ver : null);
+    else if (page === 'review' && id === 'new') await viewReviewForm();
+    else if (page === 'jobs' && id) await viewJob(+id);
+    else if (page === 'jobs') await viewJobs();
     else if (page === 'reviews') await viewReviewList();
     else if (page === 'todo') await viewTodo();
     else if (page === 'sync') viewSync();

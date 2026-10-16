@@ -323,6 +323,9 @@ class TestWebServer(unittest.TestCase, TestCommon):
         patman = [sys.executable, '-m', 'patman', '-v']
         self.assertEqual([patman + ['series', 'gather-all', '-G']],
                          srv.get_sync_cmds())
+        self.assertEqual('patman series gather-all -G',
+                         srv._cmd_label(srv.get_sync_cmds()[0]))
+        self.assertEqual('sh -c true', srv._cmd_label(['sh', '-c', 'true']))
         srv = server.Server(self.cser, review_sync=True)
         self.assertEqual([patman + ['series', 'gather-all', '-G'],
                           patman + ['review', '--sync']],
@@ -436,6 +439,143 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(1, len(state['results']))
         self.assertEqual('start\n', state['results'][0]['output'])
         self.assertEqual(-signal.SIGTERM, state['results'][0]['returncode'])
+
+    def test_parse_review_req(self):
+        """Review requests are turned into 'patman review' arguments"""
+        ups = ['us', 'ci']
+        parse = server.parse_review_req
+        self.assertEqual((['-s', '123'], 'Review series 123'),
+                         parse({'target': ' 123 '}, ups))
+        self.assertEqual(
+            (['-s', '456', '-i', '1,3-5', '-U', 'us', '-d', '-f'],
+             'Review series 456'),
+            parse({'target': 'https://pw/project/uboot/list/?series=456',
+                   'index': '1, 3-5', 'ups': 'us', 'drafts': True,
+                   'force': True}, ups))
+        self.assertEqual((['-s', '457'], 'Review series 457'),
+                         parse({'target': 'https://pw/series/457/'}, ups))
+        self.assertEqual(
+            (['-p', '2000', '-w'], 'Review series of patch 2000'),
+            parse({'target': 'https://pw/project/uboot/patch/2000/',
+                   'whole': True}, ups))
+        self.assertEqual((['-p', '2001'], 'Review patch 2001'),
+                         parse({'patch': 2001}, ups))
+        self.assertEqual((['-S', 'video: Fix', '-V', '3'],
+                          "Review 'video: Fix'"),
+                         parse({'title': 'video: Fix', 'version': '3'}, ups))
+
+        for data, msg in (
+                ({}, 'Please give a series'),
+                ({'target': 'fred'}, 'Cannot find a series'),
+                ({'target': '1', 'title': 'x'}, 'only one of'),
+                ({'target': '1', 'index': '1;rm'}, 'Invalid patch selection'),
+                ({'target': '1', 'ups': 'zz'}, "Unknown upstream 'zz'"),
+                ({'patch': 'x'}, "Invalid patch 'x'"),
+                ({'patch': True}, "Invalid patch 'True'")):
+            with self.assertRaises(ValueError) as exc:
+                parse(data, ups)
+            self.assertIn(msg, str(exc.exception))
+
+    def run_jobs(self, srv, calls):
+        """Make requests to a server, then wait for its jobs to finish
+
+        Args:
+            srv (Server): Server to use
+            calls (list of tuple): (method, path, json) for each request
+
+        Return:
+            list of tuple: (status, data) for each request
+        """
+        async def _go():
+            out = []
+            async with TestClient(TestServer(srv.make_app())) as client:
+                for method, path, data in calls:
+                    resp = await client.request(method, path, json=data)
+                    out.append((resp.status, await resp.json()))
+                while any(job.active for job in srv.get_jobs()):
+                    await asyncio.sleep(0.01)
+            return out
+
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_go())
+        finally:
+            loop.close()
+
+    def test_review_jobs(self):
+        """Reviews and redrafts run as jobs, one at a time"""
+        series_id, _ = self.add_series('rev', 'Somebody else',
+                                       {1: [('a', 'new', 5, 0)]}, ups='us',
+                                       source='review')
+        srv = self.make_server()
+        srv.get_patman_cmd = lambda *args: ['echo', *args]
+        res = self.run_jobs(srv, [
+            ('POST', '/api/review', {'target': '123', 'drafts': True}),
+            ('POST', '/api/review/scan', {}),
+            ('POST', f'/api/reviews/{series_id}/redraft', {'seqs': [2, 0]}),
+            ('POST', '/api/review', {'title': ''}),
+        ])
+        self.assertEqual([202, 202, 202, 404], [status for status, _ in res])
+        self.assertEqual('Review series 123', res[0][1]['title'])
+        self.assertTrue(res[0][1]['queued'] or res[0][1]['running'])
+        self.assertIn('Please give a series', res[3][1]['error'])
+
+        _, jobs = self.call(srv, 'GET', '/api/jobs')
+        self.assertEqual([3, 2, 1], [job['id'] for job in jobs])
+        self.assertEqual(
+            ['review -s 123 -d', 'review --scan',
+             'review -s 100 --redraft -i 0,2 -U us'],
+            [job['results'][0]['output'].strip() for job in reversed(jobs)])
+        self.assertEqual("Redraft 'Somebody else' v1", jobs[0]['title'])
+
+        status, job = self.call(srv, 'GET', '/api/jobs/2')
+        self.assertEqual((200, 'review'), (status, job['kind']))
+        status, _ = self.call(srv, 'GET', '/api/jobs/99')
+        self.assertEqual(404, status)
+        status, _ = self.call(srv, 'POST', '/api/jobs/1/cancel')
+        self.assertEqual(409, status)
+
+    def test_cancel_queued_job(self):
+        """A job which is waiting for another can be cancelled"""
+        srv = self.make_server()
+        cmds = iter([['sh', '-c', 'echo busy; sleep 10'], ['echo', 'never']])
+        srv.get_patman_cmd = lambda *args: next(cmds)
+
+        async def _go():
+            async with TestClient(TestServer(srv.make_app())) as client:
+                await client.post('/api/review', json={'target': '1'})
+                await client.post('/api/review', json={'target': '2'})
+                first, second = srv.get_job(1), srv.get_job(2)
+                while not first.state['results'] or \
+                        not first.state['results'][0]['output']:
+                    await asyncio.sleep(0.01)
+                queued = second.state['queued']
+                await client.post('/api/jobs/2/cancel')
+                await client.post('/api/jobs/1/cancel')
+                while first.active or second.active:
+                    await asyncio.sleep(0.01)
+                return queued
+
+        loop = asyncio.new_event_loop()
+        try:
+            self.assertTrue(loop.run_until_complete(_go()))
+        finally:
+            loop.close()
+        self.assertTrue(srv.get_job(1).state['cancelled'])
+        second = srv.get_job(2).state
+        self.assertTrue(second['cancelled'])
+        self.assertEqual([], second['results'])
+
+    def test_upstreams(self):
+        """Upstreams with a patchwork server are listed"""
+        with terminal.capture():
+            self.cser.upstream_add('us', 'https://us',
+                                   patchwork_url='https://pw.us')
+            self.cser.upstream_add('ci', 'https://ci')
+            self.cser.upstream_set_default('us')
+        _, data = self.call(self.make_server(), 'GET', '/api/upstreams')
+        self.assertEqual([{'name': 'us', 'default': True,
+                           'patchwork_url': 'https://pw.us'}], data)
 
     def test_periodic_sync(self):
         """The periodic sync starts with the server and runs repeatedly"""

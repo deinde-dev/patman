@@ -38,7 +38,8 @@ It can also draft reviews of patches for you, using a Claude agent:
   voice from past reviews
 
 ``patman serve`` shows the status of your series and your reviews on a
-mobile-friendly web page (see `Web server`_).
+mobile-friendly web page, where you can also work on reviews (see `Web
+server`_).
 
 The series tracking and stored reviews are kept in an optional local
 database (a ``.patman.db`` file at the top of your git tree), which
@@ -1751,7 +1752,7 @@ Web server
 ==========
 
 ``patman serve`` runs a small web server in your git tree, so that you can
-check on your series and read reviews from a phone or another computer. The
+check on your series and work on reviews from a phone or another computer. The
 page has these tabs:
 
 - **Series**: your series with the state of each patch in the latest version.
@@ -1759,6 +1760,8 @@ page has these tabs:
   letter to read its comments, which are fetched from patchwork
 - **Reviews**: series you have reviewed with ``patman review``, showing the
   review of each patch and whether it has been drafted, sent or replied to
+- **Jobs**: reviews and other commands started from the page, and the syncs,
+  with their output
 - **Todo**: series marked with ``patman workflow todo``, due ones first
 
 The page uses the JSON API described in ``doc/serve-protocol.rst``, which other
@@ -1815,6 +1818,22 @@ which is down only affects its own series.
 
 Tap the sync indicator at the top of the page to follow the output of a sync as
 it runs, to start one or to cancel one.
+
+Reviewing from the page
+-----------------------
+
+On the Reviews tab, 'Review a series' takes a patchwork series ID, the URL of a
+series or patch, or words from a cover-letter title, and runs ``patman review``
+(with ``-d`` to create Gmail drafts, if selected). 'Scan for new versions' runs
+``patman review --scan``. Each reviewed series has buttons to recreate its
+Gmail drafts, either all of them or one patch's, and to review it again.
+
+Jobs
+----
+
+Commands started from the page, such as reviews, run as jobs, one at a time in
+the order they are started, along with the syncs. The Jobs tab shows each job
+with its output as it runs, and lets you cancel it.
 
 Running it as a service
 -----------------------
