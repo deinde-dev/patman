@@ -18,6 +18,7 @@ Added
   which run one at a time as jobs, with their output shown on the page.
 - The ``patman serve`` page has an inbox of recent series on patchwork,
   marking those already reviewed.
+- Reviews which have not been sent can be edited on the ``patman serve`` page.
 - Reviews of other people's series can be kept in a separate database, given
   by the ``review_db_dir`` setting or ``--review-db-dir``.
 

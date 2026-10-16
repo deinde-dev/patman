@@ -37,6 +37,8 @@ API (all responses are JSON):
     POST /api/review/scan             Run 'review --scan'; {"drafts": bool}
     POST /api/reviews/<id>/redraft    Recreate Gmail drafts for a reviewed
                                       series; {"version": n, "seqs": [n...]}
+    POST /api/review-items/<id>       Change a review which has not been sent;
+                                      {"body": str, "redraft": bool}
 
 Jobs (syncs and reviews) run one at a time, in the order they are started.
 """
@@ -134,6 +136,7 @@ def _review_info(rev):
         dict: Review information
     """
     return {
+        'id': rev.idnum,
         'seq': rev.seq,
         'body': rev.body,
         'approved': bool(rev.approved),
@@ -386,6 +389,9 @@ def get_todo_list(cser):
 
 # Patch selection for 'review -i', e.g. '3' or '1,3-5'
 RE_INDEX = re.compile(r'^\d+(-\d+)?(,\d+(-\d+)?)*$')
+
+# Tag given in a review which approves the patch
+RE_REVIEWED_BY = re.compile(r'^Reviewed-by:', re.MULTILINE)
 
 # Patchwork series or patch in a URL, e.g. '.../series/123/', '?series=123'
 RE_SERIES_URL = re.compile(r'series[=/](\d+)')
@@ -1032,14 +1038,27 @@ class Server:
     async def _redraft(self, request):
         idnum = int(request.match_info['idnum'])
         data = await self._read_json(request)
+        return self._redraft_job(idnum, _get_int(data, 'version'),
+                                 data.get('seqs') or [])
+
+    def _redraft_job(self, idnum, version, seqs):
+        """Start a job which recreates the Gmail drafts for a review
+
+        Args:
+            idnum (int): Series ID in the review database
+            version (int or None): Version, or None for the latest
+            seqs (list of int): Patches to redraft (0 for the cover letter),
+                or empty for all
+
+        Return:
+            web.Response: Response giving the job state
+        """
         name, desc, ups = self.rcser.db.series_get_info(idnum)
-        version = (_get_int(data, 'version') or
-                   self.rcser.db.series_get_max_version(idnum))
+        version = version or self.rcser.db.series_get_max_version(idnum)
         link = self.rcser.db.ser_ver_get_link(idnum, version)
         if not link:
             raise ValueError(f"Series '{name}' v{version} has no link")
         args = ['-s', str(link), '--redraft']
-        seqs = data.get('seqs') or []
         if not isinstance(seqs, list) or not all(
                 isinstance(seq, int) and seq >= 0 for seq in seqs):
             raise ValueError('Invalid seqs')
@@ -1048,6 +1067,27 @@ class Server:
         if ups:
             args += ['-U', ups]
         return self._review_job(f"Redraft '{desc or name}' v{version}", *args)
+
+    async def _review_item(self, request):
+        db = self.rcser.db
+        rev = db.review_get(int(request.match_info['idnum']))
+        data = await self._read_json(request)
+        if rev.status in ('sent', 'replied'):
+            return web.json_response(
+                {'error': 'This review has already been sent'}, status=409)
+        body = data.get('body', rev.body)
+        if not isinstance(body, str) or not body.strip():
+            raise ValueError('The review cannot be empty')
+        # Unless told otherwise, the review approves if it gives the tag
+        approved = data.get('approved')
+        if approved is None:
+            approved = bool(RE_REVIEWED_BY.search(body))
+        db.review_set_body(rev.idnum, body, approved)
+        self.rcser.commit()
+        svr = db.ser_ver_get_by_id(rev.svid)
+        if data.get('redraft'):
+            return self._redraft_job(svr.series_id, svr.version, [rev.seq])
+        return web.json_response(_review_info(db.review_get(rev.idnum)))
 
     async def _index(self, _request):
         return web.FileResponse(os.path.join(WEB_DIR, 'index.html'))
@@ -1078,6 +1118,8 @@ class Server:
         app.router.add_post('/api/review/scan', self._review_scan)
         app.router.add_post(r'/api/reviews/{idnum:\d+}/redraft',
                             self._redraft)
+        app.router.add_post(r'/api/review-items/{idnum:\d+}',
+                            self._review_item)
         app.router.add_get('/', self._index)
         app.router.add_static('/static', WEB_DIR)
         app.on_startup.append(self._start_background)

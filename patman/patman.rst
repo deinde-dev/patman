@@ -1834,6 +1834,10 @@ Series which you have reviewed, or which are your own, are marked, as are new
 versions of series you reviewed earlier, so it is easy to see what needs a
 review. Tap a series to see its patches and start a review.
 
+A review which has not been sent can be edited on the page. Saving it can also
+update its Gmail draft, so that the draft matches. Whether the review approves
+the patch follows from whether the text includes a ``Reviewed-by:`` line.
+
 Jobs
 ----
 

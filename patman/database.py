@@ -833,6 +833,27 @@ class Database:  # pylint:disable=R0904
             return SerVer(*recs[0])
         return [SerVer(*x) for x in recs]
 
+    def ser_ver_get_by_id(self, svid):
+        """Get a ser_ver record by its ID
+
+        Args:
+            svid (int): ser_ver ID num
+
+        Return:
+            SER_VER: Requested information
+
+        Raises:
+            ValueError: There is no such record
+        """
+        res = self.execute(
+            'SELECT id, series_id, version, link, cover_id, '
+            'cover_num_comments, name, archive_tag, desc, notes '
+            'FROM ser_ver WHERE id = ?', (svid,))
+        rec = res.fetchone()
+        if not rec:
+            raise ValueError(f'No series version with id {svid}')
+        return SerVer(*rec)
+
     def ser_ver_get_svids(self, series_idnum):
         """Get all ser_ver IDs for a series
 
@@ -1394,6 +1415,18 @@ class Database:  # pylint:disable=R0904
             (body, REVIEW_SENT, gmail_msg_id, gmail_thread_id,
              review_id))
 
+    def review_set_body(self, review_id, body, approved):
+        """Change the text of a review which has not been sent
+
+        Args:
+            review_id (int): Review record ID
+            body (str): New review email body text
+            approved (bool): True if Reviewed-by is given
+        """
+        self.execute(
+            'UPDATE review SET body = ?, approved = ? WHERE id = ?',
+            (body, 1 if approved else 0, review_id))
+
     def review_set_replied(self, review_id):
         """Mark a review as having received a reply
 
@@ -1436,6 +1469,27 @@ class Database:  # pylint:disable=R0904
             'status, gmail_msg_id, gmail_thread_id '
             'FROM review WHERE svid = ? ORDER BY seq', (svid,))
         return [Review(*row) for row in res.fetchall()]
+
+    def review_get(self, review_id):
+        """Get a review record by its ID
+
+        Args:
+            review_id (int): Review record ID
+
+        Return:
+            Review: Review record
+
+        Raises:
+            ValueError: There is no such review
+        """
+        res = self.execute(
+            'SELECT id, svid, seq, body, approved, timestamp, draft_id, '
+            'status, gmail_msg_id, gmail_thread_id '
+            'FROM review WHERE id = ?', (review_id,))
+        rec = res.fetchone()
+        if not rec:
+            raise ValueError(f'No review with id {review_id}')
+        return Review(*rec)
 
     def review_get_by_status(self, status, need_thread=False):
         """Get review records with a given status

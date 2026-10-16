@@ -26,7 +26,8 @@ cover letters are not stored, so these are read from patchwork when asked for.
 
 Series IDs are those of the patman database: ``/api/series/<id>`` takes the ID
 of one of your series and ``/api/reviews/<id>`` the ID of a reviewed series, in
-the review database. IDs from patchwork, such as a patch or cover-letter ID,
+the review database. ``/api/review-items/<id>`` takes the ID of a review, as
+given in the reviews. IDs from patchwork, such as a patch or cover-letter ID,
 are named as such.
 
 Times are local, in the form ``YYYY-MM-DD HH:MM:SS``, except where they come
@@ -109,6 +110,7 @@ Review
 
 A review of one patch, or of the cover letter:
 
+- ``id`` (int): ID of the review
 - ``seq`` (int): patch number, or 0 for the cover letter
 - ``body`` (str): text of the review
 - ``approved`` (bool): true if the review gives a Reviewed-by tag
@@ -278,6 +280,20 @@ Look for new versions of reviewed series and review them (``patman review
 Create the Gmail drafts of a reviewed series again. The body may have
 ``version`` (int), defaulting to the latest, and ``seqs`` (list of int), the
 patches to act on, using 0 for the cover letter; the default is all of them.
+
+``POST /api/review-items/<id>``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Change a review which has not been sent, given its ID. The body may have:
+
+- ``body`` (str): new text of the review, which must not be empty
+- ``approved`` (bool): whether the review approves the patch; by default, true
+  if the text has a ``Reviewed-by:`` line
+- ``redraft`` (bool): update the Gmail draft too
+
+The response is the Review, or with ``redraft``, status 202 and the Job which
+updates the draft. A review which has been sent cannot be changed, giving
+status 409.
 
 Todo
 ----

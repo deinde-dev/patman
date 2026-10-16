@@ -211,8 +211,9 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual('Some notes', latest['notes'])
         self.assertEqual([0, 1], [r['seq'] for r in latest['reviews']])
         self.assertEqual(
-            {'seq': 1, 'body': '> code\nLooks good', 'approved': True,
-             'timestamp': '2026-10-01 10:00:00', 'status': 'draft'},
+            {'id': rid, 'seq': 1, 'body': '> code\nLooks good',
+             'approved': True, 'timestamp': '2026-10-01 10:00:00',
+             'status': 'draft'},
             latest['reviews'][1])
         self.assertEqual(['old review'],
                          [r['body'] for r in data['versions'][1]['reviews']])
@@ -534,6 +535,48 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(404, status)
         status, _ = self.call(srv, 'POST', '/api/jobs/1/cancel')
         self.assertEqual(409, status)
+
+    def test_edit_review(self):
+        """A review which has not been sent can be changed and redrafted"""
+        series_id, svids = self.add_series(
+            'rev', 'Somebody else', {1: [('a', 'new', 5, 0)]}, ups='us',
+            source='review')
+        db = self.cser.db
+        rid = db.review_add(svids[1], 1, 'Looks good', True,
+                            '2026-10-01 10:00:00')
+        db.review_set_draft_id(rid, 'draft1')
+        sent = db.review_add(svids[1], 0, 'Cover', False,
+                             '2026-10-01 10:00:00')
+        db.review_set_sent(sent, 'Cover')
+        db.commit()
+
+        srv = self.make_server()
+        srv.get_patman_cmd = lambda *args: ['echo', *args]
+        res = self.run_jobs(srv, [
+            ('POST', f'/api/review-items/{rid}',
+             {'body': 'Please fix', 'approved': False}),
+            ('POST', f'/api/review-items/{rid}',
+             {'body': 'Please fix this', 'redraft': True}),
+            ('POST', f'/api/review-items/{rid}',
+             {'body': 'Fine\n\nReviewed-by: Me <me@b.com>'}),
+            ('POST', f'/api/review-items/{sent}', {'body': 'x'}),
+            ('POST', f'/api/review-items/{rid}', {'body': ' '}),
+            ('POST', '/api/review-items/999', {'body': 'x'}),
+        ])
+        self.assertEqual([200, 202, 200, 409, 404, 404],
+                         [status for status, _ in res])
+        self.assertTrue(res[2][1]['approved'])
+        res = res[:2] + res[3:]
+        self.assertEqual(('Please fix', False),
+                         (res[0][1]['body'], res[0][1]['approved']))
+        self.assertIn('already been sent', res[2][1]['error'])
+        self.assertIn('cannot be empty', res[3][1]['error'])
+        rev = db.review_get(rid)
+        self.assertEqual(1, rev.approved)
+        self.assertEqual(['review -s 100 --redraft -i 1 -U us'],
+                         [job.state['results'][0]['output'].strip()
+                          for job in srv.get_jobs()])
+        self.assertEqual(series_id, db.ser_ver_get_by_id(svids[1]).series_id)
 
     def test_cancel_queued_job(self):
         """A job which is waiting for another can be cancelled"""

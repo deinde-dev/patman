@@ -631,15 +631,22 @@ async function viewReview(id, wantVer) {
   const unsent = (r) => r.status !== 'sent' && r.status !== 'replied';
   const redraft = (seqs) => startJob(`reviews/${id}/redraft`,
                                      { version: sv.version, seqs });
-  const reviews = sv.reviews.map((r) => h('div', { class: 'card review' },
-    h('div', { class: 'row' },
+  const reviewCard = (r) => {
+    const card = h('div', { class: 'card review' });
+    const header = h('div', { class: 'row' },
       h('div', { class: 'grow name' }, r.seq ? `Patch ${r.seq}` : 'Cover letter'),
       h('span', { class: `chip ${r.approved ? 'st-accepted' : 'st-changes-requested'}` },
         r.approved ? 'Reviewed-by' : 'comments'),
-      h('span', { class: 'ver' }, REVIEW_STATUS[r.status] || r.status || '')),
-    renderMail(r.body),
-    unsent(r) && h('div', { class: 'actions' },
-      confirmButton('Redraft', 'btn light small', () => redraft([r.seq])))));
+      h('span', { class: 'ver' }, REVIEW_STATUS[r.status] || r.status || ''));
+    const show = () => card.replaceChildren(header, renderMail(r.body),
+      unsent(r) && h('div', { class: 'actions' },
+        h('button', { class: 'btn light small', onclick: () => editReview(card, r, header, show) },
+          'Edit'),
+        confirmButton('Redraft', 'btn light small', () => redraft([r.seq]))));
+    show();
+    return card;
+  };
+  const reviews = sv.reviews.map(reviewCard);
   const anyUnsent = sv.reviews.some(unsent);
   const actions = sv.link && h('div', { class: 'actions' },
     anyUnsent && confirmButton('Redraft all', 'btn light small', () => redraft([])),
@@ -664,6 +671,39 @@ async function viewReview(id, wantVer) {
     h('div', { class: 'section' }, plural(reviews.length, 'review')),
     reviews.length ? h('div', { class: 'list' }, reviews)
                    : h('div', { class: 'empty' }, 'No reviews for this version'));
+}
+
+// Change the text of a review which has not been sent
+function editReview(card, r, header, show) {
+  const text = h('textarea', { spellcheck: 'true' });
+  text.value = r.body;
+  const box = h('input', { type: 'checkbox', checked: r.status === 'draft' });
+  const msg = h('div', { class: 'msg' });
+  const save = h('button', { class: 'btn small', onclick: async () => {
+    save.disabled = true;
+    msg.textContent = '';
+    try {
+      const res = await api(`review-items/${r.id}`,
+                            { json: { body: text.value, redraft: box.checked } });
+      if (res.kind) {
+        location.hash = `#/jobs/${res.id}`;
+      } else {
+        Object.assign(r, res);
+        route();
+      }
+    } catch (err) {
+      msg.textContent = err.message;
+      save.disabled = false;
+    }
+  } }, 'Save');
+  card.replaceChildren(header, h('div', { class: 'form' }, text,
+    h('label', { class: 'check' }, box, 'Update the Gmail draft'),
+    h('div', { class: 'hint' }, "Include a 'Reviewed-by:' line to approve the patch"),
+    h('div', { class: 'actions' }, save,
+      h('button', { class: 'btn light small', onclick: show }, 'Cancel')), msg));
+  text.focus();
+  text.setSelectionRange(0, 0);
+  text.scrollTop = 0;
 }
 
 async function viewReviewForm() {
