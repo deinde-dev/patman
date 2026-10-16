@@ -186,6 +186,8 @@ a.card:active { background: var(--code-bg); }
 .form textarea.note { min-height: 6em; font: inherit; }
 
 .review { margin-top: 8px; }
+.inline-mail:not(:empty) { margin-top: 10px; border-top: 1px solid var(--border);
+                           padding-top: 4px; }
 .notes { background: var(--code-bg); border-radius: 8px; padding: 10px 12px; }
 
 .empty, .error { text-align: center; color: var(--muted); padding: 40px 16px; }
@@ -693,6 +695,32 @@ async function viewMail(kind, id, ups) {
   }
 }
 
+// Button which shows a patch or cover letter in the box it returns, so
+// that it can be read next to its review
+function mailToggle(kind, id, ups) {
+  const what = kind === 'patch' ? 'patch' : 'cover letter';
+  const box = h('div', { class: 'inline-mail' });
+  let open = false;
+  let mail = null;
+  const btn = h('button', { class: 'btn light small', onclick: async () => {
+    open = !open;
+    btn.textContent = `${open ? 'Hide' : 'Show'} the ${what}`;
+    if (!open) { box.replaceChildren(); return; }
+    box.replaceChildren(h('div', { class: 'ver' }, 'Loading…'));
+    try {
+      const q = ups ? `?ups=${encodeURIComponent(ups)}` : '';
+      mail = mail || await api(`${kind}/${id}${q}`);
+      if (open) {
+        box.replaceChildren(h('div', {}, renderMail(mail.content),
+                              mail.diff && renderDiff(mail.diff)));
+      }
+    } catch (err) {
+      if (open) box.replaceChildren(h('div', { class: 'error' }, err.message));
+    }
+  } }, `Show the ${what}`);
+  return [btn, box];
+}
+
 // --- Reviews ---
 
 const REVIEW_STATUS = {
@@ -773,6 +801,8 @@ async function viewReview(id, wantVer) {
     const pat = r.seq ? (sv.patches || []).find((p) => p.seq === r.seq) : null;
     const itemId = r.seq ? pat && pat.patch_id : sv.cover_id;
     const label = r.seq ? `Patch ${r.seq}` : 'Cover letter';
+    const [mailBtn, mailBox] = itemId
+      ? mailToggle(r.seq ? 'patch' : 'cover', itemId, ser.upstream) : [null, null];
     const header = h('div', { class: 'row' },
       h('div', { class: 'grow name' }, itemId
         ? h('a', { href: mailHref(r.seq ? 'patch' : 'cover', itemId, ser.upstream) },
@@ -786,13 +816,17 @@ async function viewReview(id, wantVer) {
       (note, drafts, msg) => revise([r.seq], part, note, drafts, msg)));
     const show = () => card.replaceChildren(header,
       renderMail(r.body, unsent(r) ? ask : null),
-      unsent(r) && h('div', { class: 'actions' },
-        h('button', { class: 'btn light small', onclick: () => editReview(card, r, header, show) },
-          'Edit'),
-        h('button', { class: 'btn light small', onclick: () => ask(null) },
-          'Revise'),
-        confirmButton('Redraft', 'btn light small', () => redraft([r.seq])),
-        r.status === 'draft' && confirmButton('Send', 'btn small', () => send([r.seq]))),
+      (mailBtn || unsent(r)) && h('div', { class: 'actions' },
+        mailBtn,
+        unsent(r) && [
+          h('button', { class: 'btn light small',
+                        onclick: () => editReview(card, r, header, show) }, 'Edit'),
+          h('button', { class: 'btn light small', onclick: () => ask(null) },
+            'Revise'),
+          confirmButton('Redraft', 'btn light small', () => redraft([r.seq])),
+          r.status === 'draft' && confirmButton('Send', 'btn small',
+                                                () => send([r.seq]))]),
+      mailBox,
       ...(r.replies || []).map(replyBox));
     show();
     return card;

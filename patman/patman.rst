@@ -1921,6 +1921,9 @@ Series which you have reviewed, or which are your own, are marked, as are new
 versions of series you reviewed earlier, so it is easy to see what needs a
 review. Tap a series to see its patches and start a review.
 
+Each review has 'Show the patch' (or 'Show the cover letter'), which shows the
+commit message and diff just below the review, so the two can be read together.
+
 A review which has not been sent can be edited on the page. Saving it can also
 update its Gmail draft, so that the draft matches. Whether the review approves
 the patch follows from whether the text includes a ``Reviewed-by:`` line.
