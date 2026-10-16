@@ -7,7 +7,8 @@
 import asyncio
 import base64
 import contextlib
-from datetime import datetime
+from datetime import datetime, timedelta
+import email.utils
 import os
 import re
 import types
@@ -5581,7 +5582,8 @@ Date:   .*
                 'Cc': 'u-boot@lists.denx.de, Tom Rini <trini@k.com>, '
                       'fred@x.com',
                 'Subject': 'Re: [PATCH 2/5] video: Add a driver',
-                'Date': 'Thu, 15 Oct 2026 10:00:00 +0000',
+                'Date': email.utils.format_datetime(
+                    datetime.now().astimezone()),
                 'Message-ID': '<a2@x>', 'In-Reply-To': '<r1@me>',
                 'References': '<p0@x> <r1@me>'}, 'Why do you say that?'),
             self.gmail_msg('m3', {'From': 'Tom <trini@k.com>',
@@ -5844,6 +5846,16 @@ Date:   .*
         self.assertEqual(('sent', 'edited %d' % rids[5]),
                          (db.review_get(rids[5]).status,
                           db.review_get(rids[5]).body))
+
+    def test_review_reply_recent(self):
+        """Only recent replies get a suggested response"""
+        now = datetime.now().astimezone()
+        self.assertTrue(review._is_recent(
+            email.utils.format_datetime(now - timedelta(days=13)), 14))
+        self.assertFalse(review._is_recent(
+            email.utils.format_datetime(now - timedelta(days=15)), 14))
+        self.assertFalse(review._is_recent('garbage', 14))
+        self.assertFalse(review._is_recent(None, 14))
 
     def test_review_needs_draft(self):
         """Sent reviews are never drafted again; -i selects the patches"""

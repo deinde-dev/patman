@@ -1675,9 +1675,12 @@ This:
   for up to three reviews written in the last two weeks
 - Records replies to your reviews, from the patch author or other
   reviewers, in reviews sent in the last 90 days
-- Suggests a response to each new reply when one is needed (e.g.
-  answering questions, pushing back on objections, or conceding
-  gracefully), or notes that none is needed
+- Suggests a response to each new reply from the last 14 days when one
+  is needed (e.g. answering questions, pushing back on objections, or
+  conceding gracefully), or notes that none is needed. Older replies are
+  recorded without a suggestion, so that a backlog does not cause a lot of
+  work for the agent; use ``--suggest-reply`` for any that need one
+- Records replies which you have already answered as answered
 - Detects when a draft response has been sent
 
 A review counts as sent once you have sent a message about the same patch

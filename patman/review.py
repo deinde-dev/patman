@@ -17,7 +17,8 @@ import asyncio
 from collections import namedtuple
 from concurrent import futures
 from datetime import datetime, timedelta
-from email.utils import formataddr, getaddresses, parseaddr
+from email.utils import (formataddr, getaddresses, parseaddr,
+                         parsedate_to_datetime)
 import fcntl
 import os
 import re
@@ -2045,13 +2046,37 @@ def _sync_drafts(service, cser):
 # Only look for replies to reviews sent in this many days
 REPLY_DAYS = 90
 
+# Only ask the agent to suggest a response to replies sent in this many days
+SUGGEST_DAYS = 14
+
+
+def _is_recent(date, days):
+    """Check whether an email's Date header is within a number of days
+
+    Args:
+        date (str): Date header, e.g. 'Thu, 15 Oct 2026 10:00:00 +0000'
+        days (int): Number of days
+
+    Returns:
+        bool: True if it is recent, False if not or if it cannot be read
+    """
+    try:
+        when = parsedate_to_datetime(date)
+    except (TypeError, ValueError):
+        return False
+    if not when.tzinfo:
+        when = when.astimezone()
+    return datetime.now().astimezone() - when <= timedelta(days=days)
+
 
 def _handle_replies(service, ctx):
     """Record replies to our sent reviews and suggest responses
 
     Each reply is recorded once. A reply which we have already answered is
     recorded with our answer. The agent then suggests a response to each
-    other new reply, or decides that none is needed.
+    other new reply sent within SUGGEST_DAYS, or decides that none is
+    needed. Older replies are left for the user, so that a backlog of
+    replies does not cause a lot of work for the agent.
 
     Args:
         service: Gmail API service
@@ -2085,7 +2110,8 @@ def _handle_replies(service, ctx):
                 tout.notice(f"Review {rev.idnum}: reply {reply_id} from "
                             f"{reply['from']}, already answered")
                 continue
-            new.append(reply_id)
+            if _is_recent(reply['date'], SUGGEST_DAYS):
+                new.append(reply_id)
             tout.notice(f"Review {rev.idnum}: reply {reply_id} from "
                         f"{reply['from']}")
     ctx.cser.commit()
