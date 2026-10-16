@@ -21,7 +21,7 @@ Running the tests
 
 The suite is self-contained: a pinned ``checkpatch.pl`` and its helper
 files live in ``scripts/`` and ``u_boot_pylib`` is installed from PyPI as
-``u-boot-pylib`` (https://github.com/nxtboot/u-boot-pylib), so no
+``u-boot-pylib`` (https://github.com/deinde-dev/u-boot-pylib), so no
 surrounding U-Boot source is needed. ``checkpatch.pl`` does need ``perl``
 to be installed.
 

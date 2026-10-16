@@ -70,7 +70,7 @@ You can install patman using::
 
 The name is chosen since patman conflicts with an existing package.
 
-The source code is hosted at https://github.com/nxtboot/patman
+The source code is hosted at https://github.com/deinde-dev/patman
 
 How to use this tool
 --------------------

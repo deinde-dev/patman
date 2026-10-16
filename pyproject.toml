@@ -49,10 +49,10 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/nxtboot/patman"
+Homepage = "https://github.com/deinde-dev/patman"
 Documentation = "https://patman.readthedocs.io/"
-Repository = "https://github.com/nxtboot/patman"
-"Bug Tracker" = "https://github.com/nxtboot/patman/issues"
+Repository = "https://github.com/deinde-dev/patman"
+"Bug Tracker" = "https://github.com/deinde-dev/patman/issues"
 
 [project.scripts]
 patman = "patman.__main__:run_patman"

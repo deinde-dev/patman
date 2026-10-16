@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: patch-manager
 Upstream-Contact: Simon Glass <sjg@chromium.org>
-Source: https://github.com/nxtboot/patman
+Source: https://github.com/deinde-dev/patman
 
 Files: *
 Copyright: 2011-2026 The Chromium OS Authors

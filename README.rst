@@ -1,12 +1,12 @@
-.. image:: https://raw.githubusercontent.com/nxtboot/patman/master/logo/patman-logo-primary.png
+.. image:: https://raw.githubusercontent.com/deinde-dev/patman/master/logo/patman-logo-primary.png
    :alt: Patman
    :width: 400px
 
 Patman patch manager
 ====================
 
-.. image:: https://github.com/nxtboot/patman/actions/workflows/test.yml/badge.svg
-   :target: https://github.com/nxtboot/patman/actions/workflows/test.yml
+.. image:: https://github.com/deinde-dev/patman/actions/workflows/test.yml/badge.svg
+   :target: https://github.com/deinde-dev/patman/actions/workflows/test.yml
    :alt: Test status
 
 .. image:: https://img.shields.io/pypi/v/patch-manager.svg
