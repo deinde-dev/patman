@@ -577,6 +577,35 @@ class TestWebServer(unittest.TestCase, TestCommon):
         status, _ = self.call(srv, 'POST', '/api/jobs/1/cancel')
         self.assertEqual(409, status)
 
+    def test_revise_review(self):
+        """The agent can be asked to change a review, part of one, or all"""
+        series_id, _ = self.add_series('rev', 'Somebody else',
+                                       {1: [('a', 'new', 5, 0)]}, ups='us',
+                                       source='review')
+        srv = self.make_server()
+        srv.get_patman_cmd = lambda *args: ['echo', *args]
+        path = f'/api/reviews/{series_id}/revise'
+        res = self.run_jobs(srv, [
+            ('POST', path, {'seqs': [1], 'note': ' Drop this ',
+                            'part': '> code\nNit', 'drafts': True}),
+            ('POST', path, {'note': 'Approve them all'}),
+            ('POST', path, {'note': ' '}),
+            ('POST', path, {'note': 'x', 'seqs': ['1']}),
+        ])
+        self.assertEqual([202, 202, 404, 404], [status for status, _ in res])
+        self.assertEqual("Revise patch 1 of 'Somebody else' v1",
+                         res[0][1]['title'])
+        self.assertEqual("Revise reviews of 'Somebody else' v1",
+                         res[1][1]['title'])
+        self.assertIn('Please say what to change', res[2][1]['error'])
+        self.assertIn('Invalid seqs', res[3][1]['error'])
+        self.assertEqual(
+            ['review -s 100 --revise About this part of the review:\n\n'
+             '> code\nNit\n\nDrop this -i 1 -U us -d',
+             'review -s 100 --revise Approve them all -U us'],
+            [job.state['results'][0]['output'].strip()
+             for job in reversed(srv.get_jobs())])
+
     def test_edit_review(self):
         """A review which has not been sent can be changed and redrafted"""
         series_id, svids = self.add_series(

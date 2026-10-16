@@ -5847,6 +5847,77 @@ Date:   .*
                          (db.review_get(rids[5]).status,
                           db.review_get(rids[5]).body))
 
+    def test_review_revise(self):
+        """The agent changes unsent reviews following a reviewer's note"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'Fred series', None)
+        db.series_set_source(sid, 'review')
+        svid = db.ser_ver_add(sid, 1, link='123')
+        cover = db.review_add(svid, 0, 'Hi Fred,\n\nNice series', False,
+                              '2026-10-01T00:00:00')
+        first = db.review_add(svid, 1, 'Hi Fred,\n\n> code\n\nNit', False,
+                              '2026-10-01T00:00:00')
+        db.review_set_draft_id(first, 'd1')
+        sent = db.review_add(svid, 2, 'Sent already', False,
+                             '2026-10-01T00:00:00')
+        db.review_set_sent(sent, 'Sent already', 'm1', 't1')
+        db.commit()
+
+        new_body = ('Hi Fred,\n\nReviewed-by: Simon Glass '
+                    '<sjg@chromium.org>')
+        seen = {}
+
+        async def mock_agent(prompt, _options):
+            seen['prompt'] = prompt
+            fname = re.search(r'see file: (\S+)\)', prompt).group(1)
+            seen['reviews'] = tools.read_file(fname, binary=False)
+            # The cover-letter review comes back unchanged
+            return True, ('---SEQ 0---\nHi Fred,\n\nNice series\n'
+                          f'---SEQ 1---\n{new_body}\n')
+
+        args = cmdline.parse_args(
+            ['review', '-s', '123', '--revise', 'Drop the nit, approve it',
+             '-d', '--reviewer', 'Simon Glass <sjg@chromium.org>'],
+            config_fname=False)
+        with mock.patch.object(review.claude_mod, 'run_agent_collect',
+                               side_effect=mock_agent), \
+                mock.patch.object(review.claude_mod, 'check_available',
+                                  return_value=True), \
+                mock.patch.object(review, 'ClaudeAgentOptions',
+                                  mock.MagicMock()), \
+                mock.patch.object(review, '_review_commits',
+                                  return_value=['abc1 dm: Fix it']), \
+                mock.patch.object(review, '_fetch_series',
+                                  return_value=({'id': 123}, 'x', 1, 2)), \
+                mock.patch.object(review, '_delete_gmail_drafts') as delete, \
+                mock.patch.object(review, 'create_drafts') as create, \
+                terminal.capture() as (out, _):
+            self.assertEqual(0, review._do_revise(args, None, cser, '123'))
+        self.assertIn('Drop the nit, approve it', seen['prompt'])
+        self.assertIn('Patch 1: abc1 dm: Fix it', seen['prompt'])
+        self.assertIn('Reviewed-by: Simon Glass <sjg@chromium.org>',
+                      seen['prompt'])
+        self.assertIn('---SEQ 1---', seen['reviews'])
+        self.assertNotIn('Sent already', seen['reviews'])
+        self.assertIn('Revised the review of patch 1', out.getvalue())
+        self.assertNotIn('cover letter', out.getvalue())
+
+        rev = db.review_get(first)
+        self.assertEqual((new_body, 1), (rev.body, rev.approved))
+        self.assertEqual('Hi Fred,\n\nNice series', db.review_get(cover).body)
+        self.assertEqual(['d1'], [r.draft_id for r in delete.call_args.args[1]])
+        self.assertEqual(({1: new_body}, {1: first}),
+                         create.call_args.args[2:])
+
+        # Nothing to do if the selected reviews have all been sent
+        args = cmdline.parse_args(
+            ['review', '-s', '123', '-i', '2', '--revise', 'x'],
+            config_fname=False)
+        with self.assertRaises(ValueError) as exc:
+            review._do_revise(args, None, cser, '123')
+        self.assertIn('No unsent reviews', str(exc.exception))
+
     def test_review_reply_recent(self):
         """Only recent replies get a suggested response"""
         now = datetime.now().astimezone()

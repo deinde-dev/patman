@@ -41,6 +41,9 @@ API (all responses are JSON):
     POST /api/review/scan             Run 'review --scan'; {"drafts": bool}
     POST /api/reviews/<id>/redraft    Recreate Gmail drafts for a reviewed
                                       series; {"version": n, "seqs": [n...]}
+    POST /api/reviews/<id>/revise     Have the agent change unsent reviews;
+                                      {"note": str, "part": str, "version": n,
+                                      "seqs": [n...], "drafts": bool}
     POST /api/review-items/<id>       Change a review which has not been sent;
                                       {"body": str, "redraft": bool}
     POST /api/replies/<id>            Change the response to a reply to a
@@ -1223,6 +1226,41 @@ class Server:
             args += ['-U', ups]
         return self._review_job(f"Redraft '{desc or name}' v{version}", *args)
 
+    async def _revise(self, request):
+        idnum = int(request.match_info['idnum'])
+        data = await self._read_json(request)
+        note = data.get('note')
+        if not isinstance(note, str) or not note.strip():
+            raise ValueError('Please say what to change')
+        note = note.strip()
+        part = data.get('part')
+        if part:
+            if not isinstance(part, str):
+                raise ValueError('Invalid part')
+            note = f'About this part of the review:\n\n{part.strip()}' \
+                   f'\n\n{note}'
+        seqs = data.get('seqs') or []
+        if not isinstance(seqs, list) or not all(
+                isinstance(seq, int) and seq >= 0 for seq in seqs):
+            raise ValueError('Invalid seqs')
+        name, desc, ups = self.rcser.db.series_get_info(idnum)
+        version = _get_int(data, 'version') or \
+            self.rcser.db.series_get_max_version(idnum)
+        link = self.rcser.db.ser_ver_get_link(idnum, version)
+        if not link:
+            raise ValueError(f"Series '{name}' v{version} has no link")
+        args = ['-s', str(link), '--revise', note]
+        if seqs:
+            args += ['-i', ','.join(str(seq) for seq in sorted(seqs))]
+        if ups:
+            args += ['-U', ups]
+        if data.get('drafts'):
+            args.append('-d')
+        what = (f'patch {seqs[0]}' if seqs[0] else 'the cover letter') \
+            if len(seqs) == 1 else 'reviews'
+        return self._review_job(
+            f"Revise {what} of '{desc or name}' v{version}", *args)
+
     async def _review_item(self, request):
         db = self.rcser.db
         rev = db.review_get(int(request.match_info['idnum']))
@@ -1304,6 +1342,8 @@ class Server:
         app.router.add_post('/api/review/scan', self._review_scan)
         app.router.add_post(r'/api/reviews/{idnum:\d+}/redraft',
                             self._redraft)
+        app.router.add_post(r'/api/reviews/{idnum:\d+}/revise',
+                            self._revise)
         app.router.add_post(r'/api/review-items/{idnum:\d+}',
                             self._review_item)
         app.router.add_post(r'/api/replies/{idnum:\d+}', self._reply)

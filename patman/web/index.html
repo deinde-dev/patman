@@ -180,6 +180,10 @@ a.card:active { background: var(--code-bg); }
 .mail summary { color: var(--link); cursor: pointer; font-family: system-ui, sans-serif;
                 font-size: 12px; list-style: none; padding: 2px 0; }
 .mail summary::-webkit-details-marker { display: none; }
+.mail .chunk-btn { font: 12px system-ui, sans-serif; color: var(--link); background: none;
+                   border: 0; padding: 2px 0 6px; cursor: pointer; display: block; }
+.revise-part { margin: 4px 0 8px; max-height: 160px; overflow: auto; }
+.form textarea.note { min-height: 6em; font: inherit; }
 
 .review { margin-top: 8px; }
 .notes { background: var(--code-bg); border-radius: 8px; padding: 10px 12px; }
@@ -355,10 +359,14 @@ function npatches(n) { return `${n} patch${n === 1 ? '' : 'es'}`; }
 
 // Render an email body, with quoted lines dimmed and long runs of
 // quoted text folded away
-function renderMail(text) {
+// Show an email, collapsing long quotes. If onChunk is given, each comment
+// which follows a quote gets a button which calls onChunk() with the quote
+// and the comment
+function renderMail(text, onChunk) {
   const out = h('div', { class: 'mail' });
   const lines = (text || '').replace(/\s+$/, '').split('\n');
   let i = 0;
+  let lastQuote = null;
   while (i < lines.length) {
     if (lines[i].startsWith('>')) {
       let j = i;
@@ -377,11 +385,24 @@ function renderMail(text) {
       } else {
         out.append(quote(run));
       }
+      lastQuote = run;
       i = j;
     } else {
       let j = i;
       while (j < lines.length && !lines[j].startsWith('>')) j++;
-      out.append(lines.slice(i, j).join('\n') + '\n');
+      // Split off the tag and sign-off, which are not part of the comment
+      let k = i;
+      while (k < j && !/^(Reviewed-by:|Regards,)/.test(lines[k])) k++;
+      const comment = lines.slice(i, k).join('\n');
+      out.append(comment + '\n');
+      if (onChunk && lastQuote && comment.trim()) {
+        // Send the end of the quote, which is what the comment is about
+        const part = [...lastQuote.slice(-8), '', comment.trim()].join('\n');
+        out.append(h('button', { class: 'chunk-btn', onclick: () => onChunk(part) },
+                     '✎ Revise this'));
+      }
+      if (k < j) out.append(lines.slice(k, j).join('\n') + '\n');
+      lastQuote = null;
       i = j;
     }
   }
@@ -744,6 +765,8 @@ async function viewReview(id, wantVer) {
   const unsent = (r) => r.status !== 'sent' && r.status !== 'replied';
   const redraft = (seqs) => startJob(`reviews/${id}/redraft`,
                                      { version: sv.version, seqs });
+  const revise = (seqs, part, note, drafts, msg) => startJob(`reviews/${id}/revise`,
+    { version: sv.version, seqs, part, note, drafts }, msg);
   const reviewCard = (r) => {
     const card = h('div', { class: 'card review' });
     const pat = r.seq ? (sv.patches || []).find((p) => p.seq === r.seq) : null;
@@ -757,10 +780,16 @@ async function viewReview(id, wantVer) {
       h('span', { class: `chip ${r.approved ? 'st-accepted' : 'st-changes-requested'}` },
         r.approved ? 'Reviewed-by' : 'comments'),
       h('span', { class: 'ver' }, REVIEW_STATUS[r.status] || r.status || ''));
-    const show = () => card.replaceChildren(header, renderMail(r.body),
+    const ask = (part) => card.replaceChildren(header, reviseForm(
+      part, r.status === 'draft', show,
+      (note, drafts, msg) => revise([r.seq], part, note, drafts, msg)));
+    const show = () => card.replaceChildren(header,
+      renderMail(r.body, unsent(r) ? ask : null),
       unsent(r) && h('div', { class: 'actions' },
         h('button', { class: 'btn light small', onclick: () => editReview(card, r, header, show) },
           'Edit'),
+        h('button', { class: 'btn light small', onclick: () => ask(null) },
+          'Revise'),
         confirmButton('Redraft', 'btn light small', () => redraft([r.seq]))),
       ...(r.replies || []).map(replyBox));
     show();
@@ -768,8 +797,16 @@ async function viewReview(id, wantVer) {
   };
   const reviews = sv.reviews.map(reviewCard);
   const anyUnsent = sv.reviews.some(unsent);
+  const reviseAll = h('div', {});
+  const askAll = () => reviseAll.replaceChildren(h('div', { class: 'card' },
+    h('div', { class: 'name' }, 'Revise all the reviews'),
+    reviseForm(null, sv.reviews.some((r) => r.status === 'draft'),
+               () => reviseAll.replaceChildren(),
+               (note, drafts, msg) => revise([], null, note, drafts, msg))));
   const actions = sv.link && h('div', { class: 'actions' },
     anyUnsent && confirmButton('Redraft all', 'btn light small', () => redraft([])),
+    anyUnsent && h('button', { class: 'btn light small', onclick: askAll },
+                   'Revise all'),
     confirmButton('Review again', 'btn light small', () => startJob('review',
       { target: sv.link, ups: ser.upstream, drafts: true, force: true })),
     ser.patchwork_url && h('a', { class: 'btn light small', target: '_blank',
@@ -785,6 +822,7 @@ async function viewReview(id, wantVer) {
         ser.upstream && h('span', {}, ser.upstream),
         sv.link && h('span', {}, `series ${sv.link}`)),
       actions),
+    reviseAll,
     tabs,
     sv.notes && h('div', { class: 'section' }, 'Notes'),
     sv.notes && h('div', { class: 'notes' }, renderMail(sv.notes)),
@@ -869,6 +907,31 @@ function replyBox(rp) {
   };
   show();
   return box;
+}
+
+// A form asking the agent to change a review, or part of one, or all of them.
+// Calls submit(note, drafts, msg) when the user sends it
+function reviseForm(part, drafted, cancel, submit) {
+  const text = h('textarea', { class: 'note', spellcheck: 'true',
+    placeholder: part ? "e.g. 'Drop this', 'Suggest a timeout instead'"
+                      : "e.g. 'Approve it', 'Drop the comments about style'" });
+  const box = h('input', { type: 'checkbox', checked: drafted });
+  const msg = h('div', { class: 'msg' });
+  const send = h('button', { class: 'btn small', onclick: async () => {
+    send.disabled = true;
+    msg.textContent = '';
+    await submit(text.value, box.checked, msg);
+    send.disabled = false;
+  } }, 'Revise');
+  const form = h('div', { class: 'form' },
+    part && h('div', { class: 'hint' }, 'About this part:'),
+    part && h('div', { class: 'notes revise-part' }, renderMail(part)),
+    h('label', {}, 'What should change?'), text,
+    h('label', { class: 'check' }, box, 'Update the Gmail draft'),
+    h('div', { class: 'actions' }, send,
+      h('button', { class: 'btn light small', onclick: cancel }, 'Cancel')), msg);
+  setTimeout(() => text.focus(), 0);
+  return form;
 }
 
 // Change the text of a review which has not been sent

@@ -325,6 +325,15 @@ Create the Gmail drafts of a reviewed series again. The body may have
 ``version`` (int), defaulting to the latest, and ``seqs`` (list of int), the
 patches to act on, using 0 for the cover letter; the default is all of them.
 
+``POST /api/reviews/<id>/revise``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Have the agent change the reviews of a series which have not been sent,
+following a note. The body has ``note`` (str), saying what to change, and may
+have ``part`` (str), the part of a review which the note is about, and
+``drafts`` (bool) to update the Gmail drafts, along with ``version`` and
+``seqs`` as for ``redraft``.
+
 ``POST /api/review-items/<id>``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -645,6 +645,11 @@ def add_review_subparser(subparsers):
         help='Recreate Gmail drafts from the stored reviews even when a '
              'draft already exists, to recover after an error')
     review.add_argument(
+        '--revise', type=str, metavar='NOTE',
+        help='Ask the agent to change the stored reviews of the series as '
+             'the note says, e.g. "Drop the comments about style" (with '
+             '-i, only those patches; with -d, update the Gmail drafts)')
+    review.add_argument(
         '--review-db-dir', type=str, default=None, metavar='DIR',
         help='Directory holding a separate database for reviews (the '
              "'review_db_dir' setting); upstreams are still read from the "

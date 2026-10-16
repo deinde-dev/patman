@@ -1467,6 +1467,19 @@ been reviewed and the drafts already exist::
 Any existing draft is deleted first, so it is not left as a duplicate
 in the thread.
 
+To have the agent change reviews which have not been sent yet, say what you
+want in a note with ``--revise``. It changes only what the note asks for,
+and can check the code using the review branch. Use ``-i`` to pick which
+patches' reviews it looks at (0 is the cover letter), and ``-d`` to update
+the Gmail drafts of the reviews which change::
+
+    patman review -s 497923 -U us -i 4 -d \
+        --revise 'Ask for a timeout rather than an unbounded loop'
+    patman review -s 497923 -U us --revise 'Drop the comments about style'
+
+The review approves the patch (with a ``Reviewed-by`` tag) if the note says
+the patch is fine, and stops approving it if the note asks for a change.
+
 Use ``--apply-only`` to download and apply patches without running the
 review -- useful for checking that patches apply cleanly.
 
@@ -1884,6 +1897,12 @@ review. Tap a series to see its patches and start a review.
 A review which has not been sent can be edited on the page. Saving it can also
 update its Gmail draft, so that the draft matches. Whether the review approves
 the patch follows from whether the text includes a ``Reviewed-by:`` line.
+
+To have the agent change a review which has not been sent, tap 'Revise' under
+it and say what should change, or tap 'Revise this' under one comment to talk
+about just that part. 'Revise all' at the top applies a note to every unsent
+review of the series, e.g. 'drop the comments about style'. These run ``patman
+review --revise``, updating the Gmail drafts if selected.
 
 Replies to reviews
 ------------------

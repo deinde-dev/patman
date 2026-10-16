@@ -2550,6 +2550,192 @@ def _draft_stored_reviews(args, reviews, series_data, pwork, cser):
     create_drafts(ctx, args, review_bodies, review_ids)
 
 
+_REVISE_PROMPT = '''You are a U-Boot maintainer. You drafted the code
+reviews in the file below, but they have not been sent yet. The reviewer has
+read them and wants them changed, as described in their note.
+
+NOTE FROM THE REVIEWER:
+{note}
+
+REVIEWS:
+(see file: {reviews_path})
+
+Each review in the file starts with a line '---SEQ N---', where N is the
+patch number (0 is the cover letter).
+
+{patches}
+
+TASK:
+- Change the reviews as the note asks. If the note quotes part of a review,
+  it is about that part.
+- If the note applies to more than one review, e.g. 'drop the comments about
+  style', apply it to each of them
+- Change only what the note asks for, keeping the rest of each review as it
+  is, word for word
+- Check the code if you need to, with 'git show' on the commits above. Do not
+  read files in the working tree, since it does not hold the patches.
+- Do NOT run 'git checkout', switch branches or change any files
+- Keep the email format: the greeting, the quoted lines starting with '>',
+  the comments after each quote and the closing lines
+- If the note says a patch is fine and its review has no comments left,
+  approve it by ending the review with: Reviewed-by: {tag}
+- If the note asks for a change to a patch which its review approves, remove
+  the Reviewed-by line
+- Use {spelling} spelling
+
+OUTPUT:
+Output ONLY the reviews you changed, each as the line '---SEQ N---' followed
+by the complete new text of that review. Leave out reviews which need no
+change. Do not add any commentary.
+'''
+
+
+def _review_commits(args, cser, link, ups):
+    """Get the commits holding the patches of a reviewed series
+
+    The review branch is left in place after a review, so the patches can be
+    read from it.
+
+    Args:
+        args (Namespace): Command-line arguments (for base_branch)
+        cser (Cseries): Open cseries instance
+        link (str): Patchwork series link/ID
+        ups (str or None): Upstream name
+
+    Returns:
+        list of str: One line for each commit, 'hash subject', oldest first,
+            or an empty list if the branch is not present
+    """
+    branch = _make_review_name(link, ups)
+    try:
+        base = _get_upstream_branch(args, cser)
+        out = subprocess.run(
+            ['git', 'log', '--reverse', '--format=%H %s', f'{base}..{branch}'],
+            capture_output=True, text=True, check=True,
+            cwd=gitutil.get_top_level()).stdout
+    except (subprocess.CalledProcessError, ValueError):
+        return []
+    return out.splitlines()
+
+
+async def revise_reviews(ctx, reviews, note, commits):
+    """Ask the agent to change some reviews, following a note from the reviewer
+
+    Args:
+        ctx (ReviewContext): Review context (uses repo_path, reviewer_tag
+            and spelling)
+        reviews (dict): Map of seq to review body text
+        note (str): What the reviewer wants changed
+        commits (list of str): 'hash subject' for each patch, in order
+
+    Returns:
+        dict or None: Map of seq to new review body text, for each review
+            which changed, or None if the agent is not available or failed
+    """
+    if not claude_mod.check_available():
+        return None
+    parts = []
+    for seq in sorted(reviews):
+        parts += [f'---SEQ {seq}---', reviews[seq]]
+    if commits:
+        lines = '\n'.join(f'Patch {seq}: {line}'
+                          for seq, line in enumerate(commits, 1))
+        patches = f'The patches are these commits:\n{lines}'
+    else:
+        patches = 'The patches are not available in the repository.'
+    with tempfile.NamedTemporaryFile('w', prefix='patman_revise_',
+                                     suffix='.txt', delete=False) as outf:
+        outf.write('\n'.join(parts))
+        reviews_path = outf.name
+    try:
+        prompt = _REVISE_PROMPT.format(
+            note=note, reviews_path=reviews_path, patches=patches,
+            tag=ctx.reviewer_tag, spelling=ctx.spelling)
+        options = _agent_options(
+            allowed_tools=['Bash', 'Read', 'Grep'], cwd=ctx.repo_path,
+            max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
+        tout.notice('Revising reviews...')
+        success, log = await claude_mod.run_agent_collect(prompt, options)
+    finally:
+        os.unlink(reviews_path)
+    if not success:
+        return None
+    return {seq: body for seq, body in _parse_refined_output(log).items()
+            if seq in reviews and body and body != reviews[seq].strip()}
+
+
+def revise_reviews_sync(ctx, reviews, note, commits):
+    """Synchronous wrapper for revise_reviews()"""
+    loop = asyncio.get_event_loop()
+    return loop.run_until_complete(
+        revise_reviews(ctx, reviews, note, commits))
+
+
+def _do_revise(args, pwork, cser, link):
+    """Change stored reviews of a series, following a note from the reviewer
+
+    Only reviews which have not been sent are changed. With -i, only those
+    patches' reviews are given to the agent. With -d, the Gmail drafts of the
+    reviews which change are recreated.
+
+    Args:
+        args (Namespace): Command-line arguments
+        pwork (Patchwork): Configured patchwork instance
+        cser (Cseries): Open cseries instance
+        link (str): Patchwork series link/ID
+
+    Returns:
+        int: 0 on success, 1 on failure
+    """
+    existing = cser.db.series_find_by_link(link)
+    if not existing:
+        raise ValueError(f'Series {link} has not been reviewed')
+    _, name, version, svid = existing
+    sel = parse_patch_selection(args.patches)
+    reviews = [rev for rev in cser.db.review_get_for_version(svid)
+               if rev.status not in (database.REVIEW_SENT,
+                                     database.REVIEW_REPLIED) and
+               (not sel or rev.seq in sel)]
+    if not reviews:
+        raise ValueError(f"No unsent reviews to revise in '{name}' "
+                         f'v{version}')
+
+    ctx = ReviewContext(pwork, cser, {})
+    ctx.reviewer_name, ctx.reviewer_email = _parse_reviewer(args)
+    ctx.repo_path = gitutil.get_top_level()
+    ctx.spelling = args.spelling
+    ups = pwork.upstream if pwork else None
+    commits = _review_commits(args, cser, link, ups)
+    changed = revise_reviews_sync(
+        ctx, {rev.seq: rev.body for rev in reviews}, args.revise, commits)
+    if changed is None:
+        tout.error('Could not revise the reviews')
+        return 1
+    if not changed:
+        tout.notice('No reviews needed changing')
+        return 0
+
+    for rev in reviews:
+        if rev.seq in changed:
+            body = changed[rev.seq]
+            cser.db.review_set_body(rev.idnum, body,
+                                    'Reviewed-by:' in body)
+            label = f'patch {rev.seq}' if rev.seq else 'the cover letter'
+            tout.notice(f'Revised the review of {label}')
+            print(body)
+            print()
+    cser.commit()
+
+    if args.create_drafts:
+        redo = [cser.db.review_get(rev.idnum) for rev in reviews
+                if rev.seq in changed]
+        _delete_gmail_drafts(args, redo)
+        ctx.series_data = _fetch_series(pwork, link)[0]
+        create_drafts(ctx, args, {rev.seq: rev.body for rev in redo},
+                      {rev.seq: rev.idnum for rev in redo})
+    return 0
+
+
 def _get_upstream_branch(args, cser):
     """Determine the base branch for applying patches
 
@@ -3439,6 +3625,8 @@ def do_review(args, pwork, cser):
     elif not link:
         link = search_series(pwork, args.title, getattr(args, 'version', None))
 
+    if getattr(args, 'revise', None):
+        return _do_revise(args, pwork, cser, link)
     return _review_link(args, pwork, cser, link)
 
 
