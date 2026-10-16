@@ -24,6 +24,8 @@ API (all responses are JSON):
                                       from patchwork; ?ups=<upstream>
     GET  /api/cover/<id>              A cover letter, read from patchwork;
                                       ?ups=<upstream>
+    GET  /api/blob?hash=<h>[&hash=]   A file from the git repo: the first
+                                      blob given which the repo holds
     GET  /api/reviews                 Series reviewed with 'patman review'
     GET  /api/reviews/<id>            Reviews for each version of one
     GET  /api/todo                    Todo entries from the workflow table
@@ -192,6 +194,51 @@ def _mail_info(data):
                     'version': ser.get('version')}
                    for ser in data.get('series') or []],
     }
+
+
+# A blob hash, as in the 'index' line of a diff
+RE_BLOB = re.compile(r'^[0-9a-f]{7,40}$')
+
+# Largest file which can be read from the git repo
+MAX_BLOB = 4 << 20
+
+
+async def read_blob(topdir, hashes):
+    """Read a file from the git repo
+
+    A diff names the blobs of each file before and after the change, but
+    the repo may only hold one of them, so this tries each in turn.
+
+    Args:
+        topdir (str): Top directory of the git repo
+        hashes (list of str): Blob hashes, possibly abbreviated, to try in
+            order
+
+    Return:
+        tuple:
+            str: Hash of the blob found, as given
+            str: Contents of the file
+
+    Raises:
+        ValueError: A hash is invalid, none of the blobs is in the repo or
+            the file is too large or not text
+    """
+    for oid in hashes:
+        if not RE_BLOB.match(oid):
+            raise ValueError(f"Invalid blob hash '{oid}'")
+        proc = await asyncio.create_subprocess_exec(
+            'git', 'cat-file', 'blob', oid, cwd=topdir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL)
+        data, _ = await proc.communicate()
+        if proc.returncode:
+            continue
+        if len(data) > MAX_BLOB:
+            raise ValueError(f'File is too large ({len(data)} bytes)')
+        if b'\0' in data:
+            raise ValueError('File is not text')
+        return oid, data.decode('utf-8', errors='replace')
+    raise ValueError('The file is not in the git repo')
 
 
 def _reply_info(reply):
@@ -1176,6 +1223,11 @@ class Server:
                 data = await pwork.get_cover(client, item_id)
         return web.json_response(_mail_info(data))
 
+    async def _blob(self, request):
+        oid, text = await read_blob(self.cser.topdir,
+                                    request.query.getall('hash', []))
+        return web.json_response({'hash': oid, 'text': text})
+
     async def _sync_get(self, _request):
         return web.json_response(self.sync_state)
 
@@ -1433,6 +1485,7 @@ class Server:
                            self._comments)
         app.router.add_get(r'/api/{kind:patch|cover}/{item_id:\d+}',
                            self._mail)
+        app.router.add_get('/api/blob', self._blob)
         app.router.add_get('/api/sync', self._sync_get)
         app.router.add_post('/api/sync', self._sync_post)
         app.router.add_post('/api/sync/cancel', self._sync_cancel_post)

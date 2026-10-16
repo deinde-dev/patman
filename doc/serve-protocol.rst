@@ -259,6 +259,20 @@ has ``ups``, ``page``, ``per_page`` and ``series``, a list of objects with:
   title, i.e. an earlier version
 - ``mine`` (bool): true if this is one of your own series
 
+Files
+-----
+
+``GET /api/blob``
+~~~~~~~~~~~~~~~~~
+
+A file from the git repo, given the hash of its blob in the ``hash`` query
+parameter, as in the ``index`` line of a diff. The parameter can be given more
+than once, in which case the first blob which the repo has is used, since the
+repo may have the file before a patch or after it, but not both. The response
+has ``hash``, the hash which was found, and ``text``, the contents of the file.
+A hash which is not 7 to 40 hex digits, a file which is not text or is larger
+than 4MB, and a file which is not in the repo each give an error.
+
 Reviews
 -------
 

@@ -364,6 +364,34 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(('Cover text', '', None),
                          (data['content'], data['diff'], data['submitter']))
 
+    def test_blob(self):
+        """A file can be read from the git repo by its blob hash"""
+        def add_blob(data):
+            return subprocess.run(
+                ['git', 'hash-object', '-w', '--stdin'], cwd=self.tmpdir,
+                input=data, capture_output=True, check=True).stdout.decode(
+                    ).strip()
+
+        subprocess.run(['git', 'init', '-q'], cwd=self.tmpdir, check=True)
+        oid = add_blob(b'line 1\nline 2\n')
+        binary = add_blob(b'a\0b')
+        srv = self.make_server()
+
+        # The first blob which the repo holds is used
+        status, data = self.call(srv, 'GET', '/api/blob',
+                                 params=[('hash', '1234567'),
+                                         ('hash', oid[:10])])
+        self.assertEqual((200, {'hash': oid[:10], 'text': 'line 1\nline 2\n'}),
+                         (status, data))
+
+        for params, msg in (
+                ([('hash', '1234567')], 'The file is not in the git repo'),
+                ([], 'The file is not in the git repo'),
+                ([('hash', '--help')], "Invalid blob hash '--help'"),
+                ([('hash', binary)], 'File is not text')):
+            status, data = self.call(srv, 'GET', '/api/blob', params=params)
+            self.assertEqual((404, {'error': msg}), (status, data))
+
     def test_pwork_per_upstream(self):
         """Each upstream uses its own patchwork URL"""
         self.cser.db.upstream_add('us', 'https://us.git',
