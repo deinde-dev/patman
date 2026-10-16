@@ -24,6 +24,12 @@ Changed
 - ``series gather-all`` reads each series from the patchwork server of its
   upstream, and updates the series it can read even if others fail.
 
+Fixed
+~~~~~
+- Reviews which have been sent are not drafted again by ``review -d``,
+  ``--scan`` or ``--redraft``, and ``--redraft`` only drafts the patches
+  chosen with ``-i``.
+
 0.3.3 - 2026-10-12
 ------------------
 

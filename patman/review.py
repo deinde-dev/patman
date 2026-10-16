@@ -2203,12 +2203,35 @@ def _delete_gmail_drafts(args, reviews):
     tout.notice(f'Deleted {len(draft_ids)} old Gmail draft(s)')
 
 
+def _needs_draft(rev, redraft):
+    """Check whether a stored review should get a Gmail draft
+
+    A review which has been sent never gets a new draft. Without redraft,
+    only reviews which have never had a draft get one; with it, existing
+    drafts are recreated and deleted drafts are brought back.
+
+    Args:
+        rev (Review): Review record
+        redraft (bool): True to recreate drafts which exist or were deleted
+
+    Returns:
+        bool: True if a draft should be created
+    """
+    if rev.status in (database.REVIEW_SENT, database.REVIEW_REPLIED):
+        return False
+    if redraft:
+        return True
+    return not rev.draft_id and rev.status != database.REVIEW_DELETED
+
+
 def _draft_stored_reviews(args, reviews, series_data, pwork, cser):
     """Create Gmail drafts from stored review records
 
     Drafts reviews that do not already have a draft_id. With --redraft it
     drafts every stored review, recreating drafts that already exist so a
-    failed or lost draft can be regenerated from the database.
+    failed or lost draft can be regenerated from the database. Reviews which
+    have been sent are never drafted again. With -i, only the selected
+    patches are drafted.
 
     Args:
         args (Namespace): Command-line arguments
@@ -2217,11 +2240,10 @@ def _draft_stored_reviews(args, reviews, series_data, pwork, cser):
         pwork (Patchwork): Patchwork instance
         cser (Cseries): Cseries instance
     """
-    if args.redraft:
-        need_draft = list(reviews)
-    else:
-        need_draft = [rev for rev in reviews
-                      if not rev.draft_id]
+    sel = parse_patch_selection(getattr(args, 'patches', None))
+    need_draft = [rev for rev in reviews
+                  if _needs_draft(rev, args.redraft) and
+                  (not sel or rev.seq in sel)]
     if not need_draft:
         tout.notice('All reviews already have Gmail drafts')
         return
@@ -2886,7 +2908,7 @@ def _draft_undrafted(args, pwork, cser, dry_run=False):
         if series_id not in review_ids:
             continue
         reviews = cser.db.review_get_for_version(svid)
-        if not reviews or not any(not rev.draft_id for rev in reviews):
+        if not any(_needs_draft(rev, False) for rev in reviews):
             continue
         link = cser.db.ser_ver_get_link(series_id, version)
         if not link:

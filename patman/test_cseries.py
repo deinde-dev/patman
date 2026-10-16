@@ -5322,6 +5322,30 @@ Date:   .*
         self.assertEqual('a@b.org, c@d.org',
                          gmail._format_addrs([['a@b.org', 'c@d.org']]))
 
+    def test_review_needs_draft(self):
+        """Sent reviews are never drafted again; -i selects the patches"""
+        def rev(seq, draft_id, status):
+            return database.Review(seq, 1, seq, f'body {seq}', False, None,
+                                   draft_id, status, None, None)
+
+        new = rev(1, None, database.REVIEW_NEW)
+        draft = rev(2, 'd2', database.REVIEW_DRAFT)
+        deleted = rev(3, None, database.REVIEW_DELETED)
+        sent = rev(4, None, database.REVIEW_SENT)
+        replied = rev(5, None, database.REVIEW_REPLIED)
+        reviews = [new, draft, deleted, sent, replied]
+        self.assertEqual([new], [r for r in reviews
+                                 if review._needs_draft(r, False)])
+        self.assertEqual([new, draft, deleted],
+                         [r for r in reviews if review._needs_draft(r, True)])
+
+        args = cmdline.parse_args(['review', '--redraft', '-i', '2-4'],
+                                  config_fname=False)
+        with mock.patch.object(review, 'create_drafts') as create, \
+                mock.patch.object(review, '_delete_gmail_drafts'):
+            review._draft_stored_reviews(args, reviews, {}, None, None)
+        self.assertEqual({2: 'body 2', 3: 'body 3'}, create.call_args.args[2])
+
     def test_review_redraft(self):
         """Test --redraft recreates drafts for an already-reviewed series"""
         self.get_cser()
