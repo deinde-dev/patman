@@ -28,6 +28,8 @@ API (all responses are JSON):
     POST /api/sync                    Start a sync now
     POST /api/sync/cancel             Stop the sync which is running
     GET  /api/upstreams               Upstreams which have a patchwork server
+    GET  /api/inbox                   Recent series on patchwork, marking those
+                                      reviewed; ?ups=<upstream>&page=<n>
     GET  /api/jobs                    Background jobs, newest first
     GET  /api/jobs/<id>               One job, including its output so far
     POST /api/jobs/<id>/cancel        Stop a job
@@ -66,6 +68,9 @@ MAX_JOB_OUTPUT = 20000
 
 # Maximum number of jobs to remember
 MAX_JOBS = 20
+
+# Number of series in each page of the inbox
+INBOX_PAGE = 50
 
 def _state_counts(pcommits):
     """Count the patchwork states of a list of patches
@@ -300,6 +305,64 @@ def get_review_detail(cser, idnum):
     versions.sort(key=lambda item: item['version'], reverse=True)
     return {'id': idnum, 'name': name, 'desc': desc, 'upstream': ups,
             'versions': versions}
+
+
+def _norm_title(title):
+    """Normalise a series title so that versions of a series can be matched
+
+    Args:
+        title (str): Title, e.g. '[v2] video: Add a driver'
+
+    Return:
+        str: Normalised title, e.g. 'video: add a driver'
+    """
+    return re.sub(r'^(\[[^]]*\]\s*)+', '', title or '').strip().lower()
+
+
+def get_inbox(cser, rcser, series_list):
+    """Get information about recent series on patchwork, for review
+
+    Args:
+        cser (Cseries): Open cseries instance with your own series
+        rcser (Cseries): Open cseries instance with the reviews
+        series_list (list of dict): Series from patchwork, newest first
+
+    Return:
+        list of dict: One item for each series
+    """
+    reviews = rcser.db.series_get_dict(include_archived=True,
+                                       reviews_only=True).values()
+    review_ids = {ser.idnum for ser in reviews}
+    by_title = {}
+    for ser in reviews:
+        by_title.setdefault(_norm_title(ser.desc), ser.idnum)
+    out = []
+    for data in series_list:
+        link = str(data['id'])
+        found = rcser.db.series_find_by_link(link)
+        reviewed = found[0] if found and found[0] in review_ids else None
+        own = cser.db.series_find_by_link(link)
+        cover = data.get('cover_letter')
+        submitter = data.get('submitter') or {}
+        out.append({
+            'id': data['id'],
+            'name': data.get('name') or '',
+            'version': data.get('version'),
+            'date': data.get('date'),
+            'submitter': submitter.get('name') or submitter.get('email'),
+            'total': data.get('total'),
+            'received_all': data.get('received_all'),
+            'web_url': data.get('web_url'),
+            'cover_id': cover['id'] if cover else None,
+            'patches': [{'id': pat['id'], 'name': pat.get('name')}
+                        for pat in data.get('patches') or []],
+            'reviewed': reviewed,
+            'earlier': (None if reviewed else
+                        by_title.get(_norm_title(data.get('name')))),
+            'mine': bool(own) and (rcser is not cser or
+                                   own[0] not in review_ids),
+        })
+    return out
 
 
 def get_todo_list(cser):
@@ -896,6 +959,20 @@ class Server:
                             'patchwork_url': pw_url})
         return web.json_response(out)
 
+    async def _inbox(self, request):
+        ups = request.query.get('ups') or self.cser.db.upstream_get_default()
+        page = _get_int(request.query, 'page') or 1
+        proj = self.cser.project_get(ups)
+        if not proj:
+            raise ValueError(f"No patchwork project for upstream '{ups}'")
+        pwork = self.get_pwork(ups)
+        async with aiohttp.ClientSession() as client:
+            series_list = await pwork.get_recent_series(client, proj[2], page,
+                                                        INBOX_PAGE)
+        return web.json_response({
+            'ups': ups, 'page': page, 'per_page': INBOX_PAGE,
+            'series': get_inbox(self.cser, self.rcser, series_list)})
+
     async def _job_list(self, _request):
         return web.json_response([job.state for job in self.get_jobs()])
 
@@ -993,6 +1070,7 @@ class Server:
         app.router.add_post('/api/sync', self._sync_post)
         app.router.add_post('/api/sync/cancel', self._sync_cancel_post)
         app.router.add_get('/api/upstreams', self._upstreams)
+        app.router.add_get('/api/inbox', self._inbox)
         app.router.add_get('/api/jobs', self._job_list)
         app.router.add_get(r'/api/jobs/{idnum:\d+}', self._job_detail)
         app.router.add_post(r'/api/jobs/{idnum:\d+}/cancel', self._job_cancel)

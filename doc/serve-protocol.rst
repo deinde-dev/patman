@@ -189,6 +189,31 @@ given its patchwork ID: a list of Comment.
 The upstreams which have a patchwork server, each an object with ``name``,
 ``default`` (true for the default upstream) and ``patchwork_url``.
 
+``GET /api/inbox``
+~~~~~~~~~~~~~~~~~~
+
+The most recent series on the patchwork server of an upstream, for choosing
+what to review. The ``ups`` query parameter gives the upstream, defaulting to
+the default upstream, which must have a patchwork project. The ``page`` query
+parameter gives the page, starting at 1, with 50 series on each. The response
+has ``ups``, ``page``, ``per_page`` and ``series``, a list of objects with:
+
+- ``id`` (int): patchwork series ID
+- ``name`` (str): name of the series
+- ``version`` (int): version
+- ``date`` (str): when it was sent
+- ``submitter`` (str): name or email address of the sender
+- ``total`` (int): number of patches
+- ``received_all`` (bool): true if patchwork has all of them
+- ``web_url`` (str): URL of the series on patchwork
+- ``cover_id`` (int or null): patchwork cover-letter ID
+- ``patches`` (list): each with ``id`` (patchwork ID) and ``name``
+- ``reviewed`` (int or null): ID of the reviewed series, if this one has been
+  reviewed
+- ``earlier`` (int or null): if not, the ID of a reviewed series with the same
+  title, i.e. an earlier version
+- ``mine`` (bool): true if this is one of your own series
+
 Reviews
 -------
 

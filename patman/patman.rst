@@ -1760,6 +1760,7 @@ page has these tabs:
   letter to read its comments, which are fetched from patchwork
 - **Reviews**: series you have reviewed with ``patman review``, showing the
   review of each patch and whether it has been drafted, sent or replied to
+- **Inbox**: recent series on patchwork, showing which you have reviewed
 - **Jobs**: reviews and other commands started from the page, and the syncs,
   with their output
 - **Todo**: series marked with ``patman workflow todo``, due ones first
@@ -1827,6 +1828,11 @@ series or patch, or words from a cover-letter title, and runs ``patman review``
 (with ``-d`` to create Gmail drafts, if selected). 'Scan for new versions' runs
 ``patman review --scan``. Each reviewed series has buttons to recreate its
 Gmail drafts, either all of them or one patch's, and to review it again.
+
+The Inbox tab lists the most recent series on patchwork for each upstream.
+Series which you have reviewed, or which are your own, are marked, as are new
+versions of series you reviewed earlier, so it is easy to see what needs a
+review. Tap a series to see its patches and start a review.
 
 Jobs
 ----

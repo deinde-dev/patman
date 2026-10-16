@@ -226,6 +226,8 @@ input[type=password] {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Series</a>
   <a href="#/reviews" data-tab="reviews">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Reviews</a>
+  <a href="#/inbox" data-tab="inbox">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>Inbox</a>
   <a href="#/jobs" data-tab="jobs">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></svg>Jobs</a>
   <a href="#/todo" data-tab="todo">
@@ -336,6 +338,7 @@ function stateChips(states) {
     h('span', { class: `chip ${stClass(st)}` }, `${n} ${st}`));
 }
 function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
+function npatches(n) { return `${n} patch${n === 1 ? '' : 'es'}`; }
 
 // Render an email body, with quoted lines dimmed and long runs of
 // quoted text folded away
@@ -702,6 +705,86 @@ async function viewReviewForm() {
     h('div', { class: 'actions' }, submit), msg));
 }
 
+// --- Inbox ---
+
+// Pages of the inbox read so far, so 'Load more' can add to them
+let inbox = null;
+
+function inboxDetails(s, ups, pw) {
+  return h('div', { class: 'comments' },
+    h('div', { class: 'list' }, s.patches.map((p, i) => h('div', { class: 'row' },
+      h('span', { class: 'seq' }, i + 1),
+      h('div', { class: 'grow' },
+        pw ? h('a', { href: `${pw}/patch/${p.id}/`, target: '_blank', rel: 'noopener' },
+               p.name) : p.name)))),
+    h('div', { class: 'actions' },
+      confirmButton(s.reviewed ? 'Review again' : 'Review', 'btn small',
+        () => startJob('review', { target: String(s.id), ups, drafts: true,
+                                   force: !!s.reviewed })),
+      s.web_url && h('a', { class: 'btn light small', href: s.web_url,
+                            target: '_blank', rel: 'noopener' }, 'patchwork ↗')));
+}
+
+function inboxCard(s, ups, pw) {
+  const card = h('div', { class: 'card patch' },
+    h('div', { class: 'row' },
+      h('div', { class: 'grow name' }, s.name),
+      s.version && h('div', { class: 'ver' }, `v${s.version}`)),
+    h('div', { class: 'meta' },
+      h('span', {}, s.submitter || ''),
+      h('span', {}, ago(parseTime(s.date, true))),
+      h('span', {}, npatches(s.total || s.patches.length)),
+      s.reviewed && h('a', { class: 'chip st-accepted', href: `#/reviews/${s.reviewed}` },
+                      'reviewed'),
+      s.earlier && h('a', { class: 'chip st-under-review', href: `#/reviews/${s.earlier}` },
+                     'earlier version reviewed'),
+      s.mine && h('span', { class: 'chip st-other' }, 'yours'),
+      !s.received_all && h('span', { class: 'chip st-changes-requested' }, 'incomplete')));
+  let box = null;
+  card.addEventListener('click', (ev) => {
+    if (ev.target.closest('a, button, .comments')) return;
+    if (box) { box.remove(); box = null; return; }
+    box = inboxDetails(s, ups, pw);
+    card.append(box);
+  });
+  const groups = ['all'];
+  if (!s.reviewed && !s.mine) groups.push('todo');
+  if (s.earlier) groups.push('newver');
+  return { card, text: `${s.name} ${s.submitter || ''}`, groups };
+}
+
+async function viewInbox(more) {
+  const upstreams = await api('upstreams').catch(() => []);
+  let ups = null;
+  try { ups = localStorage.getItem('patman-inbox-ups'); } catch (e) { /* ignore */ }
+  if (!upstreams.some((u) => u.name === ups)) {
+    ups = (upstreams.find((u) => u.default) || upstreams[0] || {}).name || '';
+  }
+  const pw = (upstreams.find((u) => u.name === ups) || {}).patchwork_url;
+  if (!more || !inbox || inbox.ups !== ups) {
+    inbox = { ups, page: 0, series: [], done: false };
+  }
+  const data = await api(`inbox?ups=${encodeURIComponent(ups)}&page=${inbox.page + 1}`);
+  inbox.page = data.page;
+  inbox.series.push(...data.series);
+  inbox.done = data.series.length < data.per_page;
+
+  const upsTabs = upstreams.length > 1 && h('div', { class: 'tabs' },
+    upstreams.map((u) => h('button', { class: u.name === ups ? 'on' : '', onclick: () => {
+      try { localStorage.setItem('patman-inbox-ups', u.name); } catch (e) { /* ignore */ }
+      route();
+    } }, u.name)));
+  const loadMore = !inbox.done && h('div', { class: 'actions' },
+    h('button', { class: 'btn light', onclick: (ev) => {
+      ev.target.disabled = true;
+      viewInbox(true).catch((err) => showError(err, 'inbox'));
+    } }, 'Load more'));
+  setView('Inbox', 'inbox', false, upsTabs,
+    ...filteredList('inbox', inbox.series.map((s) => inboxCard(s, ups, pw)),
+                    [['todo', 'To review'], ['newver', 'New versions'], ['all', 'All']]),
+    loadMore);
+}
+
 // --- Todo ---
 
 async function viewTodo() {
@@ -882,6 +965,7 @@ async function route() {
     if (page === 'series' && id) await viewSeries(+id, ver ? +ver : null);
     else if (page === 'reviews' && id) await viewReview(+id, ver ? +ver : null);
     else if (page === 'review' && id === 'new') await viewReviewForm();
+    else if (page === 'inbox') await viewInbox();
     else if (page === 'jobs' && id) await viewJob(+id);
     else if (page === 'jobs') await viewJobs();
     else if (page === 'reviews') await viewReviewList();

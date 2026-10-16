@@ -566,6 +566,59 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertTrue(second['cancelled'])
         self.assertEqual([], second['results'])
 
+    def test_inbox(self):
+        """The inbox lists recent series, marking those already reviewed"""
+        rev_id, _ = self.add_series('rev', 'video: Add a driver',
+                                    {2: [('a', 'new', 6, 0)]},
+                                    source='review')
+        self.add_series('mine', 'My series', {1: [('x', 'new', 7, 0)]})
+        db = self.cser.db
+        db.upstream_add('us', 'https://us', 'https://pw.us')
+        db.upstream_set_default('us')
+        db.patchwork_update('U-Boot', 6, 'uboot', 'us')
+        db.commit()
+
+        def series(idnum, name, version):
+            return {'id': idnum, 'name': name, 'version': version,
+                    'date': '2026-10-01T10:00:00', 'total': 1,
+                    'received_all': True, 'web_url': f'https://pw/{idnum}',
+                    'submitter': {'name': 'Fred', 'email': 'f@b.com'},
+                    'cover_letter': None,
+                    'patches': [{'id': idnum * 10, 'name': name}]}
+
+        pages = {
+            'series/?project=uboot&order=-date&page=1&per_page=50': [
+                series(300, '[v3] video: Add a driver', 3),
+                series(200, 'video: Add a driver', 2),
+                series(100, 'My series', 1),
+                series(400, 'net: Something new', 1)],
+        }
+        srv = self.make_server()
+        srv.pwork_for_testing.fake_request = pages.get
+        status, data = self.call(srv, 'GET', '/api/inbox')
+        self.assertEqual(200, status)
+        self.assertEqual(('us', 1), (data['ups'], data['page']))
+        items = {item['id']: item for item in data['series']}
+        self.assertEqual([300, 200, 100, 400], list(items))
+
+        # A new version of a reviewed series is linked to the review
+        self.assertEqual((None, rev_id, False),
+                         (items[300]['reviewed'], items[300]['earlier'],
+                          items[300]['mine']))
+        self.assertEqual((rev_id, None), (items[200]['reviewed'],
+                                          items[200]['earlier']))
+        self.assertTrue(items[100]['mine'])
+        self.assertEqual((None, None, False),
+                         (items[400]['reviewed'], items[400]['earlier'],
+                          items[400]['mine']))
+        self.assertEqual('Fred', items[400]['submitter'])
+        self.assertEqual([{'id': 4000, 'name': 'net: Something new'}],
+                         items[400]['patches'])
+
+        status, data = self.call(srv, 'GET', '/api/inbox?ups=xx')
+        self.assertEqual(404, status)
+        self.assertIn("No patchwork project for upstream 'xx'", data['error'])
+
     def test_upstreams(self):
         """Upstreams with a patchwork server are listed"""
         with terminal.capture():

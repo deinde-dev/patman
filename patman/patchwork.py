@@ -426,6 +426,22 @@ class Patchwork:
         self.proj_id = project_id
         self.link_name = link_name
 
+    async def get_recent_series(self, client, project, page=1, per_page=50):
+        """Read the most recent series in a project, newest first
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            project (str): Project link name, e.g. 'uboot'
+            page (int): Page number, starting at 1
+            per_page (int): Number of series in each page
+
+        Returns:
+            list of dict: Series information, as for get_series()
+        """
+        return await self._request(
+            client, f'series/?project={project}&order=-date&page={page}'
+            f'&per_page={per_page}')
+
     async def get_series(self, client, link):
         """Read information about a series
 
