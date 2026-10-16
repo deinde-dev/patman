@@ -19,6 +19,7 @@ from u_boot_pylib import terminal
 from patman import cmdline
 from patman import control
 from patman import cseries
+from patman import database
 from patman.database import Pcommit
 from patman import patchwork
 from patman.patchwork import Patchwork
@@ -219,7 +220,8 @@ class TestWebServer(unittest.TestCase, TestCommon):
             {'id': ser_id, 'name': 'rev', 'desc': 'Somebody else',
              'upstream': None, 'version': 2, 'link': '200', 'num_reviews': 2,
              'approved': 1, 'statuses': {'new': 1, 'draft': 1},
-             'timestamp': '2026-10-01 10:00:00'}, data[0])
+             'timestamp': '2026-10-01 10:00:00', 'replies_waiting': 0},
+            data[0])
 
         status, data = self.call(srv, 'GET', f'/api/reviews/{ser_id}')
         self.assertEqual(200, status)
@@ -230,7 +232,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(
             {'id': rid, 'seq': 1, 'body': '> code\nLooks good',
              'approved': True, 'timestamp': '2026-10-01 10:00:00',
-             'status': 'draft'},
+             'status': 'draft', 'replies': []},
             latest['reviews'][1])
         self.assertEqual(['old review'],
                          [r['body'] for r in data['versions'][1]['reviews']])
@@ -615,6 +617,62 @@ class TestWebServer(unittest.TestCase, TestCommon):
                          [job.state['results'][0]['output'].strip()
                           for job in srv.get_jobs()])
         self.assertEqual(series_id, db.ser_ver_get_by_id(svids[1]).series_id)
+
+    def test_replies(self):
+        """Replies to reviews can be seen, and responses changed and drafted"""
+        series_id, svids = self.add_series(
+            'rev', 'Somebody else', {1: [('a', 'new', 5, 0)]}, ups='us',
+            source='review')
+        db = self.cser.db
+        rid = db.review_add(svids[1], 1, 'Please fix', False,
+                            '2026-10-01 10:00:00')
+        db.review_set_sent(rid, 'Please fix', 'm1', 't1')
+        first = db.reply_add(rid, 'm2', '<a2@x>', '<r1@me>', 'Fred <f@x>',
+                             'me@x', '', 'Re: [PATCH] a', 'today', 'Why?',
+                             '2026-10-02 10:00:00')
+        second = db.reply_add(rid, 'm3', '<a3@x>', '<r1@me>', 'Tom <t@x>',
+                              'me@x', '', 'Re: [PATCH] a', 'today', 'OK',
+                              '2026-10-02 11:00:00')
+        db.reply_set_response(second, 'Thanks', database.REPLY_SENT)
+        db.commit()
+
+        srv = self.make_server()
+        srv.get_patman_cmd = lambda *args: ['echo', *args]
+        _, data = self.call(srv, 'GET', '/api/reviews')
+        self.assertEqual(1, data[0]['replies_waiting'])
+        _, data = self.call(srv, 'GET', f'/api/reviews/{series_id}')
+        replies = data['versions'][0]['reviews'][0]['replies']
+        self.assertEqual(
+            {'id': first, 'sender': 'Fred <f@x>', 'subject': 'Re: [PATCH] a',
+             'date': 'today', 'body': 'Why?', 'response': None,
+             'status': 'new', 'timestamp': '2026-10-02 10:00:00'},
+            replies[0])
+        self.assertEqual(('sent', 'Thanks'),
+                         (replies[1]['status'], replies[1]['response']))
+
+        res = self.run_jobs(srv, [
+            ('POST', f'/api/replies/{first}', {'response': 'Because'}),
+            ('POST', f'/api/replies/{first}',
+             {'response': 'Because of this', 'draft': True}),
+            ('POST', f'/api/replies/{first}/suggest', None),
+            ('POST', f'/api/replies/{second}', {'response': 'x'}),
+            ('POST', '/api/replies/999', {'skip': True}),
+        ])
+        self.assertEqual([200, 202, 202, 409, 404],
+                         [status for status, _ in res])
+        self.assertEqual(('suggested', 'Because'),
+                         (res[0][1]['status'], res[0][1]['response']))
+        self.assertEqual(
+            [f'review --draft-reply {first}', f'review --suggest-reply {first}'],
+            [job.state['results'][0]['output'].strip()
+             for job in reversed(srv.get_jobs())])
+        self.assertEqual('Because of this', db.reply_get(first).response)
+
+        _, data = self.call(srv, 'POST', f'/api/replies/{first}',
+                            json={'skip': True})
+        self.assertEqual('skip', data['status'])
+        _, data = self.call(srv, 'GET', '/api/reviews')
+        self.assertEqual(0, data[0]['replies_waiting'])
 
     def test_cancel_queued_job(self):
         """A job which is waiting for another can be cancelled"""

@@ -43,6 +43,10 @@ API (all responses are JSON):
                                       series; {"version": n, "seqs": [n...]}
     POST /api/review-items/<id>       Change a review which has not been sent;
                                       {"body": str, "redraft": bool}
+    POST /api/replies/<id>            Change the response to a reply to a
+                                      review; {"response": str, "skip": bool,
+                                      "draft": bool}
+    POST /api/replies/<id>/suggest    Ask the agent to suggest a response
 
 Jobs (syncs and reviews) run one at a time, in the order they are started.
 """
@@ -62,6 +66,7 @@ from aiohttp import web
 
 from u_boot_pylib import tout
 
+from patman import database
 from patman import review as review_mod
 from patman.patchwork import Patchwork
 from patman.workflow import Wtype
@@ -171,6 +176,27 @@ def _mail_info(data):
         'series': [{'id': ser.get('id'), 'name': ser.get('name'),
                     'version': ser.get('version')}
                    for ser in data.get('series') or []],
+    }
+
+
+def _reply_info(reply):
+    """Convert a reply record to a JSON-friendly dict
+
+    Args:
+        reply (Reply): Record to convert
+
+    Return:
+        dict: Reply information
+    """
+    return {
+        'id': reply.idnum,
+        'sender': reply.sender,
+        'subject': reply.subject,
+        'date': reply.date,
+        'body': reply.body,
+        'response': reply.response,
+        'status': reply.status,
+        'timestamp': reply.timestamp,
     }
 
 
@@ -292,6 +318,7 @@ def get_review_list(cser):
         list of dict: One item for each series, most recent review first
     """
     latest = _latest_versions(cser)
+    waiting = cser.db.reply_count_waiting()
     out = []
     for ser in cser.db.series_get_dict(reviews_only=True).values():
         svr = latest.get(ser.idnum)
@@ -308,6 +335,7 @@ def get_review_list(cser):
             'statuses': dict(Counter(rev.status or 'new' for rev in reviews)),
             'timestamp': max((rev.timestamp for rev in reviews
                               if rev.timestamp), default=None),
+            'replies_waiting': waiting.get(ser.idnum, 0),
         })
     return sorted(out, key=lambda item: item['timestamp'] or '',
                   reverse=True)
@@ -331,8 +359,12 @@ def get_review_detail(cser, idnum):
     for svr in cser.db.ser_ver_get_for_series(idnum):
         info = _version_info(svr)
         info['notes'] = svr.notes
-        info['reviews'] = [_review_info(rev) for rev in
-                           cser.db.review_get_for_version(svr.idnum)]
+        info['reviews'] = []
+        for rev in cser.db.review_get_for_version(svr.idnum):
+            item = _review_info(rev)
+            item['replies'] = [_reply_info(reply) for reply in
+                               cser.db.reply_get_for_review(rev.idnum)]
+            info['reviews'].append(item)
         info['patches'] = [_patch_info(pcm) for pcm in sorted(
             cser.db.pcommit_get_list(svr.idnum), key=lambda pcm: pcm.seq)]
         versions.append(info)
@@ -1130,6 +1162,35 @@ class Server:
             return self._redraft_job(svr.series_id, svr.version, [rev.seq])
         return web.json_response(_review_info(db.review_get(rev.idnum)))
 
+    async def _reply(self, request):
+        db = self.rcser.db
+        reply = db.reply_get(int(request.match_info['idnum']))
+        data = await self._read_json(request)
+        if reply.status == database.REPLY_SENT:
+            return web.json_response(
+                {'error': 'The response has already been sent'}, status=409)
+        if 'response' in data:
+            response = data['response']
+            if not isinstance(response, str):
+                raise ValueError('Invalid response')
+            db.reply_set_response(
+                reply.idnum, response if response.strip() else None,
+                database.REPLY_SUGGESTED if response.strip() else
+                database.REPLY_NEW)
+        if data.get('skip'):
+            db.reply_set_status(reply.idnum, database.REPLY_SKIP,
+                                reply.draft_id)
+        self.rcser.commit()
+        if data.get('draft'):
+            return self._review_job(f'Draft response to reply {reply.idnum}',
+                                    '--draft-reply', str(reply.idnum))
+        return web.json_response(_reply_info(db.reply_get(reply.idnum)))
+
+    async def _reply_suggest(self, request):
+        reply = self.rcser.db.reply_get(int(request.match_info['idnum']))
+        return self._review_job(f'Suggest a response to reply {reply.idnum}',
+                                '--suggest-reply', str(reply.idnum))
+
     async def _index(self, _request):
         return web.FileResponse(os.path.join(WEB_DIR, 'index.html'))
 
@@ -1163,6 +1224,9 @@ class Server:
                             self._redraft)
         app.router.add_post(r'/api/review-items/{idnum:\d+}',
                             self._review_item)
+        app.router.add_post(r'/api/replies/{idnum:\d+}', self._reply)
+        app.router.add_post(r'/api/replies/{idnum:\d+}/suggest',
+                            self._reply_suggest)
         app.router.add_get('/', self._index)
         app.router.add_static('/static', WEB_DIR)
         app.on_startup.append(self._start_background)

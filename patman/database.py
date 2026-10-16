@@ -1665,6 +1665,21 @@ class Database:  # pylint:disable=R0904
                            tuple(statuses))
         return [Reply(*rec) for rec in res.fetchall()]
 
+    def reply_count_waiting(self):
+        """Count the replies which still need attention, for each series
+
+        Return:
+            dict: key (int): series ID, value (int): number of replies
+        """
+        marks = ', '.join(['?'] * len(REPLY_WAITING))
+        res = self.execute(
+            'SELECT sv.series_id, COUNT(*) FROM reply rp '
+            'JOIN review r ON r.id = rp.review_id '
+            'JOIN ser_ver sv ON sv.id = r.svid '
+            f'WHERE rp.status IN ({marks}) GROUP BY sv.series_id',
+            REPLY_WAITING)
+        return dict(res.fetchall())
+
     def reply_set_response(self, reply_id, response, status):
         """Set our response to a reply
 

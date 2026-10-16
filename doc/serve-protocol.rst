@@ -26,9 +26,9 @@ cover letters are not stored, so these are read from patchwork when asked for.
 
 Series IDs are those of the patman database: ``/api/series/<id>`` takes the ID
 of one of your series and ``/api/reviews/<id>`` the ID of a reviewed series, in
-the review database. ``/api/review-items/<id>`` takes the ID of a review, as
-given in the reviews. IDs from patchwork, such as a patch or cover-letter ID,
-are named as such.
+the review database. ``/api/review-items/<id>`` takes the ID of a review, and
+``/api/replies/<id>`` the ID of a reply, as given in the reviews. IDs from
+patchwork, such as a patch or cover-letter ID, are named as such.
 
 Times are local, in the form ``YYYY-MM-DD HH:MM:SS``, except where they come
 from patchwork or email, which give their own form.
@@ -118,6 +118,23 @@ A review of one patch, or of the cover letter:
 - ``timestamp`` (str): when it was written
 - ``status`` (str or null): ``new``, ``draft``, ``sent``, ``replied`` or
   ``deleted``
+- ``replies`` (list of Reply): replies to the review, oldest first; only given
+  by ``GET /api/reviews/<id>``
+
+Reply
+~~~~~
+
+A reply to a review which was sent:
+
+- ``id`` (int): ID of the reply
+- ``sender`` (str): sender, e.g. ``Name <email>``
+- ``subject`` (str): subject
+- ``date`` (str): date from the email
+- ``body`` (str): text of the reply
+- ``response`` (str or null): our response
+- ``status`` (str): ``new``, ``suggested`` (there is a response), ``skip`` (no
+  response is needed), ``draft`` (the response is in Gmail) or ``sent``
+- ``timestamp`` (str): when the reply was found
 
 Job
 ~~~
@@ -255,6 +272,7 @@ reviewed first. Each is an object with:
 - ``statuses`` (object): number of reviews with each status, using ``new`` for
   those with none
 - ``timestamp`` (str or null): when the latest review was written
+- ``replies_waiting`` (int): number of replies which need a response
 
 ``GET /api/reviews/<id>``
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -317,6 +335,27 @@ Change a review which has not been sent, given its ID. The body may have:
 The response is the Review, or with ``redraft``, status 202 and the Job which
 updates the draft. A review which has been sent cannot be changed, giving
 status 409.
+
+Replies
+-------
+
+``POST /api/replies/<id>``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Change the response to a reply, given its ID. The body may have:
+
+- ``response`` (str): new response; an empty one removes it
+- ``skip`` (bool): note that no response is needed
+- ``draft`` (bool): create a Gmail draft of the response, threaded as a reply
+
+The response is the Reply, or with ``draft``, status 202 and the Job which
+creates the draft. Once the response has been sent, it cannot be changed,
+giving status 409.
+
+``POST /api/replies/<id>/suggest``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Have the agent suggest a response to a reply, giving status 202 and the Job.
 
 Todo
 ----

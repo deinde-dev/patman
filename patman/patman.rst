@@ -1870,6 +1870,16 @@ A review which has not been sent can be edited on the page. Saving it can also
 update its Gmail draft, so that the draft matches. Whether the review approves
 the patch follows from whether the text includes a ``Reviewed-by:`` line.
 
+Replies to reviews
+------------------
+
+When someone replies to one of your reviews (found by ``review --sync``, so use
+``serve -r``), the reply is shown below the review, along with any response the
+agent suggests. The Reviews tab has a 'Needs reply' filter. You can edit the
+response, or write one, then create a Gmail draft which is threaded as a reply.
+You can also tap 'Suggest a response' to have the agent suggest one (again), or
+note that no reply is needed.
+
 Jobs
 ----
 
