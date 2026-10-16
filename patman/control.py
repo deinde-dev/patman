@@ -449,7 +449,10 @@ def do_review(args, test_db=None, pwork=None, cser=None):
 
         # Resolve patchwork URL
         if not pwork and not args.learn_voice and not args.sync \
-                and not args.relink:
+                and not args.relink \
+                and not getattr(args, 'list_replies', False) \
+                and not getattr(args, 'suggest_reply', None) \
+                and not getattr(args, 'draft_reply', None):
             ups = args.upstream
             if not ups:
                 ups = cser.db.upstream_get_default()

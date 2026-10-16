@@ -16,7 +16,8 @@ Gmail draft replies.
 import asyncio
 from collections import namedtuple
 from concurrent import futures
-from datetime import datetime
+from datetime import datetime, timedelta
+from email.utils import formataddr, getaddresses, parseaddr
 import fcntl
 import os
 import re
@@ -24,6 +25,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 
 import aiohttp
 
@@ -1959,52 +1961,233 @@ def _sync_drafts(service, cser):
     return True
 
 
-def _handle_replies(service, account, ctx):
-    """Check for replies to sent reviews and generate responses
+# Only look for replies to reviews sent in this many days
+REPLY_DAYS = 90
+
+
+def _handle_replies(service, ctx):
+    """Record replies to our sent reviews and suggest responses
+
+    Each reply is recorded once. A reply which we have already answered is
+    recorded with our answer. The agent then suggests a response to each
+    other new reply, or decides that none is needed.
 
     Args:
         service: Gmail API service
-        account (str or None): Gmail account for creating drafts
         ctx (ReviewContext): Review context
+
+    Return:
+        int: Number of new replies
     """
-    sent_reviews = ctx.cser.db.review_get_by_status('sent',
-                                                     need_thread=True)
+    db = ctx.cser.db
+    cutoff = (datetime.now() - timedelta(days=REPLY_DAYS)).isoformat()
+    reviews = [rev for status in (database.REVIEW_SENT,
+                                  database.REVIEW_REPLIED)
+               for rev in db.review_get_by_status(status, need_thread=True)
+               if (rev.timestamp or '') >= cutoff]
 
-    reply_count = 0
-
-    for rev in sent_reviews:
-        replies = gmail.fetch_thread_replies(
-            service, rev.gmail_thread_id, rev.gmail_msg_id)
-        if not replies:
-            continue
-
-        tout.notice(f'Review {rev.idnum}: {len(replies)} reply(ies)')
-        ctx.cser.db.review_set_replied(rev.idnum)
-
-        for reply in replies:
-            response = handle_reply_sync(ctx, rev.body, reply['from'],
-                                         reply['body'])
-            if response:
-                reply_count += 1
-                tout.notice(f"  Draft response to {reply['from']}")
-                terminal.tprint(f"\n--- Reply to {reply['from']} ---",
-                                colour=terminal.Color.CYAN)
-                print('---email start---')
-                print(response)
-                print('---email end---')
-                print()
-
-                if account:
-                    gmail.create_draft(gmail.get_service(account),
-                        reply['from'], 'Re: ', response)
-                    tout.notice('  Draft created')
-            else:
-                tout.notice(
-                    f"  No response needed to {reply['from']}")
-
-    if reply_count:
-        tout.notice(f'Created {reply_count} response draft(s)')
+    new = []
+    for rev in reviews:
+        for reply in gmail.fetch_thread_replies(
+                service, rev.gmail_thread_id, rev.gmail_msg_id):
+            reply_id = db.reply_add(
+                rev.idnum, reply['msg_id'], reply['message_id'],
+                reply['references'], reply['from'], reply['to'],
+                reply['cc'], reply['subject'], reply['date'], reply['body'],
+                datetime.now().isoformat())
+            if reply_id is None:
+                continue
+            db.review_set_replied(rev.idnum)
+            if reply['answer']:
+                db.reply_set_response(reply_id, reply['answer'],
+                                      database.REPLY_SENT)
+                tout.notice(f"Review {rev.idnum}: reply {reply_id} from "
+                            f"{reply['from']}, already answered")
+                continue
+            new.append(reply_id)
+            tout.notice(f"Review {rev.idnum}: reply {reply_id} from "
+                        f"{reply['from']}")
     ctx.cser.commit()
+
+    for reply_id in new:
+        _suggest_response(ctx, reply_id)
+    if new:
+        tout.notice(f'{len(new)} new reply(ies)')
+    return len(new)
+
+
+def _suggest_response(ctx, reply_id):
+    """Ask the agent to suggest a response to a reply, and record it
+
+    Args:
+        ctx (ReviewContext): Review context
+        reply_id (int): ID of the reply
+    """
+    db = ctx.cser.db
+    reply = db.reply_get(reply_id)
+    rev = db.review_get(reply.review_id)
+    status, response = handle_reply_sync(ctx, rev.body, reply.sender,
+                                         reply.body)
+    if not status:
+        tout.warning(f'Reply {reply_id}: no response could be suggested')
+        return
+    db.reply_set_response(reply_id, response, status)
+    ctx.cser.commit()
+    if response:
+        tout.notice(f'Reply {reply_id}: response suggested')
+        print(response)
+    else:
+        tout.notice(f'Reply {reply_id}: no response needed')
+
+
+def _reply_cc(reply, own):
+    """Work out who to copy on a response to a reply
+
+    Everyone the reply went to is copied, except ourselves and the person
+    who sent it, who receives the response directly.
+
+    Args:
+        reply (Reply): Reply being responded to
+        own (set of str): Our own email addresses, in lower case
+
+    Return:
+        str: Cc header, or '' if nobody
+    """
+    skip = set(own) | {parseaddr(reply.sender)[1].lower()}
+    out = []
+    for name, addr in getaddresses([reply.to_addrs or '',
+                                    reply.cc_addrs or '']):
+        if addr and addr.lower() not in skip:
+            skip.add(addr.lower())
+            out.append(formataddr((name, addr)))
+    return ', '.join(out)
+
+
+def _draft_response(service, ctx, reply_id, account=None):
+    """Create a Gmail draft of our response to a reply
+
+    The draft is threaded as a reply to it. Any earlier draft of the
+    response is deleted.
+
+    Args:
+        service: Gmail API service
+        ctx (ReviewContext): Review context
+        reply_id (int): ID of the reply
+        account (str or None): Gmail account in use
+
+    Raises:
+        ValueError: There is no response, or it has already been sent
+    """
+    db = ctx.cser.db
+    reply = db.reply_get(reply_id)
+    if reply.status == database.REPLY_SENT:
+        raise ValueError(f'The response to reply {reply_id} has been sent')
+    if not (reply.response or '').strip():
+        raise ValueError(f'There is no response to reply {reply_id}')
+    if reply.draft_id:
+        gmail.delete_draft(service, reply.draft_id)
+
+    subject = reply.subject or ''
+    if not subject.lower().startswith('re:'):
+        subject = f'Re: {subject}'
+    refs = ' '.join(item for item in (reply.refs, reply.msgid) if item)
+    own = {addr.lower() for addr in (ctx.reviewer_email, account) if addr}
+    sender = None
+    if ctx.reviewer_name and ctx.reviewer_email:
+        sender = formataddr((ctx.reviewer_name, ctx.reviewer_email))
+    draft = gmail.create_draft(
+        service, reply.sender, subject, reply.response,
+        in_reply_to=reply.msgid or None, references=refs or None,
+        cc=_reply_cc(reply, own) or None, sender=sender)
+    db.reply_set_status(reply_id, database.REPLY_DRAFT, draft['id'])
+    ctx.cser.commit()
+    tout.notice(f'Reply {reply_id}: created Gmail draft of the response')
+
+
+def _sync_reply_drafts(service, cser):
+    """Check whether drafts of our responses have been sent or deleted
+
+    Args:
+        service: Gmail API service
+        cser (Cseries): Open cseries instance
+    """
+    drafts = cser.db.reply_get_by_status([database.REPLY_DRAFT])
+    if not drafts:
+        return
+    sent, deleted = gmail.sync_drafts(service, [
+        SimpleNamespace(idnum=rep.idnum, draft_id=rep.draft_id,
+                        body=rep.response) for rep in drafts])
+    for reply_id, (body, _, _) in sent.items():
+        cser.db.reply_set_response(reply_id, body, database.REPLY_SENT)
+        tout.notice(f'Reply {reply_id}: response sent')
+    for reply_id in deleted:
+        cser.db.reply_set_status(reply_id, database.REPLY_SUGGESTED)
+        tout.notice(f'Reply {reply_id}: draft deleted (not sent)')
+    cser.commit()
+
+
+def _make_reply_ctx(args, cser):
+    """Set up a review context for handling replies
+
+    Args:
+        args (Namespace): Command-line arguments
+        cser (Cseries): Open cseries instance
+
+    Return:
+        ReviewContext: Context
+    """
+    ctx = ReviewContext(None, cser, {})
+    ctx.reviewer_name, ctx.reviewer_email = _parse_reviewer(args)
+    ctx.repo_path = gitutil.get_top_level()
+    ctx.signoff = getattr(args, 'signoff', '') or None
+    if ctx.signoff:
+        ctx.signoff = ctx.signoff.replace('\\n', '\n')
+    ctx.spelling = getattr(args, 'spelling', 'British')
+    return ctx
+
+
+def _list_replies(cser):
+    """Show the replies which still need a response
+
+    Args:
+        cser (Cseries): Open cseries instance
+
+    Return:
+        int: 0
+    """
+    replies = cser.db.reply_get_by_status(list(database.REPLY_WAITING))
+    if not replies:
+        tout.notice('No replies need a response')
+        return 0
+    for reply in replies:
+        state = ('response suggested' if reply.status ==
+                 database.REPLY_SUGGESTED else 'no response yet')
+        print(f'{reply.idnum:5}  {reply.sender}: {reply.subject} ({state})')
+    return 0
+
+
+def _do_reply_cmd(args, cser):
+    """Handle --replies, --suggest-reply and --draft-reply
+
+    Args:
+        args (Namespace): Command-line arguments
+        cser (Cseries): Open cseries instance
+
+    Return:
+        int: 0 on success, 1 on failure
+    """
+    if args.list_replies:
+        return _list_replies(cser)
+    ctx = _make_reply_ctx(args, cser)
+    if args.suggest_reply:
+        _suggest_response(ctx, args.suggest_reply)
+    if args.draft_reply:
+        if not gmail.check_available():
+            return 1
+        account = getattr(args, 'gmail_account', None)
+        _draft_response(gmail.get_service(account), ctx, args.draft_reply,
+                        account)
+    return 0
 
 
 def _do_sync(args, cser):
@@ -2023,18 +2206,8 @@ def _do_sync(args, cser):
     service = gmail.get_service(account)
 
     _sync_drafts(service, cser)
-
-    reviewer_name, reviewer_email = _parse_reviewer(args)
-    ctx = ReviewContext(None, cser, {})
-    ctx.reviewer_name = reviewer_name
-    ctx.reviewer_email = reviewer_email
-    ctx.repo_path = gitutil.get_top_level()
-    ctx.signoff = getattr(args, 'signoff', '') or None
-    if ctx.signoff:
-        ctx.signoff = ctx.signoff.replace('\\n', '\n')
-    ctx.spelling = getattr(args, 'spelling', 'British')
-
-    _handle_replies(service, account, ctx)
+    _sync_reply_drafts(service, cser)
+    _handle_replies(service, _make_reply_ctx(args, cser))
     return 0
 
 
@@ -3123,6 +3296,11 @@ def do_review(args, pwork, cser):
     if args.sync:
         return _do_sync(args, cser)
 
+    if (getattr(args, 'list_replies', False) or
+            getattr(args, 'suggest_reply', None) or
+            getattr(args, 'draft_reply', None)):
+        return _do_reply_cmd(args, cser)
+
     if args.relink:
         return _do_relink(args, cser)
 
@@ -3449,11 +3627,15 @@ async def handle_reply(ctx, review_body, reply_from, reply_body):
         reply_body (str): The reply text
 
     Returns:
-        str or None: Response email body, or None if no response needed
+        tuple:
+            str or None: database.REPLY_SUGGESTED if there is a response,
+                database.REPLY_SKIP if no response is needed, or None if the
+                agent is not available or failed
+            str or None: Response email body, if there is one
     """
 
     if not claude_mod.check_available():
-        return None
+        return None, None
 
     # Write our review and the reply to temp files
     review_path = os.path.join(tempfile.gettempdir(),
@@ -3477,11 +3659,11 @@ async def handle_reply(ctx, review_body, reply_from, reply_body):
             os.unlink(path)
 
     if not success or not log.strip():
-        return None
+        return None, None
 
     greeting, verdict, comments = parse_review_output(log)
     if verdict == 'skip':
-        return None
+        return database.REPLY_SKIP, None
 
     if '<' in reply_from:
         reply_name = reply_from.split('<')[0].strip()
@@ -3497,7 +3679,8 @@ async def handle_reply(ctx, review_body, reply_from, reply_body):
     reply_ctx.reviewer_name = ctx.reviewer_name
     reply_ctx.reviewer_email = ctx.reviewer_email
     reply_ctx.signoff = ctx.signoff
-    return format_review_email(reply_ctx, greeting, verdict, comments)
+    return database.REPLY_SUGGESTED, format_review_email(
+        reply_ctx, greeting, verdict, comments)
 
 
 def handle_reply_sync(ctx, review_body, reply_from, reply_body):

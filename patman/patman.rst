@@ -1672,9 +1672,28 @@ This:
   content in the database (for context when reviewing future versions)
 - Detects deleted drafts (review not sent)
 - Refines the voice profile if the sent text differs from the draft
-- Detects replies from the patch author or other reviewers
-- Generates response drafts when appropriate (e.g. answering
-  questions, pushing back on objections, or conceding gracefully)
+- Records replies to your reviews, from the patch author or other
+  reviewers, in reviews sent in the last 90 days
+- Suggests a response to each new reply when one is needed (e.g.
+  answering questions, pushing back on objections, or conceding
+  gracefully), or notes that none is needed
+- Detects when a draft response has been sent
+
+Only messages which reply to your review are recorded; other messages in
+the same thread, and your own, are ignored.
+
+Responding to replies
+---------------------
+
+To see the replies which still need a response, and act on them::
+
+    patman review --replies             # list them, with their IDs
+    patman review --suggest-reply 12    # ask the agent (again) for a response
+    patman review --draft-reply 12      # create a Gmail draft of it
+
+The draft is threaded as a reply to the reply, with a 'Re:' subject, and is
+copied to everyone the reply went to. The response can also be edited, and
+the draft created, from the Reviews tab of ``patman serve``.
 
 Scanning for new versions
 -------------------------
@@ -1899,7 +1918,7 @@ Database schema
 
 Patman stores series tracking, review and workflow state in a SQLite
 database (``.patman.db``) in the top-level git directory. The schema is
-versioned and auto-migrated on startup (currently at v10).
+versioned and auto-migrated on startup (currently at v11).
 
 Set the ``PATMAN_DB_DIR`` environment variable to use a database elsewhere
 (``~`` is expanded). The variable names a *directory* in which patman looks
@@ -2085,6 +2104,34 @@ status            TEXT      'new', 'draft', 'sent', 'deleted',
                             'replied' (added v9)
 gmail_msg_id      TEXT      Gmail message ID after sending (added v9)
 gmail_thread_id   TEXT      Gmail thread ID for replies (added v9)
+================  ========  ==========================================
+
+reply
+~~~~~
+
+When someone replies to one of your sent reviews, ``patman review --sync``
+records the reply here (added v11), along with your response to it. The
+response can be suggested by the agent, edited and then turned into a Gmail
+draft which is threaded as a reply.
+
+================  ========  ==========================================
+Column            Type      Description
+================  ========  ==========================================
+id                INTEGER   Primary key (auto-increment)
+review_id         INTEGER   FK -> review.id
+gmail_msg_id      TEXT      Gmail message ID of the reply (unique)
+msgid             TEXT      Message-ID header, for threading a response
+refs              TEXT      References header
+sender            TEXT      From header
+to_addrs          TEXT      To header
+cc_addrs          TEXT      Cc header
+subject           TEXT      Subject header
+date              TEXT      Date header
+body              TEXT      Text of the reply
+response          TEXT      Text of your response, if any
+status            TEXT      'new', 'suggested', 'skip', 'draft', 'sent'
+draft_id          TEXT      Gmail draft ID of the response
+timestamp         TEXT      When the reply was recorded
 ================  ========  ==========================================
 
 upstream

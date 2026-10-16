@@ -26,6 +26,10 @@ Added
 - ``patman database`` (alias ``db``) moves reviews between the main and review
   databases with ``split`` and ``join``, and copies series from another
   database with ``merge``.
+- ``review --sync`` records replies to sent reviews, suggesting a response to
+  each. ``review --replies`` lists them, ``--suggest-reply`` asks the agent
+  for a response and ``--draft-reply`` creates a Gmail draft of it, threaded
+  as a reply.
 
 Changed
 ~~~~~~~

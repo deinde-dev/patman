@@ -552,7 +552,10 @@ def _make_all_drafts(params, cover, patches, review_bodies,
 
 
 def fetch_thread_replies(service, thread_id, after_msg_id):
-    """Fetch replies in a thread that appeared after a given message
+    """Fetch the replies to one of our messages in a thread
+
+    Only messages which reply to ours, directly or further down the
+    conversation, are included. Messages we sent are left out.
 
     Args:
         service (googleapiclient.discovery.Resource): Gmail API service
@@ -560,7 +563,14 @@ def fetch_thread_replies(service, thread_id, after_msg_id):
         after_msg_id (str): Gmail message ID of our sent review
 
     Returns:
-        list of dict: Replies, each with 'from', 'date', 'body'
+        list of dict: Replies, each with:
+            from, to, cc, subject, date, body: from the reply
+            message_id (str): Message-ID header of the reply
+            references (str): References header of the reply
+            msg_id (str): Gmail message ID of the reply
+            thread_id (str): Gmail thread ID
+            answer (str or None): Text of a message we sent in response to
+                the reply, if any
     """
     try:
         thread = service.users().threads().get(
@@ -570,30 +580,54 @@ def fetch_thread_replies(service, thread_id, after_msg_id):
 
     messages = thread.get('messages', [])
 
-    # Find our message index
+    def headers_of(msg):
+        return {hdr['name'].lower(): hdr['value']
+                for hdr in msg.get('payload', {}).get('headers', [])}
+
+    # Find our message, and the Message-ID which replies refer to
     our_idx = -1
     for i, msg in enumerate(messages):
         if msg['id'] == after_msg_id:
             our_idx = i
             break
-
     if our_idx < 0:
         return []
+    ours = headers_of(messages[our_idx]).get('message-id', '')
 
-    # Collect messages after ours
+    # Our later messages, which may answer the replies
+    answers = []
+    for msg in messages[our_idx + 1:]:
+        if 'SENT' in msg.get('labelIds', []):
+            hdrs = headers_of(msg)
+            answers.append((f"{hdrs.get('references', '')} "
+                            f"{hdrs.get('in-reply-to', '')}", msg))
+
     replies = []
     for msg in messages[our_idx + 1:]:
-        payload = msg.get('payload', {})
-        headers = {h['name']: h['value']
-                   for h in payload.get('headers', [])}
-        body = _extract_body(payload)
+        if 'SENT' in msg.get('labelIds', []):
+            continue
+        hdrs = headers_of(msg)
+        refs = hdrs.get('references', '')
+        if ours and ours not in f"{refs} {hdrs.get('in-reply-to', '')}":
+            continue
+        body = _extract_body(msg.get('payload', {}))
+        msgid = hdrs.get('message-id', '')
+        answer = next((_extract_body(ans.get('payload', {}))
+                       for refs, ans in answers if msgid and msgid in refs),
+                      None)
         if body:
             replies.append({
-                'from': headers.get('From', ''),
-                'date': headers.get('Date', ''),
+                'from': hdrs.get('from', ''),
+                'to': hdrs.get('to', ''),
+                'cc': hdrs.get('cc', ''),
+                'subject': hdrs.get('subject', ''),
+                'date': hdrs.get('date', ''),
                 'body': body,
+                'message_id': hdrs.get('message-id', ''),
+                'references': refs,
                 'msg_id': msg['id'],
                 'thread_id': thread_id,
+                'answer': answer,
             })
     return replies
 

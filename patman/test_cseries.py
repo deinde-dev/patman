@@ -5,6 +5,7 @@
 """Functional tests for checking that patman behaves correctly"""
 
 import asyncio
+import base64
 import contextlib
 from datetime import datetime
 import os
@@ -4144,7 +4145,7 @@ Date:   .*
             self.assertEqual(f'Update database to v{version}',
                              out.getvalue().strip())
             self.assertEqual(version, db.get_schema_version())
-        self.assertEqual(10, database.LATEST)
+        self.assertEqual(11, database.LATEST)
 
     def test_migrate_future_version(self):
         """Test that a database newer than patman is rejected"""
@@ -5535,6 +5536,181 @@ Date:   .*
                                            'ski=3A_fix?='))
         self.assertEqual('a@b.org, c@d.org',
                          gmail._format_addrs([['a@b.org', 'c@d.org']]))
+
+    @staticmethod
+    def gmail_msg(msg_id, hdrs, body, sent=False):
+        """Make a message as returned by the Gmail API
+
+        Args:
+            msg_id (str): Gmail message ID
+            hdrs (dict): Headers
+            body (str): Text of the message
+            sent (bool): True if we sent it
+
+        Return:
+            dict: Message
+        """
+        return {
+            'id': msg_id,
+            'labelIds': ['SENT'] if sent else ['INBOX'],
+            'payload': {
+                'mimeType': 'text/plain',
+                'headers': [{'name': key, 'value': val}
+                            for key, val in hdrs.items()],
+                'body': {'data': base64.urlsafe_b64encode(
+                    body.encode()).decode()},
+            },
+        }
+
+    def fake_gmail(self):
+        """Set up a fake Gmail service with a thread containing a review
+
+        The thread has the patch, our review, a reply to the review, a reply
+        to someone else and a response which we sent.
+
+        Return:
+            MagicMock: Gmail service
+        """
+        msgs = [
+            self.gmail_msg('m0', {'Message-ID': '<p0@x>'}, 'The patch'),
+            self.gmail_msg('m1', {'Message-ID': '<r1@me>'}, 'My review',
+                           sent=True),
+            self.gmail_msg('m2', {
+                'From': 'Fred Bloggs <fred@x.com>',
+                'To': 'Simon Glass <sjg@chromium.org>',
+                'Cc': 'u-boot@lists.denx.de, Tom Rini <trini@k.com>, '
+                      'fred@x.com',
+                'Subject': 'Re: [PATCH 2/5] video: Add a driver',
+                'Date': 'Thu, 15 Oct 2026 10:00:00 +0000',
+                'Message-ID': '<a2@x>', 'In-Reply-To': '<r1@me>',
+                'References': '<p0@x> <r1@me>'}, 'Why do you say that?'),
+            self.gmail_msg('m3', {'From': 'Tom <trini@k.com>',
+                                  'References': '<p0@x> <o@y>',
+                                  'Message-ID': '<t3@k>'}, 'Not to you'),
+            self.gmail_msg('m4', {'References': '<p0@x> <r1@me>',
+                                  'Message-ID': '<r4@me>'}, 'More from me',
+                           sent=True),
+            self.gmail_msg('m5', {
+                'From': 'Tom Rini <trini@k.com>', 'Subject': 'Re: x',
+                'Message-ID': '<t5@k>', 'References': '<p0@x> <r1@me>'},
+                'Looks fine to me'),
+            self.gmail_msg('m6', {'References': '<r1@me> <t5@k>',
+                                  'Message-ID': '<r6@me>'}, 'Thanks Tom',
+                           sent=True),
+        ]
+        service = mock.MagicMock()
+        service.users.return_value.threads.return_value.get.return_value \
+            .execute.return_value = {'messages': msgs}
+        return service
+
+    def test_review_replies(self):
+        """Replies to a sent review are recorded and can be responded to"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'Fred series', None)
+        db.series_set_source(sid, 'review')
+        svid = db.ser_ver_add(sid, 1, link='123')
+        rid = db.review_add(svid, 2, 'Please fix this', False,
+                            datetime.now().isoformat())
+        db.review_set_sent(rid, 'Please fix this', 'm1', 't1')
+        old = db.review_add(svid, 3, 'Old review', False,
+                            '2020-01-01T00:00:00')
+        db.review_set_sent(old, 'Old review', 'm1', 't1')
+        db.commit()
+
+        service = self.fake_gmail()
+        replies = gmail.fetch_thread_replies(service, 't1', 'm1')
+        self.assertEqual([('m2', None), ('m5', 'Thanks Tom')],
+                         [(rep['msg_id'], rep['answer']) for rep in replies])
+        self.assertEqual(('<a2@x>', '<p0@x> <r1@me>', 'Why do you say that?'),
+                         (replies[0]['message_id'], replies[0]['references'],
+                          replies[0]['body']))
+
+        ctx = review.ReviewContext(None, cser, {})
+        ctx.reviewer_name = 'Simon Glass'
+        ctx.reviewer_email = 'sjg@chromium.org'
+        with mock.patch.object(review, 'handle_reply_sync',
+                               return_value=('suggested', 'Because')) as ai, \
+                terminal.capture() as (out, _):
+            self.assertEqual(1, review._handle_replies(service, ctx))
+
+            # A second sync records nothing new
+            self.assertEqual(0, review._handle_replies(service, ctx))
+        ai.assert_called_once_with(ctx, 'Please fix this',
+                                   'Fred Bloggs <fred@x.com>',
+                                   'Why do you say that?')
+        self.assertIn('response suggested', out.getvalue())
+        self.assertEqual('replied', db.review_get(rid).status)
+        self.assertEqual('sent', db.review_get(old).status)
+
+        reply, answered = db.reply_get_for_review(rid)
+        self.assertEqual(('suggested', 'Because', 'Fred Bloggs <fred@x.com>'),
+                         (reply.status, reply.response, reply.sender))
+        self.assertEqual(('sent', 'Thanks Tom'),
+                         (answered.status, answered.response))
+        self.assertEqual([reply.idnum],
+                         [rep.idnum for rep in db.reply_get_by_status(
+                             database.REPLY_WAITING)])
+
+        with terminal.capture() as (out, _):
+            review._list_replies(cser)
+        self.assertIn('Fred Bloggs <fred@x.com>: Re: [PATCH 2/5] video: Add a '
+                      'driver (response suggested)', out.getvalue())
+
+        # The response is copied to everyone but ourselves and the sender
+        self.assertEqual('u-boot@lists.denx.de, Tom Rini <trini@k.com>',
+                         review._reply_cc(reply, {'sjg@chromium.org'}))
+
+        draft_svc = mock.MagicMock()
+        with mock.patch.object(gmail, 'create_draft',
+                               return_value={'id': 'd1'}) as create, \
+                terminal.capture():
+            review._draft_response(draft_svc, ctx, reply.idnum)
+        create.assert_called_once_with(
+            draft_svc, 'Fred Bloggs <fred@x.com>',
+            'Re: [PATCH 2/5] video: Add a driver', 'Because',
+            in_reply_to='<a2@x>', references='<p0@x> <r1@me> <a2@x>',
+            cc='u-boot@lists.denx.de, Tom Rini <trini@k.com>',
+            sender='Simon Glass <sjg@chromium.org>')
+        reply = db.reply_get(reply.idnum)
+        self.assertEqual(('draft', 'd1'), (reply.status, reply.draft_id))
+
+        # Drafting again replaces the old draft
+        with mock.patch.object(gmail, 'create_draft',
+                               return_value={'id': 'd2'}), \
+                mock.patch.object(gmail, 'delete_draft') as delete, \
+                terminal.capture():
+            review._draft_response(draft_svc, ctx, reply.idnum)
+        delete.assert_called_once_with(draft_svc, 'd1')
+
+        # Once the draft is sent, the response is recorded as sent
+        with mock.patch.object(gmail, 'sync_drafts',
+                               return_value=({reply.idnum: ('Sent text', 'm9',
+                                                            't1')}, [])), \
+                terminal.capture():
+            review._sync_reply_drafts(draft_svc, cser)
+        reply = db.reply_get(reply.idnum)
+        self.assertEqual(('sent', 'Sent text'),
+                         (reply.status, reply.response))
+        with self.assertRaises(ValueError) as exc:
+            review._draft_response(draft_svc, ctx, reply.idnum)
+        self.assertIn('has been sent', str(exc.exception))
+
+        # The agent may decide that no response is needed
+        db.reply_set_response(reply.idnum, None, database.REPLY_NEW)
+        with mock.patch.object(review, 'handle_reply_sync',
+                               return_value=('skip', None)), \
+                terminal.capture() as (out, _):
+            review._suggest_response(ctx, reply.idnum)
+        self.assertIn('no response needed', out.getvalue())
+        self.assertEqual('skip', db.reply_get(reply.idnum).status)
+        with self.assertRaises(ValueError) as exc:
+            review._draft_response(draft_svc, ctx, reply.idnum)
+        self.assertIn('There is no response', str(exc.exception))
+
+        # Deleting the review deletes its replies
+        db.review_delete_for_version(svid)
+        self.assertEqual([], db.reply_get_by_status(['skip']))
 
     def test_review_needs_draft(self):
         """Sent reviews are never drafted again; -i selects the patches"""

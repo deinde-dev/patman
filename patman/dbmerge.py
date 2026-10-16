@@ -38,6 +38,7 @@ class Stats:
         versions (int): Number of versions added
         patches (int): Number of patches added
         reviews (int): Number of reviews added
+        replies (int): Number of replies to reviews added
         todos (int): Number of workflow entries (todos) added
         upstreams (int): Number of upstreams added
         dup_versions (list of str): Versions already in the destination, as
@@ -53,6 +54,7 @@ class Stats:
         self.versions = 0
         self.patches = 0
         self.reviews = 0
+        self.replies = 0
         self.todos = 0
         self.upstreams = 0
         self.dup_versions = []
@@ -72,6 +74,8 @@ class Stats:
             f'{verb} {count} series: {self.versions} versions, '
             f'{self.patches} patches, {self.reviews} reviews, '
             f'{self.todos} todos')
+        if self.replies:
+            tout.notice(f'Including {self.replies} replies to reviews')
         if self.upstreams:
             tout.notice(f'Added {self.upstreams} upstreams')
         for item in self.dup_versions:
@@ -154,6 +158,31 @@ PCOMMIT_COLS = ['seq', 'subject', 'patch_id', 'change_id', 'state',
                 'num_comments']
 REVIEW_COLS = ['seq', 'body', 'approved', 'timestamp', 'draft_id', 'status',
                'gmail_msg_id', 'gmail_thread_id']
+REPLY_COLS = ['gmail_msg_id', 'msgid', 'refs', 'sender', 'to_addrs',
+              'cc_addrs', 'subject', 'date', 'body', 'response', 'status',
+              'draft_id', 'timestamp']
+
+
+def _copy_reviews(src, dst, svid, new_svid, stats):
+    """Copy the reviews of a version, along with the replies to them
+
+    Args:
+        src (Database): Database to copy from
+        dst (Database): Database to copy to
+        svid (int): Version ID in src
+        new_svid (int): Version ID in dst
+        stats (Stats): Counts to update
+    """
+    cols = ', '.join(REVIEW_COLS)
+    marks = ', '.join(['?'] * (len(REVIEW_COLS) + 1))
+    for rid, *fields in src.execute(
+            f'SELECT id, {cols} FROM review WHERE svid = ?',
+            (svid,)).fetchall():
+        dst.execute(f'INSERT INTO review (svid, {cols}) VALUES ({marks})',
+                    (new_svid, *fields))
+        stats.reviews += 1
+        stats.replies += _copy_rows(src, dst, 'reply', REPLY_COLS,
+                                    'review_id', rid, dst.lastrowid())
 
 
 def _copy_one(src, dst, sid, name, fields, stats, move):
@@ -221,8 +250,7 @@ def _copy_one(src, dst, sid, name, fields, stats, move):
         stats.versions += 1
         stats.patches += _copy_rows(src, dst, 'pcommit', PCOMMIT_COLS, 'svid',
                                     svid, new_svid)
-        stats.reviews += _copy_rows(src, dst, 'review', REVIEW_COLS, 'svid',
-                                    svid, new_svid)
+        _copy_reviews(src, dst, svid, new_svid, stats)
 
     # Todos are only copied with a new series, to avoid duplicating them,
     # unless they would otherwise be lost
@@ -274,6 +302,8 @@ def _remove_series(db, sid):
         sid (int): Series ID
     """
     svids = '(SELECT id FROM ser_ver WHERE series_id = ?)'
+    db.execute(f'DELETE FROM reply WHERE review_id IN (SELECT id FROM review '
+               f'WHERE svid IN {svids})', (sid,))
     db.execute(f'DELETE FROM review WHERE svid IN {svids}', (sid,))
     db.execute(f'DELETE FROM pcommit WHERE svid IN {svids}', (sid,))
     db.execute('DELETE FROM workflow WHERE series_id = ?', (sid,))

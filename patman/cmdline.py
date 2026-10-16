@@ -694,6 +694,16 @@ def add_review_subparser(subparsers):
         help='Number of review emails/comments to collect for '
              '--learn-voice (default: 20)')
     review.add_argument(
+        '--replies', action='store_true', dest='list_replies',
+        help='List replies to your reviews which still need a response')
+    review.add_argument(
+        '--suggest-reply', type=int, metavar='ID',
+        help='Ask the agent to suggest a response to a reply (see --replies)')
+    review.add_argument(
+        '--draft-reply', type=int, metavar='ID',
+        help='Create a Gmail draft of the response to a reply, threaded as a '
+             'reply to it')
+    review.add_argument(
         '--sync', action='store_true',
         help='Check if review drafts have been sent and record the '
              'final email content')
