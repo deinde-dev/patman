@@ -24,6 +24,8 @@ Added
 - Reviews which have not been sent can be edited on the ``patman serve`` page.
 - The ``patman serve`` page shows replies to reviews, and a response can be
   edited and drafted there.
+- The ``patman serve`` sync fetches the upstreams which reviews use, so that
+  reviews apply patches to up-to-date branches.
 - Reviews of other people's series can be kept in a separate database, given
   by the ``review_db_dir`` setting or ``--review-db-dir``.
 - ``patman database`` (alias ``db``) moves reviews between the main and review

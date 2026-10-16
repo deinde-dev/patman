@@ -63,6 +63,7 @@ import json
 import os
 import re
 import signal
+import subprocess
 import sys
 
 import aiohttp
@@ -729,11 +730,37 @@ class Server:
         """
         if self.sync_cmds_for_testing is not None:
             return self.sync_cmds_for_testing
-        cmds = [self.get_patman_cmd('series', 'gather-all', '-G')]
+        fetch = self.get_fetch_cmd()
+        cmds = [fetch] if fetch else []
+        cmds.append(self.get_patman_cmd('series', 'gather-all', '-G'))
         if self.review_sync:
             cmds.append(self.get_patman_cmd('review', '--sync',
                                             *self._review_db_args()))
         return cmds
+
+    def get_fetch_cmd(self):
+        """Get a command which fetches the upstreams which reviews use
+
+        Reviews apply patches to the upstream's branches, so these must be
+        kept up to date. The default upstream and the upstreams of reviewed
+        series are fetched, where they are git remotes.
+
+        Return:
+            list of str or None: Command, or None if there is nothing to
+                fetch
+        """
+        wanted = {ser.upstream for ser in
+                  self.rcser.db.series_get_dict(reviews_only=True).values()
+                  if ser.upstream}
+        default = self.cser.db.upstream_get_default()
+        if default:
+            wanted.add(default)
+        res = subprocess.run(['git', 'remote'], cwd=self.cser.topdir,
+                             capture_output=True, text=True, check=False)
+        remotes = sorted(wanted & set(res.stdout.split()))
+        if not remotes:
+            return None
+        return ['git', 'fetch', '-q', '--multiple', *remotes]
 
     def get_patman_cmd(self, *args):
         """Get a command which runs patman in a child process
@@ -984,6 +1011,8 @@ class Server:
         tout.info(f"Job {job.idnum}: running {result['cmd']}")
         env = review_mod._child_env()  # pylint: disable=W0212
         env['PYTHONUNBUFFERED'] = '1'
+        # Fail rather than wait for a password which nobody can type
+        env['GIT_TERMINAL_PROMPT'] = '0'
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd, stdin=asyncio.subprocess.DEVNULL,

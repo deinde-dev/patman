@@ -386,6 +386,8 @@ A sync updates the database from patchwork. With ``--sync``, one runs when the
 server starts and then every so many minutes; one can also be started through
 the API. It runs these commands in turn:
 
+- ``git fetch`` of the default upstream and the upstreams of reviewed series,
+  where these are git remotes
 - ``patman series gather-all -G``
 - ``patman review --sync``, if the server is given ``-r``, passing on any
   ``--review-db-dir``

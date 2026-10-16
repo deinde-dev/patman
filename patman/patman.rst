@@ -1883,6 +1883,11 @@ replies; this needs Gmail access (see `Assisted patch review`_).
 Each series is read from the patchwork server of its upstream, so a server
 which is down only affects its own series.
 
+Before gathering, the sync runs ``git fetch`` for the default upstream and the
+upstreams of reviewed series, where these are git remotes, so that reviews
+apply patches to up-to-date branches. This only updates the remote branches,
+not your own.
+
 Tap the sync indicator at the top of the page to follow the output of a sync as
 it runs, to start one or to cancel one.
 

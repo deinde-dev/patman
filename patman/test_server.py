@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import signal
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -372,6 +373,28 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual([patman + ['series', 'gather-all', '-G'],
                           patman + ['review', '--sync']],
                          srv.get_sync_cmds())
+
+    def test_sync_fetch(self):
+        """The sync fetches the upstreams which reviews use"""
+        db = self.cser.db
+        db.upstream_add('us', 'https://us', 'https://pw.us')
+        db.upstream_set_default('us')
+        db.commit()
+        self.add_series('rev', 'Review', {1: []}, ups='other',
+                        source='review')
+        self.add_series('rev2', 'Review', {1: []}, ups='ci', source='review')
+        self.add_series('mine', 'Mine', {1: []}, ups='mine')
+        srv = server.Server(self.cser)
+
+        # Without the remotes, there is nothing to fetch
+        self.assertIsNone(srv.get_fetch_cmd())
+
+        subprocess.run(['git', 'init', '-q'], cwd=self.tmpdir, check=True)
+        for name in ['us', 'other', 'mine']:
+            subprocess.run(['git', 'remote', 'add', name, f'https://{name}'],
+                           cwd=self.tmpdir, check=True)
+        self.assertEqual(['git', 'fetch', '-q', '--multiple', 'other', 'us'],
+                         srv.get_sync_cmds()[0])
 
     def test_sync(self):
         """A sync runs each command and records its output"""
