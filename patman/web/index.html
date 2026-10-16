@@ -1472,15 +1472,25 @@ function jobStatus(st) {
                                                     : ['failed', 'st-rejected'];
 }
 
-// Render the output of each command in a job, following the one running
+// Render the output of each command in a job, following the one running.
+// The page is redrawn every few seconds while the job runs, so the returned
+// function puts the page and each log back where the user left them, and
+// keeps a log scrolled to its end there as more output arrives
 function jobOutput(st) {
-  const logs = st.results.map((r) =>
-    h('div', { class: 'log mail' }, r.output.trim() || '(no output yet)'));
+  const key = (i) => `${location.hash}:${i}`;
+  const old = new Map([...main.querySelectorAll('.log')].map((log) => [log.dataset.key, {
+    top: log.scrollTop,
+    end: log.scrollTop + log.clientHeight >= log.scrollHeight - 4 }]));
+  const pageY = old.size ? window.scrollY : null;
+  const logs = st.results.map((r, i) =>
+    h('div', { class: 'log mail', 'data-key': key(i) }, r.output.trim() || '(no output yet)'));
   const follow = () => {
-    if (st.running && logs.length) {
-      const log = logs[logs.length - 1];
-      log.scrollTop = log.scrollHeight;
-    }
+    if (pageY !== null) window.scrollTo(0, pageY);
+    logs.forEach((log, i) => {
+      const prev = old.get(key(i));
+      if (prev && !prev.end) log.scrollTop = prev.top;
+      else if (prev || (st.running && i === logs.length - 1)) log.scrollTop = log.scrollHeight;
+    });
   };
   return [st.results.flatMap((r, i) => [
     h('div', { class: 'section cmd' }, `${r.cmd} — ${cmdStatus(r, st)}`), logs[i]]), follow];
