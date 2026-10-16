@@ -2594,7 +2594,8 @@ def _review_commits(args, cser, link, ups):
     """Get the commits holding the patches of a reviewed series
 
     The review branch is left in place after a review, so the patches can be
-    read from it.
+    read from it. It may be based on next or master (see _series_base()), so
+    the base is whichever of these leaves the fewest commits on the branch.
 
     Args:
         args (Namespace): Command-line arguments (for base_branch)
@@ -2607,14 +2608,23 @@ def _review_commits(args, cser, link, ups):
             or an empty list if the branch is not present
     """
     branch = _make_review_name(link, ups)
-    try:
-        base = _get_upstream_branch(args, cser)
-        out = subprocess.run(
-            ['git', 'log', '--reverse', '--format=%H %s', f'{base}..{branch}'],
-            capture_output=True, text=True, check=True,
-            cwd=gitutil.get_top_level()).stdout
-    except (subprocess.CalledProcessError, ValueError):
+    git_dir = gitutil.get_top_level()
+    if not gitutil.ref_exists(branch, git_dir):
         return []
+    bases = [_get_upstream_branch(args, cser)]
+    if ups:
+        bases += [f'{ups}/next', _main_branch(ups, git_dir)]
+    counts = {}
+    for base in bases:
+        count = gitutil.count_revs(git_dir, f'{base}..{branch}')
+        if count:
+            counts[base] = count
+    if not counts:
+        return []
+    base = min(counts, key=counts.get)
+    out = subprocess.run(
+        ['git', 'log', '--reverse', '--format=%H %s', f'{base}..{branch}'],
+        capture_output=True, text=True, check=False, cwd=git_dir).stdout
     return out.splitlines()
 
 
@@ -2788,6 +2798,134 @@ def _get_upstream_branch(args, cser):
     return 'origin/master'
 
 
+# A 'base-commit:' trailer, added by 'git format-patch --base' and by patman,
+# giving the commit the series was written against
+RE_BASE_COMMIT = re.compile(r'^base-commit:\s*([0-9a-f]{7,40})\s*$',
+                            re.MULTILINE)
+
+# A note in the cover letter saying which branch the series is for, e.g.
+# 'This series is based on master' or 'Applies on top of u-boot/next'
+RE_BASED_ON = re.compile(
+    r'\b(?:based|applies|apply|rebased)\s+'
+    r'(?:onto|on(?:\s+top\s+of)?|to|against)'
+    r'\s+(?:the\s+)?(?:(?:u-boot|upstream|origin|us)[/ ])?[\'"`]?'
+    r'(master|main|next)\b', re.IGNORECASE)
+
+
+def find_series_base(text):
+    """Find which commit or branch a series says it is based on
+
+    Args:
+        text (str): Cover letter, or the last patch if there is none
+
+    Returns:
+        tuple:
+            str or None: Base commit from a 'base-commit:' trailer
+            str or None: 'main' or 'next', if the text says the series
+                is based on one of them ('master' counts as 'main')
+    """
+    match = RE_BASE_COMMIT.search(text or '')
+    commit = match.group(1) if match else None
+    match = RE_BASED_ON.search(text or '')
+    branch = None
+    if match:
+        branch = 'next' if match.group(1).lower() == 'next' else 'main'
+    return commit, branch
+
+
+def _base_text(ctx):
+    """Get the text which may say what a series is based on
+
+    'git format-patch --base' puts the trailer at the end of the cover
+    letter, or of the last patch if there is no cover letter. The cover
+    letter is kept in ctx.cover_content for the review.
+
+    Args:
+        ctx (ReviewContext): Review context (uses pwork and series_data)
+
+    Returns:
+        str: Text to search
+    """
+    ctx.cover_content = _fetch_cover_content(ctx.pwork, ctx.series_data)
+    if ctx.cover_content:
+        return ctx.cover_content
+    patches = ctx.series_data.get('patches') or []
+    if not patches:
+        return ''
+
+    async def _fetch():
+        async with aiohttp.ClientSession() as client:
+            return await ctx.pwork.get_patch(client, str(patches[-1]['id']))
+
+    loop = asyncio.get_event_loop()
+    data = loop.run_until_complete(_fetch())
+    return f"{data.get('content') or ''}\n{data.get('diff') or ''}"
+
+
+def _is_ancestor(commit, ref, git_dir):
+    """Check whether a commit is in the history of a ref"""
+    return subprocess.run(
+        ['git', 'merge-base', '--is-ancestor', commit, ref], cwd=git_dir,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        check=False).returncode == 0
+
+
+def _commit_exists(commit, git_dir):
+    """Check whether a commit is in the repository"""
+    return gitutil.ref_exists(f'{commit}^{{commit}}', git_dir)
+
+
+def _series_base(ctx, ups, default):
+    """Work out the base to apply a series to, from what the series says
+
+    During the merge window, series are often written against main rather
+    than next, and do not apply to next. If the series gives a base commit,
+    use whichever of next and main holds it, preferring the default; if
+    neither does, use the commit itself. The upstream is fetched if the
+    commit is not known yet. Failing that, use the branch which the cover
+    letter says the series is based on, if any.
+
+    Args:
+        ctx (ReviewContext): Review context (uses pwork, series_data and
+            main_repo)
+        ups (str or None): Upstream name, which is also the git remote
+        default (str): Base which would otherwise be used, e.g. 'us/next'
+
+    Returns:
+        str or None: Base to use, or None to use the default
+    """
+    commit, branch = find_series_base(_base_text(ctx))
+    if not ups:
+        return commit if commit and _commit_exists(
+            commit, ctx.main_repo) else None
+    if commit and not _commit_exists(commit, ctx.main_repo):
+        tout.notice(f"Fetching '{ups}' to find base-commit {commit}")
+        subprocess.run(['git', 'fetch', '-q', ups], cwd=ctx.main_repo,
+                       check=False)
+    main = _main_branch(ups, ctx.main_repo)
+    branches = [default] + [ref for ref in (f'{ups}/next', main)
+                            if ref != default]
+    if commit:
+        if _commit_exists(commit, ctx.main_repo):
+            for ref in branches:
+                if gitutil.ref_exists(ref, ctx.main_repo) and \
+                        _is_ancestor(commit, ref, ctx.main_repo):
+                    tout.notice(f'The series is based on {commit[:12]}, '
+                                f'which is in {ref}')
+                    return ref
+            tout.notice(f'The series is based on {commit[:12]}, which is '
+                        f'not in {ups}/next or {main}; using it')
+            return commit
+        tout.warning(f'Cannot find base-commit {commit}; using {default}')
+    if branch:
+        ref = main if branch == 'main' else f'{ups}/{branch}'
+        if gitutil.ref_exists(ref, ctx.main_repo):
+            tout.notice(f'The cover letter says the series is based on '
+                        f'{branch}; using {ref}')
+            return ref
+    return None
+
+
 def _apply_and_check(ctx, link):
     """Download, apply patches and verify they applied
 
@@ -2923,7 +3061,8 @@ def _run_and_store_reviews(ctx, args):
     for rev in prev_db:
         ctx.previous_reviews[rev.seq] = rev.body
 
-    ctx.cover_content = _fetch_cover_content(ctx.pwork, ctx.series_data)
+    if ctx.cover_content is None:
+        ctx.cover_content = _fetch_cover_content(ctx.pwork, ctx.series_data)
 
     review_bodies = review_patches_sync(ctx)
 
@@ -3138,6 +3277,10 @@ def _review_link(args, pwork, cser, link):
 
         ctx.upstream_branch = _get_upstream_branch(args, cser)
         ctx.main_repo = main_repo
+        if not args.base_branch:
+            ctx.upstream_branch = _series_base(
+                ctx, args.upstream or cser.db.upstream_get_default(),
+                ctx.upstream_branch) or ctx.upstream_branch
         ctx.branch_name = branch_name
         wt_path = cser_helper.review_worktree_path(ctx.main_repo,
                                                    ctx.branch_name)

@@ -669,9 +669,10 @@ def add_review_subparser(subparsers):
     review.add_argument(
         '-b', '--base-branch', type=str, default=None,
         help="Base branch to apply review patches onto (e.g. 'us/main', "
-             "'us/next'). If unset, picks the upstream's '/next' branch "
-             "when it has commits ahead of '/main' (or '/master'), "
-             "otherwise '/main'.")
+             "'us/next'). If unset, uses the series' base-commit, or the "
+             "branch its cover letter says it is based on, else picks the "
+             "upstream's '/next' branch when it has commits ahead of "
+             "'/main' (or '/master'), otherwise '/main'.")
     review.add_argument(
         '--apply-only', action='store_true',
         help='Only download and apply patches, skip the review')

@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 import email.utils
 import os
 import re
+import subprocess
 import types
 import unittest
 from unittest import mock
@@ -5917,6 +5918,85 @@ Date:   .*
         with self.assertRaises(ValueError) as exc:
             review._do_revise(args, None, cser, '123')
         self.assertIn('No unsent reviews', str(exc.exception))
+
+    def test_review_find_base(self):
+        """The base commit or branch is found in a cover letter"""
+        find = review.find_series_base
+        self.assertEqual(('0123456789ab', None),
+                         find('Some text\n\nbase-commit: 0123456789ab\n'))
+        self.assertEqual((None, 'main'),
+                         find('This series is based on u-boot/master.'))
+        self.assertEqual((None, 'main'), find('Applies on top of main'))
+        self.assertEqual((None, 'next'), find("It is rebased onto 'next'"))
+        self.assertEqual((None, None), find('This is based on a true story'))
+        self.assertEqual((None, None), find(None))
+
+    def test_review_series_base(self):
+        """A series is applied to the branch holding its base commit"""
+        def git(cwd, *args):
+            return subprocess.run(
+                ['git', '-c', 'user.name=T', '-c', 'user.email=t@x', *args],
+                cwd=cwd, check=True, capture_output=True,
+                text=True).stdout.strip()
+
+        def commit(cwd, msg):
+            git(cwd, 'commit', '-q', '--allow-empty', '-m', msg)
+            return git(cwd, 'rev-parse', 'HEAD')
+
+        work = os.path.join(self.tmpdir, 'work')
+        os.mkdir(work)
+        git(work, 'init', '-q', '-b', 'master')
+        first = commit(work, 'first')
+        bare = os.path.join(self.tmpdir, 'up.git')
+        git(self.tmpdir, 'clone', '-q', '--bare', work, bare)
+
+        # Upstream moves on, with master and next each gaining a commit
+        other = os.path.join(self.tmpdir, 'other')
+        git(self.tmpdir, 'clone', '-q', bare, other)
+        git(other, 'checkout', '-q', '-b', 'next')
+        commit(other, 'on next')
+        git(other, 'checkout', '-q', 'master')
+        on_master = commit(other, 'on master')
+        git(other, 'push', '-q', 'origin', 'master', 'next')
+        git(work, 'remote', 'add', 'us', bare)
+        git(work, 'checkout', '-q', '-b', 'local')
+        local = commit(work, 'local only')
+
+        ctx = review.ReviewContext(None, None, {})
+        ctx.main_repo = work
+
+        def base(text):
+            with mock.patch.object(review, '_base_text', return_value=text):
+                return review._series_base(ctx, 'us', 'us/next')
+
+        # The commit is only upstream, so it is fetched, and it is on master
+        with terminal.capture() as (out, _):
+            self.assertEqual('us/master', base(f'base-commit: {on_master}'))
+        self.assertIn("Fetching 'us'", out.getvalue())
+        self.assertIn('which is in us/master', out.getvalue())
+
+        # A commit in both branches uses the default
+        with terminal.capture():
+            self.assertEqual('us/next', base(f'base-commit: {first}'))
+
+            # A commit in neither is used directly
+            self.assertEqual(local, base(f'base-commit: {local}'))
+
+            # Without the commit, the cover letter's words are used
+            with terminal.capture() as (_, err):
+                self.assertEqual('us/master', base(
+                    'base-commit: 0123456789abcdef\nBased on master'))
+        self.assertIn('Cannot find base-commit 0123456789abcdef',
+                      err.getvalue())
+        self.assertIsNone(base('Nothing to see'))
+
+        # Once the upstream has a main branch, it is used instead of master
+        git(other, 'checkout', '-q', '-b', 'main')
+        on_main = commit(other, 'on main')
+        git(other, 'push', '-q', 'origin', 'main')
+        with terminal.capture():
+            self.assertEqual('us/main', base(f'base-commit: {on_main}'))
+            self.assertEqual('us/main', base('Based on master'))
 
     def test_review_reply_recent(self):
         """Only recent replies get a suggested response"""

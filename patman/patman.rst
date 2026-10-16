@@ -1490,8 +1490,20 @@ branch otherwise. The main branch is ``<upstream>/main``, or
 U-Boot's release cadence: right after a release ``next`` is merged into
 ``main`` and stays empty until the next cycle's RC1, so reviews land on
 ``main`` during that window and switch back to ``next`` automatically
-once it diverges. Use ``-b`` / ``--base-branch`` to override the choice
-for a particular run::
+once it diverges.
+
+Series often say what they are based on, which matters during the merge
+window, when some are written against ``main`` and do not apply to
+``next``. If the cover letter (or the last patch, if there is no cover
+letter) has a ``base-commit:`` line, as added by ``git format-patch
+--base`` and by patman, the review uses whichever of ``next`` and
+``main`` holds that commit, or the commit itself if neither does. The
+upstream is fetched first if the commit is not known yet. Without a base
+commit, a cover letter which says it is 'based on' or 'applies to'
+``main``, ``master`` or ``next`` picks that branch.
+
+Use ``-b`` / ``--base-branch`` to override the choice for a particular
+run::
 
     patman review -s 497923 -U us -b us/main \
         --reviewer 'Your Name <your@email>'

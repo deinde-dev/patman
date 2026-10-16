@@ -45,6 +45,8 @@ Changed
   upstream, and updates the series it can read even if others fail.
 - ``review`` applies a series to the upstream's ``main`` branch, if it has
   one, rather than ``master``.
+- Without ``-b``, ``review`` applies a series to the base commit or branch
+  which it says it is based on.
 
 Fixed
 ~~~~~
