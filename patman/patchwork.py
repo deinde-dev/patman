@@ -7,6 +7,7 @@
 
 import asyncio
 import re
+import socket
 from urllib.parse import quote_plus
 
 import aiohttp
@@ -47,7 +48,8 @@ RETRIES = 3
 # HTTP status codes which suggest that a request may work if tried again
 RETRY_STATUS = (502, 503, 504)
 
-# Seconds to wait for a request to complete before trying again
+# Seconds to wait for a request to complete before trying again, which can be
+# changed with the 'patchwork_timeout' setting
 REQUEST_TIMEOUT = 30
 
 # Max concurrent request
@@ -230,9 +232,13 @@ class Patchwork:
                         # print('- done', full_url)
                         return result
                     break
-                except aiohttp.ClientConnectorError:
-                    # The server cannot be reached, so don't retry
-                    raise
+                except aiohttp.ClientConnectorError as exc:
+                    # A name which does not resolve will not start working,
+                    # but a busy server may fail to accept a connection
+                    if isinstance(exc.os_error, socket.gaierror) or \
+                            i == RETRIES:
+                        raise
+                    await asyncio.sleep(i + 1)
                 except (aiohttp.ServerDisconnectedError,
                         aiohttp.ClientOSError, asyncio.TimeoutError):
                     # The server may drop, reset or stall connections when
@@ -240,6 +246,16 @@ class Patchwork:
                     if i == RETRIES:
                         raise
                     await asyncio.sleep(i + 1)
+
+    @staticmethod
+    def set_timeout(secs):
+        """Set the time to wait for each request before trying again
+
+        Args:
+            secs (float): Timeout in seconds
+        """
+        global REQUEST_TIMEOUT  # pylint: disable=W0603
+        REQUEST_TIMEOUT = secs
 
     @staticmethod
     def for_testing(func):

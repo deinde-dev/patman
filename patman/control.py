@@ -639,6 +639,8 @@ def do_patman(args, test_db=None, pwork=None, cser=None):
         cser (Cseries): Cseries object to use when executing the command,
             or None to create one
     """
+    if getattr(args, 'patchwork_timeout', None):
+        Patchwork.set_timeout(args.patchwork_timeout)
     if args.full_help:
         with resources.path('patman', 'patman.rst') as readme:
             tools.print_full_help(str(readme))

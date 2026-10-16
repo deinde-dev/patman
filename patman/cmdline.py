@@ -840,6 +840,10 @@ def setup_parser():
                         default='https://patchwork.ozlabs.org',
                         help='URL of patchwork server [default: %(default)s]')
     parser.add_argument(
+        '--patchwork-timeout', type=int, default=30, metavar='SECS',
+        help='Seconds to wait for each patchwork request before trying '
+             "again (the 'patchwork_timeout' setting) [default: %(default)s]")
+    parser.add_argument(
         '-T', '--thread', action='store_true', dest='thread',
         default=False, help='Create patches as a single thread')
     parser.add_argument(

@@ -29,8 +29,9 @@ Added
 
 Changed
 ~~~~~~~
-- Patchwork requests are retried when the connection is reset or stalls for 30
-  seconds, or the server returns a 502, 503 or 504 status.
+- Patchwork requests are retried when the connection fails, is reset or
+  stalls, or the server returns a 502, 503 or 504 status. The timeout is set
+  with ``--patchwork-timeout`` or the ``patchwork_timeout`` setting.
 - ``series gather-all`` reads each series from the patchwork server of its
   upstream, and updates the series it can read even if others fail.
 

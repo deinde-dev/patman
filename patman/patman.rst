@@ -194,6 +194,12 @@ patman.py.  For reference, the useful ones (at the moment) shown below
     verbose: True
     smtp_server: /path/to/sendmail
     patchwork_url: https://patchwork.ozlabs.org
+    patchwork_timeout: 60
+
+``patchwork_timeout`` is the number of seconds to wait for each request to
+patchwork before trying again (default 30). A busy server can stall a
+request, so patman retries a request which times out, has its connection
+reset or refused, or gets a 502, 503 or 504 status, up to three times.
 
 By default patman adds ``base-commit:`` and ``branch:`` trailers to the
 generated patches (or the cover letter). These record the commit that the

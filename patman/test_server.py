@@ -733,6 +733,39 @@ class TestWebServer(unittest.TestCase, TestCommon):
             loop.close()
         self.assertEqual(3, len(calls))
 
+    def test_patchwork_connect_retry(self):
+        """A failed connection is retried, but a name which fails is not"""
+        sleeps = []
+
+        async def fake_sleep(secs):
+            sleeps.append(secs)
+
+        async def _go(url):
+            pwork = Patchwork(url, show_progress=False)
+            async with aiohttp.ClientSession() as client:
+                return await pwork._request(client, 'patches/1/')
+
+        for url, expect in (('http://127.0.0.1:1', [1, 2, 3]),
+                            ('http://no-such-host.invalid', [])):
+            sleeps.clear()
+            loop = asyncio.new_event_loop()
+            try:
+                with mock.patch.object(patchwork.asyncio, 'sleep', fake_sleep):
+                    with self.assertRaises(aiohttp.ClientConnectorError):
+                        loop.run_until_complete(_go(url))
+            finally:
+                loop.close()
+            self.assertEqual(expect, sleeps)
+
+    def test_patchwork_timeout_setting(self):
+        """The patchwork_timeout setting sets the request timeout"""
+        args = cmdline.parse_args(['--patchwork-timeout', '7', 'upstream',
+                                   'ls'], config_fname=False)
+        with mock.patch.object(patchwork, 'REQUEST_TIMEOUT', 30), \
+                mock.patch.object(control, 'upstream'):
+            control.do_patman(args)
+            self.assertEqual(7, patchwork.REQUEST_TIMEOUT)
+
     @staticmethod
     def _no_sleep(real_sleep):
         """Make retry delays short, without affecting other sleeps"""

@@ -178,7 +178,8 @@ Patchwork
 
 These read from patchwork each time. Those which take an optional ``ups`` query
 parameter use the patchwork server of that upstream, falling back to the ``-P``
-setting.
+setting. Requests to patchwork are retried if they fail in a way which may not
+happen again, using the ``--patchwork-timeout`` setting for each attempt.
 
 ``GET /api/comments/<kind>/<id>``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
