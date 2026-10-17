@@ -5295,6 +5295,16 @@ Date:   .*
 
         raise ValueError(f'Fake Patchwork unhandled URL: {subpath}')
 
+    def _review_pwork(self):
+        """Get a fake patchwork with the series used by the review tests
+
+        Returns:
+            Patchwork: Patchwork instance, with the project set
+        """
+        pwork = Patchwork.for_testing(self._fake_patchwork_review)
+        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        return pwork
+
     REVIEWER = 'Test Reviewer <test@test.com>'
 
     def run_review(self, *argv, **kwargs):
@@ -5337,8 +5347,7 @@ Date:   .*
     def test_review_new_series(self):
         """Test reviewing a new series creates database records"""
         cser = self.get_cser()
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
 
         with self._mock_review():
             with terminal.capture() as _:
@@ -5365,8 +5374,7 @@ Date:   .*
     def test_review_already_reviewed(self):
         """Test that reviewing the same link again is detected"""
         cser = self.get_cser()
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
 
         with self._mock_review():
             with terminal.capture() as _:
@@ -5381,8 +5389,7 @@ Date:   .*
     def test_review_new_version(self):
         """Test that reviewing v2 detects v1 as previously reviewed"""
         cser = self.get_cser()
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
 
         # Review v1 first
         with self._mock_review():
@@ -5406,8 +5413,7 @@ Date:   .*
     def test_review_title_search(self):
         """Test searching for a series by title"""
         cser = self.get_cser()
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
 
         with self._mock_review():
             with terminal.capture() as (out, _):
@@ -5485,8 +5491,7 @@ Date:   .*
     def test_review_search_series_version(self):
         """Test -V selects a specific version when searching by title"""
         from patman import review as review_mod
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
 
         with terminal.capture():
             # Default picks the most recent (v2)
@@ -5535,8 +5540,7 @@ Date:   .*
     def test_review_no_link_or_title(self):
         """Test that missing -l and -t gives a proper error"""
         self.get_cser()
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
 
         with terminal.capture() as _:
             self.run_review( pwork=pwork, expect_ret=1)
@@ -5544,8 +5548,7 @@ Date:   .*
     def test_review_apply_failure(self):
         """Test that apply failure is reported"""
         self.get_cser()
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
 
         with mock.patch('patman.review._apply_and_check',
                         return_value=False), \
@@ -5562,8 +5565,7 @@ Date:   .*
     def test_review_create_drafts_dry_run(self):
         """Test dry-run draft creation shows what would be created"""
         self.get_cser()
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
 
         with self._mock_review():
             with terminal.capture() as (out, _):
@@ -5577,8 +5579,7 @@ Date:   .*
     def test_review_create_drafts(self):
         """Test actual draft creation calls Gmail API"""
         self.get_cser()
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
 
         with self._mock_review(), self._mock_gmail():
             with terminal.capture() as (out, _):
@@ -6213,8 +6214,7 @@ Date:   .*
     def test_review_redraft(self):
         """Test --redraft recreates drafts for an already-reviewed series"""
         self.get_cser()
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
 
         def run(*extra):
             with self._mock_review(), self._mock_gmail():
@@ -6260,8 +6260,7 @@ Date:   .*
     def test_review_force_deletes_drafts(self):
         """Test -f re-review removes the old Gmail drafts before recreating"""
         self.get_cser()
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
 
         def run(*extra):
             with self._mock_review(), self._mock_gmail():
@@ -6299,8 +6298,7 @@ Date:   .*
     def test_review_scan(self):
         """Test --scan launches a review of a new version"""
         self.get_cser()
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
 
         # Review v1 first to record the series
         self._review_v1(pwork)
@@ -6328,8 +6326,7 @@ Date:   .*
     def test_review_scan_dry_run(self):
         """Test --scan -n reports what it would do without reviewing"""
         self.get_cser()
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
 
         # Review v1 first so v2 shows up as a new version
         self._review_v1(pwork)
@@ -6346,8 +6343,7 @@ Date:   .*
     def test_review_scan_no_new(self):
         """Test --scan reports nothing when there is no newer version"""
         self.get_cser()
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
 
         # Review the latest version (v2)
         self._review_v1(pwork, self.REVIEW_LINK_V2)
@@ -6380,8 +6376,7 @@ Date:   .*
     def test_review_inactive_refused(self):
         """Test reviewing a non-active series is refused with the flag named"""
         cser = self.get_cser()
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
         self.review_states = {self.REVIEW_LINK: ['superseded']}
 
         with self._mock_review():
@@ -6399,8 +6394,7 @@ Date:   .*
     def test_review_inactive_any_state(self):
         """Test --any-state reviews a non-active series anyway"""
         cser = self.get_cser()
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
         self.review_states = {self.REVIEW_LINK: ['superseded']}
 
         with self._mock_review():
@@ -6413,8 +6407,7 @@ Date:   .*
     def test_review_scan_skips_inactive(self):
         """Test --scan skips a new version that is not active"""
         self.get_cser()
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
 
         # Review v1 first (active)
         self._review_v1(pwork)
@@ -6526,8 +6519,7 @@ Date:   .*
     def test_review_lock_in_progress(self):
         """Test a review is refused when one is already running for it"""
         cser = self.get_cser()
-        pwork = Patchwork.for_testing(self._fake_patchwork_review)
-        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        pwork = self._review_pwork()
 
         # Hold the lock for this series, as if a review were in progress
         ups = pwork.upstream if pwork else None
