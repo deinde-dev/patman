@@ -5317,9 +5317,9 @@ Date:   .*
     def _mock_review(self):
         """Mock applying the series, the upstream, git and the AI review"""
         fake_review = {1: f'Reviewed-by: {self.REVIEWER}'}
-        with mock.patch('patman.review.core._apply_and_check',
+        with mock.patch('patman.review.apply.apply_and_check',
                         return_value=True), \
-                mock.patch('patman.review.core._get_upstream_branch',
+                mock.patch('patman.review.apply.get_upstream_branch',
                            return_value='origin/master'), \
                 mock.patch('patman.review.core.review_patches_sync',
                            return_value=fake_review), \
@@ -5434,12 +5434,12 @@ Date:   .*
         ctx.repo_path = '/tmp/x'
         ctx.series_id = 5
         ctx.version = 1
-        with mock.patch('patman.review.core.apply_series_sync',
+        with mock.patch('patman.review.apply.apply_series_sync',
                         return_value=(True, None)), \
                 mock.patch('patman.review.core.gitutil.count_revs',
                            return_value=0), \
                 terminal.capture():
-            result = review.core._apply_and_check(ctx, '526073')
+            result = review.apply.apply_and_check(ctx, '526073')
         # None means 'nothing to review', not a failure
         self.assertIsNone(result)
         ctx.cser.db.ser_ver_remove.assert_called_once_with(5, 1)
@@ -5449,10 +5449,10 @@ Date:   .*
         ctx = mock.Mock()
         ctx.series_id = 5
         ctx.version = 1
-        with mock.patch('patman.review.core.apply_series_sync',
+        with mock.patch('patman.review.apply.apply_series_sync',
                         return_value=(False, None)), \
                 terminal.capture():
-            result = review.core._apply_and_check(ctx, '526073')
+            result = review.apply.apply_and_check(ctx, '526073')
         self.assertFalse(result)
         ctx.cser.db.ser_ver_remove.assert_called_once_with(5, 1)
 
@@ -5551,9 +5551,9 @@ Date:   .*
         self.get_cser()
         pwork = self._review_pwork()
 
-        with mock.patch('patman.review.core._apply_and_check',
+        with mock.patch('patman.review.apply.apply_and_check',
                         return_value=False), \
-             mock.patch('patman.review.core._get_upstream_branch',
+             mock.patch('patman.review.apply.get_upstream_branch',
                         return_value='origin/master'), \
              mock.patch('patman.review.core.gitutil.get_top_level',
                         return_value=self.tmpdir), \
@@ -6104,7 +6104,7 @@ Date:   .*
 
     def test_review_find_base(self):
         """The base commit or branch is found in a cover letter"""
-        find = review.core.find_series_base
+        find = review.apply.find_series_base
         self.assertEqual(('0123456789ab', None),
                          find('Some text\n\nbase-commit: 0123456789ab\n'))
         self.assertEqual((None, 'main'),
@@ -6150,8 +6150,8 @@ Date:   .*
 
         def base(text):
             with mock.patch.object(
-                    review.core, '_base_text', return_value=text):
-                return review.core._series_base(ctx, 'us', 'us/next')
+                    review.apply, '_base_text', return_value=text):
+                return review.apply.series_base(ctx, 'us', 'us/next')
 
         # The commit is only upstream, so it is fetched, and it is on master
         with terminal.capture() as (out, _):
@@ -7748,7 +7748,7 @@ VERDICT: changes_needed"""
 
 
 class TestGetUpstreamBranch(unittest.TestCase):
-    """Tests for review.core._get_upstream_branch() base-branch selection."""
+    """Tests for review.apply.get_upstream_branch() base-branch selection."""
 
     def _cser(self, default_upstream=None):
         cser = mock.Mock()
@@ -7758,70 +7758,70 @@ class TestGetUpstreamBranch(unittest.TestCase):
     def test_explicit_base_branch_wins(self):
         """An explicit -b/--base-branch overrides every other check."""
         args = Namespace(base_branch='custom/branch', upstream='us')
-        with mock.patch('patman.review.core.gitutil') as gu:
+        with mock.patch('patman.review.apply.gitutil') as gu:
             self.assertEqual(
                 'custom/branch',
-                review.core._get_upstream_branch(args, self._cser()))
+                review.apply.get_upstream_branch(args, self._cser()))
             gu.ref_exists.assert_not_called()
             gu.count_revs.assert_not_called()
 
     def test_next_ahead_of_master_picks_next(self):
         """When next has commits ahead of master, next is chosen."""
         args = Namespace(base_branch=None, upstream='us')
-        with mock.patch('patman.review.core.gitutil.ref_exists',
+        with mock.patch('patman.review.apply.gitutil.ref_exists',
                         return_value=True), \
-             mock.patch('patman.review.core.gitutil.count_revs',
+             mock.patch('patman.review.apply.gitutil.count_revs',
                         return_value=3):
             self.assertEqual(
                 'us/next',
-                review.core._get_upstream_branch(args, self._cser()))
+                review.apply.get_upstream_branch(args, self._cser()))
 
     def test_next_empty_falls_back_to_master(self):
         """When next exists but has no commits ahead, master is chosen."""
         args = Namespace(base_branch=None, upstream='us')
-        with mock.patch('patman.review.core.gitutil.ref_exists',
+        with mock.patch('patman.review.apply.gitutil.ref_exists',
                         side_effect=lambda ref, _=None: ref != 'us/main'), \
-             mock.patch('patman.review.core.gitutil.count_revs',
+             mock.patch('patman.review.apply.gitutil.count_revs',
                         return_value=0):
             self.assertEqual(
                 'us/master',
-                review.core._get_upstream_branch(args, self._cser()))
+                review.apply.get_upstream_branch(args, self._cser()))
 
     def test_main_preferred_to_master(self):
         """When the upstream has a main branch, it is used, not master."""
         args = Namespace(base_branch=None, upstream='us')
-        with mock.patch('patman.review.core.gitutil.ref_exists',
+        with mock.patch('patman.review.apply.gitutil.ref_exists',
                         return_value=True), \
-             mock.patch('patman.review.core.gitutil.count_revs',
+             mock.patch('patman.review.apply.gitutil.count_revs',
                         return_value=0) as count:
             self.assertEqual(
                 'us/main',
-                review.core._get_upstream_branch(args, self._cser()))
+                review.apply.get_upstream_branch(args, self._cser()))
         self.assertEqual('us/main..us/next', count.call_args.args[1])
 
     def test_next_missing_falls_back_to_master(self):
         """When next does not exist at all, master is chosen."""
         args = Namespace(base_branch=None, upstream='us')
-        with mock.patch('patman.review.core.gitutil.ref_exists',
+        with mock.patch('patman.review.apply.gitutil.ref_exists',
                         return_value=False):
             self.assertEqual(
                 'us/master',
-                review.core._get_upstream_branch(args, self._cser()))
+                review.apply.get_upstream_branch(args, self._cser()))
 
     def test_default_upstream_used_when_unset(self):
         """When args.upstream is unset, the cser default is consulted."""
         args = Namespace(base_branch=None, upstream=None)
         cser = self._cser(default_upstream='us')
-        with mock.patch('patman.review.core.gitutil.ref_exists',
+        with mock.patch('patman.review.apply.gitutil.ref_exists',
                         return_value=True), \
-             mock.patch('patman.review.core.gitutil.count_revs',
+             mock.patch('patman.review.apply.gitutil.count_revs',
                         return_value=5):
             self.assertEqual(
-                'us/next', review.core._get_upstream_branch(args, cser))
+                'us/next', review.apply.get_upstream_branch(args, cser))
 
     def test_no_upstream_returns_origin_master(self):
         """With no upstream configured anywhere, return 'origin/master'."""
         args = Namespace(base_branch=None, upstream=None)
         self.assertEqual(
             'origin/master',
-            review.core._get_upstream_branch(args, self._cser()))
+            review.apply.get_upstream_branch(args, self._cser()))
