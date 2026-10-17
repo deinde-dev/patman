@@ -6624,7 +6624,7 @@ VERDICT: skip"""
                                side_effect=mock_agent), \
              mock.patch.object(review.common, 'ClaudeAgentOptions',
                                mock.MagicMock()), \
-             mock.patch.object(review_mod.core, '_build_review_prompt',
+             mock.patch.object(review_mod.prompts, 'build_review_prompt',
                                return_value='prompt'), \
              mock.patch.object(review_mod.core.gitutil, 'diff_stat',
                                return_value=''), \
@@ -6866,7 +6866,7 @@ VERDICT: skip"""
         ctx.coverity_text = '- RESOURCE_LEAK: drivers/foo.c:42: Handle leaked'
         with mock.patch.object(
                 review_mod.voice, 'get_voice', return_value=None):
-            prompt = review_mod.core._build_review_prompt(
+            prompt = review_mod.prompts.build_review_prompt(
                 ctx, 'abc1234', 1, [(1, 'abc1234', 'subj')], None)
         self.assertIn('COVERITY', prompt)
         self.assertIn('drivers/foo.c:42', prompt)

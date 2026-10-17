@@ -12,5 +12,6 @@ flow is in the core module.
 
 from patman.review import common
 from patman.review import core
+from patman.review import prompts
 from patman.review import voice
 from patman.review.core import do_review, review_series
