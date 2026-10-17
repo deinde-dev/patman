@@ -52,8 +52,8 @@ Series subcommands
 'patman series' has subcommands to add a series, send it, link it to
 patchwork, gather its tags, start the next version and archive it, along with
 others to list, show and tidy up series. 'patman series -h' lists them, and
-the command reference (``doc/reference/series.rst``) describes each one with
-its options. 'patman series' can be abbreviated to 'patman s'.
+:doc:`the command reference </reference/series>` describes each one with its
+options. 'patman series' can be abbreviated to 'patman s'.
 
 The workflow below shows the main ones in the order you use them.
 
@@ -61,8 +61,8 @@ Patman series workflow
 ----------------------
 
 These are the commands for the life of a series, in order.
-``doc/guide/series-workflow.rst`` goes through them with a real U-Boot series
-and the output of each.
+:doc:`Tracking a series with the database </guide/series-workflow>` goes
+through them with a real U-Boot series and the output of each.
 
 1. Tell patman the patchwork project for the upstream remote, once for each
    clone. The remote defaults to the one the current branch tracks, or the
@@ -126,7 +126,8 @@ that each series automatically uses the correct send settings for its
 destination. The trees may use different mailing lists, patchwork servers and
 SMTP credentials.
 
-For a worked example with real output, see ``doc/guide/upstreams.rst``.
+For a worked example with real output, see
+:doc:`Sending to more than one upstream </guide/upstreams>`.
 
 The key concepts are:
 

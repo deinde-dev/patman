@@ -7,7 +7,7 @@ If you point patman to your series on patchwork it can show you what new
 reviews have appeared since you sent your series.
 
 To set this up, add a Series-links tag to one of the commits in your series
-(see the 'Tags' chapter).
+(see :doc:`the Tags chapter </tags>`).
 
 Then you can type:
 
@@ -47,10 +47,11 @@ end. The new branch does not track an upstream branch, so set one with
 There is also a -c option to list the comments received for each patch, and a
 -C option to list those on the cover letter.
 
-For a worked example using real series, see ``doc/guide/status-and-tags.rst``.
+For a worked example using real series, see
+:doc:`Checking status and collecting tags </guide/status-and-tags>`.
 
 If you have several series in flight, 'patman series' keeps track of them for
 you in a database: each version, its patchwork link and the state of each
 patch. It can find the links, gather the review tags, start each new version
-and archive a series once merged. The 'Series Management' chapter describes
-this.
+and archive a series once merged. The
+:doc:`Series Management chapter </series>` describes this.

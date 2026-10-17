@@ -4,8 +4,8 @@ Sending a series
 ================
 
 ``patman send`` creates the patches from your branch, checks them and sends
-them. The guide in ``doc/guide/`` goes through this with a real series, from
-the first version to the last, with the output at each step.
+them. :doc:`The guide </guide/index>` goes through this with a real series,
+from the first version to the last, with the output at each step.
 
 How to run it
 -------------
@@ -99,7 +99,7 @@ Setting it up
 
 The guide goes through the setup step by step, with the output to expect:
 see 'Sending through the kernel.org web relay' in
-``doc/guide/getting-started.rst``. In brief:
+:doc:`Setting up patman </guide/getting-started>`. In brief:
 
 - give patatt, which signs the messages, a signing key, e.g.
   ``git config --global patatt.signingkey openpgp:<your-key-id>``

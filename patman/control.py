@@ -44,14 +44,33 @@ HELP_FILES = ('patman.rst', 'configuration.rst', 'sending.rst',
               'serve.rst', 'db.rst')
 
 
+# A link to another page of the docs, e.g. :doc:`the guide </guide/index>`
+RE_DOC_LINK = re.compile(r':doc:`([^`<]+?)\s*<[^>`]+>`')
+
+
+def plain_links(text):
+    """Turn links to other pages of the docs into plain text
+
+    The manual links to other pages, such as the guide, which are not part of
+    the text shown in the terminal, so show just the text of each link.
+
+    Args:
+        text (str): Text of a part of the manual
+
+    Returns:
+        str: Text with each link replaced by its text
+    """
+    return RE_DOC_LINK.sub(r'\1', text)
+
+
 def full_help_text():
     """Get the text of the whole manual, as shown by 'patman -H'
 
     Returns:
         str: The parts of the manual, one after the other
     """
-    return '\n'.join(resources.files('patman').joinpath(fname).read_text(
-        encoding='utf-8') for fname in HELP_FILES)
+    return '\n'.join(plain_links(resources.files('patman').joinpath(
+        fname).read_text(encoding='utf-8')) for fname in HELP_FILES)
 
 
 def setup():

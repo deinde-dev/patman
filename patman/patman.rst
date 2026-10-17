@@ -38,8 +38,8 @@ It can also draft reviews of patches for you, using a Claude agent:
   voice from past reviews
 
 ``patman serve`` shows the status of your series and your reviews on a
-mobile-friendly web page, where you can also work on reviews (see the 'Web
-server' chapter).
+mobile-friendly web page, where you can also work on reviews (see
+:doc:`the Web server chapter </serve>`).
 
 The series tracking and stored reviews are kept in an optional local
 database (a ``.patman.db`` file at the top of your git tree), which
@@ -93,12 +93,12 @@ This tool requires a certain way of working:
   patches. Weeks later, change the patches and repeat, knowing that you
   will get a consistent result each time.
 
-The guide in ``doc/guide/`` shows how to work this way, step by step, with a
-real U-Boot series: setting up, sending a first series, checking its status and
-collecting review tags, sending the next version, and tracking it all with the
-``patman series`` database. Start with ``doc/guide/index.rst``.
+:doc:`The guide </guide/index>` shows how to work this way, step by step,
+with a real U-Boot series: setting up, sending a first series, checking its
+status and collecting review tags, sending the next version, and tracking it
+all with the ``patman series`` database.
 
-The command reference in ``doc/reference/`` lists every command and its
+:doc:`The command reference </reference/index>` lists every command and its
 options, as does ``patman <command> -h``.
 
 The chapters which follow cover configuring patman, sending a series,
