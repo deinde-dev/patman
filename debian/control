@@ -38,9 +38,9 @@ Description: create, check and email patch series with Patchwork integration
  or, where there is no working SMTP, through a web relay.  It can also track
  a series on Patchwork and gather review tags into the commits.
  .
- The web-relay send path attests each message with patatt.  The optional AI
- review feature needs the claude-agent-sdk, which is not packaged in Debian
- and so is not pulled in here.
+ The web-relay send path attests each message with patatt.  The optional
+ assisted-review feature needs the claude-agent-sdk, which is not
+ packaged in Debian and so is not pulled in here.
  .
  Debian already has an unrelated program called patman, so this package
  installs the command only as patch-manager.

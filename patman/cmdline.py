@@ -377,7 +377,7 @@ def add_series_subparser(subparsers):
     ren.add_argument('-N', '--new-name', help='New name for the series')
 
     rev = series_subparsers.add_parser(
-        'review', help='AI-review the series and store the result')
+        'review', help='Draft a review of the series and store it')
     rev.add_argument('-f', '--force', action='store_true',
                      help='Re-review even if reviews are already stored')
     rev.add_argument('--spelling', type=str, default='British',
@@ -605,7 +605,7 @@ def add_review_subparser(subparsers):
     """
     review = subparsers.add_parser(
         'review', aliases=ALIASES['review'],
-        help='AI-powered review of a patchwork series')
+        help='Draft reviews of a patchwork series using an agent')
     review.add_argument(
         '-s', '--series', type=str, dest='pw_link',
         help='Patchwork series link/ID number')
@@ -662,7 +662,7 @@ def add_review_subparser(subparsers):
              "when it has commits ahead of '/master', otherwise '/master'.")
     review.add_argument(
         '--apply-only', action='store_true',
-        help='Only download and apply patches, skip AI review')
+        help='Only download and apply patches, skip the review')
     review.add_argument(
         '--coverity', action='store_true',
         help='Run Coverity on the base and the series, and feed the new '

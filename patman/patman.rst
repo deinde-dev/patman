@@ -5,7 +5,7 @@
 .. v1, v2, 19-Oct-11
 .. revised v3 24-Nov-11
 .. revised v4 Independence Day 2020, with Patchwork integration
-.. revised 2026, with AI review, series tracking and web-relay sending
+.. revised 2026, with assisted review, series tracking and web-relay sending
 
 Patman patch manager
 ====================
@@ -31,7 +31,7 @@ Once a series is out for review it helps you track it on Patchwork:
 - Show review tags from Patchwork and gather them into your commits
 - List the comments a series has received
 
-It can also review patches for you, using an AI agent:
+It can also draft reviews of patches for you, using a Claude agent:
 
 - Review any Patchwork series, or your own series before you send it
 - Optionally build Gmail drafts, run Coverity or learn your writing
@@ -1325,11 +1325,12 @@ might be bugs. In particular, tags are case sensitive which is probably
 a bad thing.
 
 
-AI-assisted patch review
-========================
+Assisted patch review
+=====================
 
 Patman can review other people's patches from Patchwork using a Claude
-AI agent, and create Gmail draft replies with the review comments.
+agent, and create Gmail draft replies with the review comments. Nothing
+is sent until you have checked a draft and chosen to send it.
 
 Prerequisites
 -------------
@@ -1457,7 +1458,7 @@ Any existing draft is deleted first, so it is not left as a duplicate
 in the thread.
 
 Use ``--apply-only`` to download and apply patches without running the
-AI review -- useful for checking that patches apply cleanly.
+review -- useful for checking that patches apply cleanly.
 
 By default the review branch is created from ``<upstream>/next`` when
 that branch has commits ahead of ``<upstream>/master``, and from
@@ -1487,8 +1488,8 @@ the email is sent with the correct identity.
 Reviewing your own series before sending
 ----------------------------------------
 
-To get an AI review of your own series before sending it, add the
-series with ``patman series add`` and then run::
+To have your own series reviewed before sending it, add the series with
+``patman series add`` and then run::
 
     patman series review
 
@@ -1522,7 +1523,7 @@ review regardless::
 How the review works
 --------------------
 
-For each patch, the AI agent:
+For each patch, the agent:
 
 1. Studies all patches in the series to understand the overall design
 2. Re-reads the specific patch in detail
@@ -1632,7 +1633,7 @@ the spelling convention used in review comments.
 Voice learning
 --------------
 
-Build a voice profile so AI reviews match your writing style::
+Build a voice profile so draft reviews match your writing style::
 
     # From Gmail (searches your sent reviews to the mailing list)
     patman review --learn-voice gmail -U us \
@@ -1660,7 +1661,7 @@ This:
 - Detects which drafts have been sent and records the final email
   content in the database (for context when reviewing future versions)
 - Detects deleted drafts (review not sent)
-- Refines the voice profile if the sent text differs from the AI draft
+- Refines the voice profile if the sent text differs from the draft
 - Detects replies from the patch author or other reviewers
 - Generates response drafts when appropriate (e.g. answering
   questions, pushing back on objections, or conceding gracefully)
@@ -1716,7 +1717,7 @@ Review lifecycle
 
 Each review goes through these states:
 
-- **new**: AI review generated, not yet sent
+- **new**: Review drafted, not yet sent
 - **draft**: Gmail draft created
 - **sent**: Draft was sent; body updated with actual sent content
 - **deleted**: Draft was deleted without sending
@@ -1724,7 +1725,7 @@ Each review goes through these states:
 
 When reviewing a new version of a previously reviewed series, patman
 loads the most recent earlier version that has reviews as context for
-the AI, so it can check whether earlier issues were addressed and avoid
+the agent, so it can check whether earlier issues were addressed and avoid
 raising fresh points the earlier versions did not. Versions are linked
 by their cleaned cover-letter title.
 
@@ -1778,13 +1779,13 @@ version of a series arrives, carry forward review tags and change logs
 from earlier versions, and show upstream progress without re-querying
 patchwork each time.
 
-For AI-assisted review of other people's patches, the database stores
+For assisted review of other people's patches, the database stores
 the generated review text, Gmail draft IDs and thread state so that
 patman can resume where it left off  - showing stored reviews, creating
 drafts for reviews that were not yet sent, detecting when drafts have
 been sent or deleted, and providing previous review context when a new
 version of the series is posted. Review-handling notes from the
-``handle-reviews`` workflow are also stored per-version so the AI has
+``handle-reviews`` workflow are also stored per-version so the agent has
 context about what was changed and why.
 
 Entity relationships
@@ -1806,7 +1807,7 @@ Entity relationships
 A **series** represents a named patch series across all its versions.
 Each **ser_ver** is one version of that series (e.g. v1, v2), linked to
 patchwork by a series link. Each ser_ver has one **pcommit** per patch
-and zero or more **review** records (one per AI review).
+and zero or more **review** records (one per drafted review).
 
 Tables
 ------
@@ -1827,7 +1828,7 @@ name        TEXT      Series name (unique)
 desc        TEXT      Series description / cover-letter title
 archived    BIT       True if series is archived
 upstream    TEXT      Upstream name (added v5)
-source      TEXT      'review' for AI-reviewed series (added v8)
+source      TEXT      'review' for reviewed series (added v8)
 ==========  ========  ==========================================
 
 ser_ver
@@ -1836,7 +1837,7 @@ ser_ver
 Each time you send a new version of a series, patman creates a ser_ver
 record linking it to patchwork. This lets patman track review tags,
 change logs and upstream progress separately for each version. For
-AI-reviewed series, review-handling notes are stored here so the next
+reviewed series, review-handling notes are stored here so the next
 version has context about what was changed.
 
 ==================  ========  ==========================================
