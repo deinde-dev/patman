@@ -5443,7 +5443,7 @@ Date:   .*
         self.assertIsNone(result)
         ctx.cser.db.ser_ver_remove.assert_called_once_with(5, 1)
 
-    def test_review_apply_failure(self):
+    def test_review_apply_check_failure(self):
         """A genuine apply failure still returns False"""
         ctx = mock.Mock()
         ctx.series_id = 5
