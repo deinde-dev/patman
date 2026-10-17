@@ -10,12 +10,10 @@ Unreleased
 
 Added
 ~~~~~
-- ``doc/getting-started.rst`` describes the setup needed to send patches,
-  ``doc/first-series.rst`` walks through sending a first series, using a
-  real U-Boot series which was merged in v2026.07, and
-  ``doc/status-and-tags.rst`` shows checking its status and collecting
-  review tags, ``doc/next-version.rst`` shows sending its v2 and
-  ``doc/series-workflow.rst`` shows tracking it with ``patman series``.
+- A guide in ``doc/guide/`` shows how to use patman step by step with a
+  real U-Boot series which was merged in v2026.07: setting up, sending a
+  first series, checking its status and collecting review tags, sending the
+  next version, and tracking it all with ``patman series``.
 - ``patman status -C`` shows the comments on the cover letter, as
   ``patman series status -C`` does.
 - ``patman serve`` runs a web server showing series status, patchwork

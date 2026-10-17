@@ -6,13 +6,9 @@
 
 .. toctree::
    :maxdepth: 2
-   :caption: Examples
+   :caption: Guide
 
-   getting-started
-   first-series
-   status-and-tags
-   next-version
-   series-workflow
+   guide/index
 
 .. toctree::
    :maxdepth: 2

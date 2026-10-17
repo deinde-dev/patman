@@ -93,12 +93,10 @@ This tool requires a certain way of working:
   patches. Weeks later, change the patches and repeat, knowing that you
   will get a consistent result each time.
 
-For the setup needed to send patches, see ``doc/getting-started.rst``. For a
-worked example using a real U-Boot series, from a branch of commits to the
-email on the mailing list, see ``doc/first-series.rst``. For checking its
-status and collecting review tags, see ``doc/status-and-tags.rst``, for
-sending the next version, see ``doc/next-version.rst``, and for tracking it
-all with the ``patman series`` database, see ``doc/series-workflow.rst``.
+The guide in ``doc/guide/`` shows how to work this way, step by step, with a
+real U-Boot series: setting up, sending a first series, checking its status and
+collecting review tags, sending the next version, and tracking it all with the
+``patman series`` database. Start with ``doc/guide/index.rst``.
 
 
 How to configure it
@@ -617,176 +615,39 @@ end. The new branch does not track an upstream branch, so set one with
 There is also a -c option to list the comments received for each patch, and a
 -C option to list those on the cover letter.
 
-For a worked example using real series, see ``doc/status-and-tags.rst``.
+For a worked example using real series, see ``doc/guide/status-and-tags.rst``.
 
 
 Example Work Flow
 -----------------
 
 The basic workflow is to create your commits, add some tags to the top
-commit, and type 'patman' to check and send them.
+commit, and run 'patman send' to check and send them. The guide in
+``doc/guide/`` goes through this with a real series, from the first version
+to the last, with the output at each step. A few more points:
 
-Here is an example workflow for a series of 4 patches. Let's say you have
-these rather contrived patches in the following order in branch us-cmd in
-your tree where 'us' means your upstreaming activity (newest to oldest as
-output by git log --oneline)::
+Leaving out commits
+    If the branch has commits which should not be sent, such as a
+    work-in-progress commit at the top for testing, use ``-s`` to skip that
+    many commits from the top, or ``-e`` to skip commits at the bottom, e.g.
 
-    7c7909c wip
-    89234f5 Don't include standard parser if hush is used
-    8d640a7 mmc: sparc: Stop using builtin_run_command()
-    0c859a9 Rename run_command2() to run_command()
-    a74443f sandbox: Rename run_command() to builtin_run_command()
+    .. code-block:: bash
 
-The first patch is some test things that enable your code to be compiled,
-but that you don't want to submit because there is an existing patch for it
-on the list. So you can tell patman to create and check some patches
-(skipping the first patch) with:
+        patman send -s1 -n
 
-.. code-block:: bash
+    Tags in a skipped commit are not seen, so keep them in a commit which is
+    sent.
 
-    patman -s1 send -n
+Fixing problems
+    If the dry run reports checkpatch errors or warnings, fix the commit,
+    e.g. with 'git rebase -i' and 'edit', then run the dry run again until it
+    is clean. Use ``-i`` to send in spite of the errors, or ``--no-check`` to
+    skip checkpatch.
 
-If you want to do all of them including the work-in-progress one, then
-(if you are tracking an upstream branch):
-
-.. code-block:: bash
-
-    patman send -n
-
-Let's say that patman reports an error in the second patch. Then:
-
-.. code-block:: bash
-
-    git rebase -i HEAD~6
-    # change 'pick' to 'edit' in 89234f5
-    # use editor to make code changes
-    git add -u
-    git rebase --continue
-
-Now you have an updated patch series. To check it:
-
-.. code-block:: bash
-
-    patman -s1 send -n
-
-Let's say it is now clean and you want to send it. Now you need to set up
-the destination. So amend the top commit with:
-
-.. code-block:: bash
-
-    git commit --amend
-
-Use your editor to add some tags, so that the whole commit message is::
-
-    The current run_command() is really only one of the options, with
-    hush providing the other. It really shouldn't be called directly
-    in case the hush parser is bring used, so rename this function to
-    better explain its purpose::
-
-    Series-to: u-boot
-    Series-cc: bfin, marex
-    Series-prefix: RFC
-    Cover-letter:
-    Unified command execution in one place
-
-    At present two parsers have similar code to execute commands. Also
-    cmd_usage() is called all over the place. This series adds a single
-    function which processes commands called cmd_process().
-    END
-
-    Change-Id: Ica71a14c1f0ecb5650f771a32fecb8d2eb9d8a17
-
-
-You want this to be an RFC and Cc the whole series to the bfin alias and
-to Marek. Two of the patches have tags (those are the bits at the front of
-the subject that say mmc: sparc: and sandbox:), so 8d640a7 will be Cc'd to
-mmc and sparc, and the last one to sandbox.
-
-Now to send the patches, take off the -n flag:
-
-.. code-block:: bash
-
-   patman -s1 send
-
-The patches will be created, shown in your editor, and then sent along with
-the cover letter. Note that patman's tags are automatically removed so that
-people on the list don't see your secret info.
-
-Of course patches often attract comments and you need to make some updates.
-Let's say one person sent comments and you get an Acked-by: on one patch.
-Also, the patch on the list that you were waiting for has been merged,
-so you can drop your wip commit.
-
-Take a look on patchwork and find out the URL of the series. This will be
-something like `http://patchwork.ozlabs.org/project/uboot/list/?series=187331`
-Add this to a tag in your top commit::
-
-   Series-links: 187331
-
-You can use then patman to collect the Acked-by tag to the correct commit,
-creating a new 'version 2' branch for us-cmd:
-
-.. code-block:: bash
-
-    patman status -d us-cmd2
-    git checkout us-cmd2
-
-You can look at the comments in Patchwork or with:
-
-.. code-block:: bash
-
-    patman status -C
-
-Then you can resync with upstream:
-
-.. code-block:: bash
-
-    git fetch origin        # or whatever upstream is called
-    git rebase origin/master
-
-and use git rebase -i to edit the commits, dropping the wip one.
-
-Then update the `Series-cc:` in the top commit to add the person who reviewed
-the v1 series::
-
-    Series-cc: bfin, marex, Heiko Schocher <hs@denx.de>
-
-and remove the Series-prefix: tag since it it isn't an RFC any more. The
-series is now version two, so the series info in the top commit looks like
-this::
-
-    Series-to: u-boot
-    Series-cc: bfin, marex, Heiko Schocher <hs@denx.de>
-    Series-version: 2
-    Cover-letter:
-    ...
-
-Finally, you need to add a change log to the two commits you changed. You
-add change logs to each individual commit where the changes happened, like
-this::
-
-    Series-changes: 2
-    - Updated the command decoder to reduce code size
-    - Wound the torque propounder up a little more
-
-(note the blank line at the end of the list)
-
-When you run patman it will collect all the change logs from the different
-commits and combine them into the cover letter, if you have one. So finally
-you have a new series of commits::
-
-    faeb973 Don't include standard parser if hush is used
-    1b2f2fe mmc: sparc: Stop using builtin_run_command()
-    cfbe330 Rename run_command2() to run_command()
-    0682677 sandbox: Rename run_command() to builtin_run_command()
-
-so to send them:
-
-.. code-block:: bash
-
-    patman
-
-and it will create and send the version 2 series.
+Dropping commits
+    When a commit is no longer needed, e.g. because the patch it depends on
+    has been merged, drop it with 'git rebase -i' before sending the next
+    version.
 
 
 Series Management
@@ -955,7 +816,7 @@ Patman series workflow
 
 Here is a run-through of how to incorporate 'patman series' into your workflow.
 For the same with real output from a U-Boot series, see
-``doc/series-workflow.rst``.
+``doc/guide/series-workflow.rst``.
 
 Firstly, set up your project::
 
