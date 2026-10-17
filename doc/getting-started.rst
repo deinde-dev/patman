@@ -13,7 +13,9 @@ What you need
 -------------
 
 - Python 3.9 or later
-- git, with ``git send-email``, which patman uses to send the email
+- git, with ``git send-email``, which patman uses to send the email, or
+  else a key for the kernel.org web relay (see `Sending through the
+  kernel.org web relay`_)
 - Perl, which U-Boot's ``checkpatch.pl`` and ``get_maintainer.pl`` need
 - a clone of the project you are sending patches to
 
@@ -65,9 +67,82 @@ Check that sending works by mailing a patch to yourself::
     rm 0001-*.patch
 
 ``--suppress-cc=all`` stops git copying the people named in the patch's
-trailers. If the patch arrives, git is ready. If you cannot send email from
-your machine at all, patman can post the series to a web relay instead;
-see 'Sending through a web relay' in the manual.
+trailers. If the patch arrives, git is ready.
+
+Sending through the kernel.org web relay
+----------------------------------------
+
+If you cannot send email from your machine, for example because the SMTP
+port is blocked or your provider mangles patches, patman can post the series
+to kernel.org's web relay instead, which sends the email for you. This is
+the relay which b4 uses, and U-Boot can use it too. ``git send-email`` is not
+needed in this case.
+
+The relay checks each message by its signature rather than by a password,
+so it needs a signing key, which patatt (installed with patman) uses to sign
+the messages. To use an existing PGP key, find its ID::
+
+    $ gpg --list-secret-keys --keyid-format=long
+    sec   rsa4096/0123456789ABCDEF 2020-01-01 [SC]
+    ...
+
+and tell patatt to use it::
+
+    git config --global patatt.signingkey openpgp:0123456789ABCDEF
+
+The setting is ``patatt.signingkey``, not ``user.signingKey``. Instead of a
+PGP key you can create an ed25519 key with ``patatt genkey`` and add the
+``[patatt]`` section it prints to your git config. gpg must be able to sign
+without getting stuck on a prompt; putting ``export GPG_TTY=$(tty)`` in your
+shell startup usually does it.
+
+Then tell patman to send U-Boot patches through the relay, in ``~/.patman``::
+
+    [u-boot_settings]
+    send_endpoint_web: https://lkml.kernel.org/_b4_submit
+
+The ``[u-boot_settings]`` section applies only in a U-Boot tree, so other
+projects still use ``git send-email``.
+
+Register your key and email address with the relay, once. Run this in the
+U-Boot tree, so that the setting above applies::
+
+    $ patman send --web-auth-new
+    Requesting email authorisation from https://lkml.kernel.org/_b4_submit
+      Name:     Your Name
+      Identity: you@example.com
+      Selector: default
+    Challenge sent to you@example.com. When it arrives, run:
+      patman send --web-auth-verify <challenge>
+
+The relay emails you a challenge. Pass it back to finish registering::
+
+    $ patman send --web-auth-verify <challenge>
+    Challenge verified for you@example.com; the endpoint is ready for sending.
+
+The identity is your git ``user.email``, so the patches must be sent from
+that address.
+
+A dry run now shows that the series would go through the relay, here with
+the series from :doc:`first-series`::
+
+    $ patman send -n
+    ...
+    Dry run: would send 4 message(s) via https://lkml.kernel.org/_b4_submit
+    Dry run, so not doing much. But I would do this:
+
+    Send a total of 3 patches with a cover letter.
+    ...
+    Git command: (web relay https://lkml.kernel.org/_b4_submit)
+
+To check it all works, send the series with ``--reflect``, which has the
+relay email the series back to you only, not to the list or anyone copied::
+
+    patman send --reflect
+
+When that looks right, ``patman send`` sends it for real. To use ``git
+send-email`` for a single run instead, add ``--no-relay``. More details are in
+'Sending through a web relay' in the manual.
 
 Setting up the tree
 -------------------
