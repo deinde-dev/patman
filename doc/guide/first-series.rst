@@ -93,8 +93,7 @@ commit of the series, with its tags::
     body. patman adds the list of patches and the diffstat
 
 patman removes these tags from the patches it creates, so they never
-reach the mailing list. The full list of tags is in the 'How to add tags'
-section of the manual.
+reach the mailing list. The full list of tags is in :doc:`/tags`.
 
 Checking the series
 -------------------
