@@ -29,7 +29,6 @@ from u_boot_pylib import tout
 from patman import coverity
 from patman import cser_helper
 from patman import database
-from patman import gmail
 from patman import patchstream
 from patman import workflow
 from patman.review import apply
@@ -40,6 +39,7 @@ from patman.review import lookup
 from patman.review import prompts
 from patman.review import replies
 from patman.review import scan
+from patman.review import stored
 from patman.review import voice
 
 
@@ -483,247 +483,6 @@ def _register_series(cser, clean_name, version, link, series_data,
     return series_id, svid
 
 
-def _do_stored(args, pwork, cser, link):
-    """Handle --send and --revise, which act on stored reviews
-
-    Args:
-        args (Namespace): Command-line arguments
-        pwork (Patchwork): Configured patchwork instance
-        cser (Cseries): Open cseries instance
-        link (str): Patchwork series link/ID
-
-    Returns:
-        int: 0 on success, 1 on failure
-    """
-    if args.send:
-        return _do_send(args, cser, link)
-    return _do_revise(args, pwork, cser, link)
-
-
-def _do_send(args, cser, link):
-    """Send the Gmail drafts of the reviews of a series
-
-    The cover letter's review is sent first, then the patches' in order.
-    With -i, only those patches' drafts are sent. Each review is recorded as
-    sent, with the text which was sent, since the draft may have been
-    changed in Gmail.
-
-    Args:
-        args (Namespace): Command-line arguments
-        cser (Cseries): Open cseries instance
-        link (str): Patchwork series link/ID
-
-    Returns:
-        int: 0 on success, 1 if any draft could not be sent
-    """
-    existing = cser.db.series_find_by_link(link)
-    if not existing:
-        raise ValueError(f'Series {link} has not been reviewed')
-    _, name, version, svid = existing
-    sel = common.parse_patch_selection(args.patches)
-    reviews = sorted((rev for rev in cser.db.review_get_for_version(svid)
-                      if rev.status == database.REVIEW_DRAFT and
-                      rev.draft_id and (not sel or rev.seq in sel)),
-                     key=lambda rev: rev.seq)
-    if not reviews:
-        raise ValueError(f"No Gmail drafts to send in '{name}' v{version}")
-    if args.dry_run:
-        for rev in reviews:
-            tout.notice(f'Dry run: would send the review of '
-                        f'{_review_label(rev.seq)}')
-        return 0
-    if not gmail.check_available():
-        return 1
-
-    service = gmail.get_service(getattr(args, 'gmail_account', None))
-    failed = 0
-    for rev in reviews:
-        label = _review_label(rev.seq)
-        try:
-            result = gmail.send_draft(service, rev.draft_id)
-        except Exception as exc:  # pylint: disable=W0718
-            tout.error(f'Cannot send the review of {label}: {exc}')
-            failed += 1
-            continue
-        if not result:
-            tout.warning(f'The draft of the review of {label} has gone; '
-                         'not sent')
-            failed += 1
-            continue
-        body, msg_id, thread_id = result
-        cser.db.review_set_sent(rev.idnum, body or rev.body, msg_id,
-                                thread_id)
-        cser.commit()
-        tout.notice(f'Sent the review of {label}')
-    tout.notice(f'Sent {len(reviews) - failed} of {len(reviews)} review(s)')
-    return 1 if failed else 0
-
-
-def _review_label(seq):
-    """Describe which part of a series a review is for
-
-    Args:
-        seq (int): Patch number, 0 for the cover letter
-
-    Returns:
-        str: e.g. 'patch 2' or 'the cover letter'
-    """
-    return f'patch {seq}' if seq else 'the cover letter'
-
-
-def _review_commits(args, cser, link, ups):
-    """Get the commits holding the patches of a reviewed series
-
-    The review branch is left in place after a review, so the patches can be
-    read from it. It may be based on next or master (see series_base()), so
-    the base is whichever of these leaves the fewest commits on the branch.
-
-    Args:
-        args (Namespace): Command-line arguments (for base_branch)
-        cser (Cseries): Open cseries instance
-        link (str): Patchwork series link/ID
-        ups (str or None): Upstream name
-
-    Returns:
-        list of str: One line for each commit, 'hash subject', oldest first,
-            or an empty list if the branch is not present
-    """
-    branch = lookup.make_review_name(link, ups)
-    git_dir = gitutil.get_top_level()
-    if not gitutil.ref_exists(branch, git_dir):
-        return []
-    bases = [apply.get_upstream_branch(args, cser)]
-    if ups:
-        bases += [f'{ups}/next', apply.main_branch(ups, git_dir)]
-    counts = {}
-    for base in bases:
-        count = gitutil.count_revs(git_dir, f'{base}..{branch}')
-        if count:
-            counts[base] = count
-    if not counts:
-        return []
-    base = min(counts, key=counts.get)
-    out = subprocess.run(
-        ['git', 'log', '--reverse', '--format=%H %s', f'{base}..{branch}'],
-        capture_output=True, text=True, check=False, cwd=git_dir).stdout
-    return out.splitlines()
-
-
-async def revise_reviews(ctx, reviews, note, commits):
-    """Ask the agent to change some reviews, following a note from the reviewer
-
-    Args:
-        ctx (ReviewContext): Review context (uses repo_path, reviewer_tag
-            and spelling)
-        reviews (dict): Map of seq to review body text
-        note (str): What the reviewer wants changed
-        commits (list of str): 'hash subject' for each patch, in order
-
-    Returns:
-        dict or None: Map of seq to new review body text, for each review
-            which changed, or None if the agent is not available or failed
-    """
-    if not claude_mod.check_available():
-        return None
-    parts = []
-    for seq in sorted(reviews):
-        parts += [f'---SEQ {seq}---', reviews[seq]]
-    if commits:
-        lines = '\n'.join(f'Patch {seq}: {line}'
-                          for seq, line in enumerate(commits, 1))
-        patches = f'The patches are these commits:\n{lines}'
-    else:
-        patches = 'The patches are not available in the repository.'
-    with tempfile.NamedTemporaryFile('w', prefix='patman_revise_',
-                                     suffix='.txt', delete=False) as outf:
-        outf.write('\n'.join(parts))
-        reviews_path = outf.name
-    try:
-        prompt = prompts.REVISE_PROMPT.format(
-            note=note, reviews_path=reviews_path, patches=patches,
-            tag=ctx.reviewer_tag, spelling=ctx.spelling)
-        options = common.agent_options(
-            allowed_tools=['Bash', 'Read', 'Grep'], cwd=ctx.repo_path,
-            max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
-        tout.notice('Revising reviews...')
-        success, log = await claude_mod.run_agent_collect(prompt, options)
-    finally:
-        os.unlink(reviews_path)
-    if not success:
-        return None
-    return {seq: body for seq, body in emails.parse_refined_output(log).items()
-            if seq in reviews and body and body != reviews[seq].strip()}
-
-
-def revise_reviews_sync(ctx, reviews, note, commits):
-    """Synchronous wrapper for revise_reviews()"""
-    return common.run(revise_reviews(ctx, reviews, note, commits))
-
-
-def _do_revise(args, pwork, cser, link):
-    """Change stored reviews of a series, following a note from the reviewer
-
-    Only reviews which have not been sent are changed. With -i, only those
-    patches' reviews are given to the agent. With -d, the Gmail drafts of the
-    reviews which change are recreated.
-
-    Args:
-        args (Namespace): Command-line arguments
-        pwork (Patchwork): Configured patchwork instance
-        cser (Cseries): Open cseries instance
-        link (str): Patchwork series link/ID
-
-    Returns:
-        int: 0 on success, 1 on failure
-    """
-    existing = cser.db.series_find_by_link(link)
-    if not existing:
-        raise ValueError(f'Series {link} has not been reviewed')
-    _, name, version, svid = existing
-    sel = common.parse_patch_selection(args.patches)
-    reviews = [rev for rev in cser.db.review_get_for_version(svid)
-               if rev.status not in (database.REVIEW_SENT,
-                                     database.REVIEW_REPLIED) and
-               (not sel or rev.seq in sel)]
-    if not reviews:
-        raise ValueError(f"No unsent reviews to revise in '{name}' "
-                         f'v{version}')
-
-    ctx = common.ReviewContext(pwork, cser, {})
-    ctx.reviewer_name, ctx.reviewer_email = common.parse_reviewer(args)
-    ctx.repo_path = gitutil.get_top_level()
-    ctx.spelling = args.spelling
-    ups = pwork.upstream if pwork else None
-    commits = _review_commits(args, cser, link, ups)
-    changed = revise_reviews_sync(
-        ctx, {rev.seq: rev.body for rev in reviews}, args.revise, commits)
-    if changed is None:
-        tout.error('Could not revise the reviews')
-        return 1
-    if not changed:
-        tout.notice('No reviews needed changing')
-        return 0
-
-    for rev in reviews:
-        if rev.seq in changed:
-            body = changed[rev.seq]
-            cser.db.review_set_body(rev.idnum, body,
-                                    'Reviewed-by:' in body)
-            tout.notice(f'Revised the review of {_review_label(rev.seq)}')
-            print(body)
-            print()
-    cser.commit()
-
-    if args.create_drafts:
-        redo = [cser.db.review_get(rev.idnum) for rev in reviews
-                if rev.seq in changed]
-        drafts.delete_gmail_drafts(args, redo)
-        ctx.series_data = lookup.fetch_series(pwork, link)[0]
-        drafts.create_drafts(ctx, args, {rev.seq: rev.body for rev in redo},
-                             {rev.seq: rev.idnum for rev in redo})
-    return 0
-
-
 def _run_coverity(ctx, args):
     """Analyse the series with Coverity and summarise the new defects
 
@@ -1157,5 +916,5 @@ def do_review(args, pwork, cser):
             pwork, args.title, getattr(args, 'version', None))
 
     if getattr(args, 'send', False) or getattr(args, 'revise', None):
-        return _do_stored(args, pwork, cser, link)
+        return stored.do_stored(args, pwork, cser, link)
     return _review_link(args, pwork, cser, link)

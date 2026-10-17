@@ -5478,7 +5478,7 @@ Date:   .*
             captured['ph'] = patch_headers
             return {}
 
-        with mock.patch.object(review.core.gmail, 'create_review_drafts',
+        with mock.patch.object(gmail, 'create_review_drafts',
                                side_effect=fake_crd), \
                 terminal.capture():
             review.drafts.create_drafts(ctx, args, {0: 'cov', 1: 'pat'},
@@ -5996,7 +5996,7 @@ Date:   .*
                                   return_value=True), \
                 mock.patch.object(review.common, 'ClaudeAgentOptions',
                                   mock.MagicMock()), \
-                mock.patch.object(review.core, '_review_commits',
+                mock.patch.object(review.stored, '_review_commits',
                                   return_value=['abc1 dm: Fix it']), \
                 mock.patch.object(review.lookup, 'fetch_series',
                                   return_value=({'id': 123}, 'x', 1, 2)), \
@@ -6005,7 +6005,7 @@ Date:   .*
                 mock.patch.object(review.drafts, 'create_drafts') as create, \
                 terminal.capture() as (out, _):
             self.assertEqual(
-                0, review.core._do_revise(args, None, cser, '123'))
+                0, review.stored._do_revise(args, None, cser, '123'))
         self.assertIn('Drop the nit, approve it', seen['prompt'])
         self.assertIn('Patch 1: abc1 dm: Fix it', seen['prompt'])
         self.assertIn('Reviewed-by: Simon Glass <sjg@chromium.org>',
@@ -6027,7 +6027,7 @@ Date:   .*
             ['review', '-s', '123', '-i', '2', '--revise', 'x'],
             config_fname=False)
         with self.assertRaises(ValueError) as exc:
-            review.core._do_revise(args, None, cser, '123')
+            review.stored._do_revise(args, None, cser, '123')
         self.assertIn('No unsent reviews', str(exc.exception))
 
     def test_review_send(self):
@@ -6053,13 +6053,13 @@ Date:   .*
         def run(*argv):
             args = cmdline.parse_args(['review', '-s', '123', '--send',
                                        *argv], config_fname=False)
-            with mock.patch.object(review.core.gmail, 'check_available',
+            with mock.patch.object(gmail, 'check_available',
                                    return_value=True), \
-                    mock.patch.object(review.core.gmail, 'get_service'), \
-                    mock.patch.object(review.core.gmail, 'send_draft',
+                    mock.patch.object(gmail, 'get_service'), \
+                    mock.patch.object(gmail, 'send_draft',
                                       side_effect=send) as sender, \
                     terminal.capture() as (out, err):
-                ret = review.core._do_send(args, cser, '123')
+                ret = review.stored._do_send(args, cser, '123')
             return ret, [call.args[1] for call in sender.call_args_list], \
                 out.getvalue() + err.getvalue()
 
