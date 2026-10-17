@@ -44,6 +44,7 @@ from patman import patchstream
 from patman import workflow
 from patman.review import common
 from patman.review import emails
+from patman.review import lookup
 from patman.review import prompts
 from patman.review import voice
 
@@ -129,66 +130,6 @@ def _read_context(spec):
         path = os.path.expanduser(spec[1:])
         return tools.read_file(path, binary=False).rstrip()
     return spec
-
-
-def _format_comment(what, comment):
-    """Format a patchwork comment for the agent to read
-
-    Args:
-        what (str): What the comment is on, e.g. 'cover letter'
-        comment (dict): Comment from patchwork
-
-    Returns:
-        str: Comment, with a heading and its sender and date
-    """
-    sub = comment.get('submitter', {})
-    return (f"=== Comment on {what} ===\n"
-            f"From: {sub.get('name', '')} <{sub.get('email', '')}>\n"
-            f"Date: {comment.get('date', '')}\n\n"
-            f"{comment.get('content', '')}\n")
-
-
-def _write_comments_file(series_data, pwork):
-    """Fetch and write existing patchwork comments to a temp file
-
-    Args:
-        series_data (dict): Series data from patchwork get_series()
-        pwork: Patchwork instance
-
-    Returns:
-        str or None: Path to the comments file, or None if no comments
-    """
-    patches = series_data.get('patches', [])
-    cover = series_data.get('cover_letter')
-
-    async def _fetch_comments():
-        all_comments = []
-        async with aiohttp.ClientSession() as client:
-            if cover:
-                for comment in await pwork.get_cover_comments(
-                        client, cover['id']):
-                    all_comments.append(
-                        _format_comment('cover letter', comment))
-
-            for i, patch in enumerate(patches):
-                for comment in await pwork.get_patch_comments(
-                        client, str(patch['id'])):
-                    all_comments.append(_format_comment(
-                        f"patch {i + 1}: {patch.get('name', '')}", comment))
-
-        return all_comments
-
-    comments = common.run(_fetch_comments())
-
-    if not comments:
-        return None
-
-    comments_path = os.path.join(tempfile.gettempdir(),
-                                 'patman_review_comments.txt')
-    tools.write_file(comments_path, '\n'.join(comments), binary=False)
-
-    tout.notice(f'Found {len(comments)} existing comment(s)')
-    return comments_path
 
 
 async def _run_cover_review(ctx, all_commits):
@@ -340,7 +281,7 @@ async def review_patches(ctx):
     patches = ctx.series_data.get('patches', [])
     seq_by_subject = {}
     for i, patch in enumerate(patches):
-        subject = _clean_series_name(patch.get('name', ''))
+        subject = lookup.clean_series_name(patch.get('name', ''))
         seq_by_subject.setdefault(subject, i + 1)
 
     total = ctx.patch_count or len(commits)
@@ -513,132 +454,6 @@ def apply_series_sync(pwork, link, branch_name, upstream_branch, repo_path):
     """
     return common.run(apply_series(
         pwork, link, branch_name, upstream_branch, repo_path))
-
-
-def search_patch(pwork, title):
-    """Search patchwork for a patch by title and return its series and index
-
-    Queries the patchwork patches API by title, picks the most recent
-    match, then looks up its series.
-
-    Args:
-        pwork (Patchwork): Configured patchwork instance
-        title (str): Patch title text to search for
-
-    Returns:
-        tuple: (series_link, patch_seq)
-
-    Raises:
-        ValueError: if no matching patch is found
-    """
-    from urllib.parse import quote_plus
-
-    results = common.pw_call(pwork.search_patches, quote_plus(title, safe=':'))
-
-    if not results:
-        raise ValueError(f"No patch found matching '{title}'")
-
-    if len(results) > 1:
-        tout.notice(f"Found {len(results)} matching patches:")
-        for i, p in enumerate(results[:10]):
-            tout.notice(f"  {i + 1}. [{p['id']}] {p['name']}")
-
-    best = results[0]
-    patch_id = best['id']
-    tout.notice(f"Using: [{patch_id}] {best['name']}")
-    return lookup_patch_series(pwork, patch_id)
-
-
-def lookup_patch_series(pwork, patch_id):
-    """Look up a patch on patchwork and return its series link and position
-
-    Args:
-        pwork (Patchwork): Configured patchwork instance
-        patch_id (int): Patchwork patch ID
-
-    Returns:
-        tuple: (series_link, patch_seq) where series_link is the series
-            ID as a string and patch_seq is the 1-based position
-
-    Raises:
-        ValueError: if the patch or its series cannot be found
-    """
-    data = common.pw_call(pwork.get_patch, patch_id)
-
-    series_list = data.get('series', [])
-    if not series_list:
-        raise ValueError(f'Patch {patch_id} has no associated series')
-
-    series_link = str(series_list[0]['id'])
-    patch_name = data.get('name', '')
-    tout.notice(f"Patch {patch_id}: '{patch_name}'")
-    tout.notice(f"Series: {series_list[0].get('name', '')} "
-                f"(link {series_link})")
-
-    # Fetch the series to find the patch position
-    series_data = _fetch_series(pwork, series_link)[0]
-    patches = series_data.get('patches', [])
-    for i, patch in enumerate(patches):
-        if patch.get('id') == patch_id:
-            return series_link, i + 1
-    return series_link, 1
-
-
-def search_series(pwork, title, version=None):
-    """Search patchwork for a series by cover-letter title
-
-    Queries the patchwork API and returns the link for the best match.
-    If multiple matches are found, shows them and picks the most recent,
-    unless a specific version is requested.
-
-    Args:
-        pwork (Patchwork): Configured patchwork instance
-        title (str): Title text to search for
-        version (int or None): Specific version to select, or None for the
-            most recent
-
-    Returns:
-        str: Patchwork series link/ID
-
-    Raises:
-        ValueError: if no matching series (or version) is found
-    """
-    if not pwork.proj_id:
-        raise ValueError('Patchwork project not configured; use '
-            "'patman patchwork set-project' or provide -l <link>")
-    results = common.pw_call(pwork.query_series, title)
-
-    if not results:
-        raise ValueError(f"No series found matching '{title}'")
-
-    if version is not None:
-        matches = [r for r in results if r.get('version') == version]
-        if not matches:
-            avail = ', '.join(
-                f"v{r.get('version')}"
-                for r in sorted(results, key=lambda r: r.get('version', 0)))
-            raise ValueError(
-                f"No v{version} of '{title}' found (available: {avail})")
-        # If several share the version, take the most recent by date
-        best = max(matches, key=lambda r: r.get('date', ''))
-        tout.notice(f"Using v{version}: {best['name']} (link {best['id']})")
-        return str(best['id'])
-
-    if len(results) == 1:
-        match = results[0]
-        tout.notice(f"Found: {match['name']} (v{match['version']}, "
-                  f"link {match['id']})")
-        return str(match['id'])
-
-    # Multiple matches - show them and pick the most recent
-    tout.notice(f"Found {len(results)} matching series:")
-    for i, match in enumerate(results):
-        tout.notice(f"  {i + 1}. [{match['id']}] {match['name']} "
-                  f"(v{match['version']}, {match['date']})")
-
-    best = max(results, key=lambda r: (r.get('version', 0), r.get('date', '')))
-    tout.notice(f"Using most recent: {best['name']} (link {best['id']})")
-    return str(best['id'])
 
 
 def _draft_location(ctx):
@@ -1191,36 +1006,6 @@ def _do_sync(args, cser):
     return 0
 
 
-def _clean_series_name(name):
-    """Strip the [U-Boot,v2,0/4] prefix from a series name
-
-    Args:
-        name (str): Raw series name from patchwork
-
-    Returns:
-        str: Cleaned name
-    """
-    if name.startswith('['):
-        bracket_end = name.find(']')
-        if bracket_end != -1:
-            return name[bracket_end + 1:].strip()
-    return name
-
-
-def _make_review_name(link, upstream=None):
-    """Build a series name for a review branch
-
-    Args:
-        link (str): Patchwork series link/ID
-        upstream (str or None): Upstream name
-
-    Returns:
-        str: Branch-style name, e.g. 'us-498633-review'
-    """
-    ups = upstream or 'pw'
-    return f'{ups}-{link}-review'
-
-
 def _register_series(cser, clean_name, version, link, series_data,
                      upstream=None):
     """Register a series in the database for review
@@ -1255,7 +1040,7 @@ def _register_series(cser, clean_name, version, link, series_data,
             tout.notice(f"Previously reviewed '{db_name}' v{prev_version};"
                         f" adding v{version}")
         else:
-            branch_name = _make_review_name(link, upstream)
+            branch_name = lookup.make_review_name(link, upstream)
             series_id = cser.db.series_find_by_name(
                 branch_name, include_archived=True)
             if not series_id:
@@ -1299,38 +1084,6 @@ def _register_series(cser, clean_name, version, link, series_data,
         raise
     tout.notice(f"Added series '{clean_name}' v{version} to database")
     return series_id, svid
-
-
-def _fetch_series(pwork, link):
-    """Fetch and validate series metadata from patchwork
-
-    Args:
-        pwork (Patchwork): Configured patchwork instance
-        link (str): Patchwork series link/ID
-
-    Returns:
-        tuple: (series_data, clean_name, version, patch_count)
-
-    Raises:
-        ValueError: if the series is incomplete
-    """
-    series_data = common.pw_call(pwork.get_series, link)
-
-    series_name = series_data.get('name', f'series-{link}')
-    version = series_data.get('version', 1)
-    patch_count = series_data.get('received_total', 0)
-    total = series_data.get('total', patch_count)
-
-    clean_name = _clean_series_name(series_name)
-
-    tout.notice(f"Series: {clean_name}")
-    tout.notice(f"Version: {version}, Patches: {patch_count}")
-
-    if patch_count < total:
-        raise ValueError('Incomplete series: patchwork received '
-            f'{patch_count} of {total} patches')
-
-    return series_data, clean_name, version, patch_count
 
 
 def _delete_gmail_drafts(args, reviews):
@@ -1525,7 +1278,7 @@ def _review_commits(args, cser, link, ups):
         list of str: One line for each commit, 'hash subject', oldest first,
             or an empty list if the branch is not present
     """
-    branch = _make_review_name(link, ups)
+    branch = lookup.make_review_name(link, ups)
     git_dir = gitutil.get_top_level()
     if not gitutil.ref_exists(branch, git_dir):
         return []
@@ -1655,7 +1408,7 @@ def _do_revise(args, pwork, cser, link):
         redo = [cser.db.review_get(rev.idnum) for rev in reviews
                 if rev.seq in changed]
         _delete_gmail_drafts(args, redo)
-        ctx.series_data = _fetch_series(pwork, link)[0]
+        ctx.series_data = lookup.fetch_series(pwork, link)[0]
         create_drafts(ctx, args, {rev.seq: rev.body for rev in redo},
                       {rev.seq: rev.idnum for rev in redo})
     return 0
@@ -1761,7 +1514,7 @@ def _base_text(ctx):
     Returns:
         str: Text to search
     """
-    ctx.cover_content = _fetch_cover_content(ctx.pwork, ctx.series_data)
+    ctx.cover_content = lookup.fetch_cover_content(ctx.pwork, ctx.series_data)
     if ctx.cover_content:
         return ctx.cover_content
     patches = ctx.series_data.get('patches') or []
@@ -1886,23 +1639,6 @@ def _apply_and_check(ctx, link):
     return True
 
 
-def _fetch_cover_content(pwork, series_data):
-    """Fetch cover letter content from patchwork
-
-    Args:
-        pwork (Patchwork): Patchwork instance
-        series_data (dict): Series data from patchwork
-
-    Returns:
-        str or None: Cover letter text
-    """
-    cover = series_data.get('cover_letter')
-    if not cover:
-        return None
-
-    return common.pw_call(pwork.get_cover, cover['id']).get('content', '')
-
-
 def _run_coverity(ctx, args):
     """Analyse the series with Coverity and summarise the new defects
 
@@ -1966,7 +1702,8 @@ def _run_and_store_reviews(ctx, args):
         ctx.previous_reviews[rev.seq] = rev.body
 
     if ctx.cover_content is None:
-        ctx.cover_content = _fetch_cover_content(ctx.pwork, ctx.series_data)
+        ctx.cover_content = lookup.fetch_cover_content(
+            ctx.pwork, ctx.series_data)
 
     review_bodies = review_patches_sync(ctx)
 
@@ -2058,27 +1795,8 @@ def _find_or_register(ctx, args, clean_name, link):
     return series_id, svid
 
 
-# Patchwork patch states worth reviewing: a series is reviewed only when at
-# least one of its patches is in one of these states
-ACTIVE_STATES = {'new', 'rfc', 'under-review', 'changes-requested',
-                 'needs-review-ack'}
-
-
 class ReviewInProgressError(Exception):
     """Raised when another review of the same series is already running"""
-
-
-def _get_patch_states(pwork, link):
-    """Get the patchwork state of each patch in a series
-
-    Args:
-        pwork (Patchwork): Configured patchwork instance
-        link (str): Patchwork series link/ID
-
-    Returns:
-        list of str: State slug for each patch
-    """
-    return common.pw_call(pwork.get_series_patch_states, link)
 
 
 def _acquire_review_lock(repo, branch_name):
@@ -2143,7 +1861,7 @@ def _review_link(args, pwork, cser, link):
         ValueError: if the series is incomplete (not all patches present)
     """
     ups = pwork.upstream if pwork else None
-    branch_name = _make_review_name(link, ups)
+    branch_name = lookup.make_review_name(link, ups)
     main_repo = gitutil.get_top_level()
     try:
         lock_fd = _acquire_review_lock(main_repo, branch_name)
@@ -2154,11 +1872,11 @@ def _review_link(args, pwork, cser, link):
 
     try:
         series_data, clean_name, version, patch_count = \
-            _fetch_series(pwork, link)
+            lookup.fetch_series(pwork, link)
 
         if not getattr(args, 'any_state', False):
-            states = _get_patch_states(pwork, link)
-            if not any(state in ACTIVE_STATES for state in states):
+            states = lookup.get_patch_states(pwork, link)
+            if not any(state in lookup.ACTIVE_STATES for state in states):
                 shown = ', '.join(sorted({s for s in states if s})) or 'none'
                 raise ValueError(
                     f"Series '{clean_name}' is not active on patchwork "
@@ -2205,7 +1923,7 @@ def _review_link(args, pwork, cser, link):
             ctx.signoff = ctx.signoff.replace('\\n', '\n')
         ctx.spelling = args.spelling
         ctx.context = _read_context(args.context) if args.context else None
-        ctx.comments_path = _write_comments_file(series_data, pwork)
+        ctx.comments_path = lookup.write_comments_file(series_data, pwork)
 
         if getattr(args, 'coverity', False):
             ctx.coverity_text = _run_coverity(ctx, args)
@@ -2264,7 +1982,7 @@ def _scan_new_versions(pwork, cser):
                 total = data.get('total', received)
                 states = await pwork.get_series_patch_states(
                     client, latest['id'])
-                active = any(state in ACTIVE_STATES for state in states)
+                active = any(state in lookup.ACTIVE_STATES for state in states)
                 found.append(NewVersion(ser.desc, int(latest['version']),
                                         latest['id'], received >= total,
                                         active))
@@ -2447,7 +2165,7 @@ def _draft_undrafted(args, pwork, cser, dry_run=False):
             tout.notice(f'Would create Gmail drafts for link {link} '
                         f'(v{version})')
             continue
-        series_data = _fetch_series(pwork, link)[0]
+        series_data = lookup.fetch_series(pwork, link)[0]
         _draft_stored_reviews(args, reviews, series_data, pwork, cser)
     return count
 
@@ -2576,7 +2294,7 @@ def _do_relink(args, cser):
     series = cser.db.series_get_dict(include_archived=True, reviews_only=True)
     groups = {}
     for ser in series.values():
-        groups.setdefault(_clean_series_name(ser.desc), []).append(ser)
+        groups.setdefault(lookup.clean_series_name(ser.desc), []).append(ser)
 
     merged = 0
     cleaned = 0
@@ -2675,15 +2393,16 @@ def do_review(args, pwork, cser):
     whole = getattr(args, 'whole_series', False)
     link = args.pw_link
     if not link and has_patch:
-        link, patch_seq = lookup_patch_series(pwork, args.patch)
+        link, patch_seq = lookup.lookup_patch_series(pwork, args.patch)
         if not whole:
             args.patches = str(patch_seq)
     elif not link and has_patch_title:
-        link, patch_seq = search_patch(pwork, args.patch_title)
+        link, patch_seq = lookup.search_patch(pwork, args.patch_title)
         if not whole:
             args.patches = str(patch_seq)
     elif not link:
-        link = search_series(pwork, args.title, getattr(args, 'version', None))
+        link = lookup.search_series(
+            pwork, args.title, getattr(args, 'version', None))
 
     if getattr(args, 'send', False) or getattr(args, 'revise', None):
         return _do_stored(args, pwork, cser, link)

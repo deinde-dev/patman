@@ -217,7 +217,7 @@ class TestCseries(unittest.TestCase, TestCommon):
         def fake_draft(args, reviews, series_data, pwork, cser_):
             drafted.append(series_data['id'])
 
-        with mock.patch.object(review.core, '_fetch_series',
+        with mock.patch.object(review.lookup, 'fetch_series',
                                side_effect=lambda pw, link: ({'id': link},)), \
                 mock.patch.object(review.core, '_draft_stored_reviews',
                                   side_effect=fake_draft), \
@@ -229,7 +229,7 @@ class TestCseries(unittest.TestCase, TestCommon):
 
         # Dry run counts it but drafts nothing
         with mock.patch.object(review.core, '_draft_stored_reviews') as md, \
-                mock.patch.object(review.core, '_fetch_series') as mf, \
+                mock.patch.object(review.lookup, 'fetch_series') as mf, \
                 terminal.capture():
             n = review.core._draft_undrafted(args, None, cser, dry_run=True)
         self.assertEqual(1, n)
@@ -5498,19 +5498,19 @@ Date:   .*
             # Default picks the most recent (v2)
             self.assertEqual(
                 str(self.REVIEW_LINK_V2),
-                review_mod.core.search_series(pwork, self.REVIEW_NAME))
+                review_mod.lookup.search_series(pwork, self.REVIEW_NAME))
             # -V selects the requested version
             self.assertEqual(
                 str(self.REVIEW_LINK),
-                review_mod.core.search_series(pwork, self.REVIEW_NAME, 1))
+                review_mod.lookup.search_series(pwork, self.REVIEW_NAME, 1))
             self.assertEqual(
                 str(self.REVIEW_LINK_V2),
-                review_mod.core.search_series(pwork, self.REVIEW_NAME, 2))
+                review_mod.lookup.search_series(pwork, self.REVIEW_NAME, 2))
 
         # An unavailable version errors, listing what is available
         with terminal.capture():
             with self.assertRaises(ValueError) as cm:
-                review_mod.core.search_series(pwork, self.REVIEW_NAME, 5)
+                review_mod.lookup.search_series(pwork, self.REVIEW_NAME, 5)
         self.assertIn('available', str(cm.exception))
         self.assertIn('v1', str(cm.exception))
 
@@ -5523,7 +5523,7 @@ Date:   .*
                 patch_title='some subject', patches=None, whole_series=whole)
 
         # search_patch locates the series (link) and the patch's position
-        with mock.patch.object(review.core, 'search_patch',
+        with mock.patch.object(review.lookup, 'search_patch',
                                return_value=('link-xyz', 3)), \
                 mock.patch.object(review.core, '_review_link') as rev_link:
             # Default: review just the located patch (index 3)
@@ -5998,7 +5998,7 @@ Date:   .*
                                   mock.MagicMock()), \
                 mock.patch.object(review.core, '_review_commits',
                                   return_value=['abc1 dm: Fix it']), \
-                mock.patch.object(review.core, '_fetch_series',
+                mock.patch.object(review.lookup, 'fetch_series',
                                   return_value=({'id': 123}, 'x', 1, 2)), \
                 mock.patch.object(
                     review.core, '_delete_gmail_drafts') as delete, \
@@ -6534,7 +6534,7 @@ Date:   .*
 
         # Hold the lock for this series, as if a review were in progress
         ups = pwork.upstream if pwork else None
-        branch = review.core._make_review_name(str(self.REVIEW_LINK), ups)
+        branch = review.lookup.make_review_name(str(self.REVIEW_LINK), ups)
         lock_fd = review.core._acquire_review_lock(self.tmpdir, branch)
         try:
             with self._mock_review():
@@ -6653,7 +6653,7 @@ VERDICT: skip"""
         data = {'cover_letter': {'id': 9},
                 'patches': [{'id': 1, 'name': 'video: Fix it'}, {'id': 2}]}
         with terminal.capture():
-            fname = review.core._write_comments_file(data, FakePatchwork())
+            fname = review.lookup.write_comments_file(data, FakePatchwork())
         self.assertEqual(
             '=== Comment on cover letter ===\n'
             'From: Ann <ann@x.org>\n'
@@ -6671,7 +6671,7 @@ VERDICT: skip"""
         # With no comments there is no file
         data = {'cover_letter': None, 'patches': []}
         self.assertIsNone(
-            review.core._write_comments_file(data, FakePatchwork()))
+            review.lookup.write_comments_file(data, FakePatchwork()))
 
     def test_review_is_code_comment(self):
         """Test code comments are told apart from commit-message comments"""
