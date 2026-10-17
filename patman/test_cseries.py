@@ -5706,13 +5706,13 @@ Date:   .*
         ctx = review.common.ReviewContext(None, cser, {})
         ctx.reviewer_name = 'Simon Glass'
         ctx.reviewer_email = 'sjg@chromium.org'
-        with mock.patch.object(review.core, 'handle_reply_sync',
+        with mock.patch.object(review.replies, 'handle_reply_sync',
                                return_value=('suggested', 'Because')) as ai, \
                 terminal.capture() as (out, _):
-            self.assertEqual(1, review.core._handle_replies(service, ctx))
+            self.assertEqual(1, review.replies._handle_replies(service, ctx))
 
             # A second sync records nothing new
-            self.assertEqual(0, review.core._handle_replies(service, ctx))
+            self.assertEqual(0, review.replies._handle_replies(service, ctx))
         ai.assert_called_once_with(ctx, 'Please fix this',
                                    'Fred Bloggs <fred@x.com>',
                                    'Why do you say that?')
@@ -5730,19 +5730,19 @@ Date:   .*
                              database.REPLY_WAITING)])
 
         with terminal.capture() as (out, _):
-            review.core._list_replies(cser)
+            review.replies._list_replies(cser)
         self.assertIn('Fred Bloggs <fred@x.com>: Re: [PATCH 2/5] video: Add a '
                       'driver (response suggested)', out.getvalue())
 
         # The response is copied to everyone but ourselves and the sender
         self.assertEqual('u-boot@lists.denx.de, Tom Rini <trini@k.com>',
-                         review.core._reply_cc(reply, {'sjg@chromium.org'}))
+                         review.replies._reply_cc(reply, {'sjg@chromium.org'}))
 
         draft_svc = mock.MagicMock()
         with mock.patch.object(gmail, 'create_draft',
                                return_value={'id': 'd1'}) as create, \
                 terminal.capture():
-            review.core._draft_response(draft_svc, ctx, reply.idnum)
+            review.replies._draft_response(draft_svc, ctx, reply.idnum)
         create.assert_called_once_with(
             draft_svc, 'Fred Bloggs <fred@x.com>',
             'Re: [PATCH 2/5] video: Add a driver', 'Because',
@@ -5757,7 +5757,7 @@ Date:   .*
                                return_value={'id': 'd2'}), \
                 mock.patch.object(gmail, 'delete_draft') as delete, \
                 terminal.capture():
-            review.core._draft_response(draft_svc, ctx, reply.idnum)
+            review.replies._draft_response(draft_svc, ctx, reply.idnum)
         delete.assert_called_once_with(draft_svc, 'd1')
 
         # Once the draft is sent, the response is recorded as sent
@@ -5765,24 +5765,24 @@ Date:   .*
                                return_value=({reply.idnum: ('Sent text', 'm9',
                                                             't1')}, [], {})), \
                 terminal.capture():
-            review.core._sync_reply_drafts(draft_svc, cser)
+            review.replies._sync_reply_drafts(draft_svc, cser)
         reply = db.reply_get(reply.idnum)
         self.assertEqual(('sent', 'Sent text'),
                          (reply.status, reply.response))
         with self.assertRaises(ValueError) as exc:
-            review.core._draft_response(draft_svc, ctx, reply.idnum)
+            review.replies._draft_response(draft_svc, ctx, reply.idnum)
         self.assertIn('has been sent', str(exc.exception))
 
         # The agent may decide that no response is needed
         db.reply_set_response(reply.idnum, None, database.REPLY_NEW)
-        with mock.patch.object(review.core, 'handle_reply_sync',
+        with mock.patch.object(review.replies, 'handle_reply_sync',
                                return_value=('skip', None)), \
                 terminal.capture() as (out, _):
-            review.core._suggest_response(ctx, reply.idnum)
+            review.replies._suggest_response(ctx, reply.idnum)
         self.assertIn('no response needed', out.getvalue())
         self.assertEqual('skip', db.reply_get(reply.idnum).status)
         with self.assertRaises(ValueError) as exc:
-            review.core._draft_response(draft_svc, ctx, reply.idnum)
+            review.replies._draft_response(draft_svc, ctx, reply.idnum)
         self.assertIn('There is no response', str(exc.exception))
 
         # Sending a response with no draft creates one first, and records
@@ -5795,14 +5795,14 @@ Date:   .*
                 mock.patch.object(gmail, 'send_draft',
                                   return_value=('Edited', 'm3', 't3')) as send, \
                 terminal.capture() as (out, _):
-            review.core._send_response(draft_svc, ctx, reply.idnum)
+            review.replies._send_response(draft_svc, ctx, reply.idnum)
         self.assertEqual('My answer', create.call_args[0][3])
         send.assert_called_once_with(draft_svc, 'd3')
         self.assertIn('sent the response', out.getvalue())
         reply = db.reply_get(reply.idnum)
         self.assertEqual(('sent', 'Edited'), (reply.status, reply.response))
         with self.assertRaises(ValueError) as exc:
-            review.core._send_response(draft_svc, ctx, reply.idnum)
+            review.replies._send_response(draft_svc, ctx, reply.idnum)
         self.assertIn('has been sent', str(exc.exception))
 
         # An existing draft is sent as it is; if it has been deleted in
@@ -5813,7 +5813,7 @@ Date:   .*
                 mock.patch.object(gmail, 'send_draft',
                                   return_value=None) as send:
             with self.assertRaises(ValueError) as exc:
-                review.core._send_response(draft_svc, ctx, reply.idnum)
+                review.replies._send_response(draft_svc, ctx, reply.idnum)
         self.assertIn('has been deleted', str(exc.exception))
         create.assert_not_called()
         send.assert_called_once_with(draft_svc, 'd4')
@@ -6185,12 +6185,12 @@ Date:   .*
     def test_review_reply_recent(self):
         """Only recent replies get a suggested response"""
         now = datetime.now().astimezone()
-        self.assertTrue(review.core._is_recent(
+        self.assertTrue(review.replies._is_recent(
             email.utils.format_datetime(now - timedelta(days=13)), 14))
-        self.assertFalse(review.core._is_recent(
+        self.assertFalse(review.replies._is_recent(
             email.utils.format_datetime(now - timedelta(days=15)), 14))
-        self.assertFalse(review.core._is_recent('garbage', 14))
-        self.assertFalse(review.core._is_recent(None, 14))
+        self.assertFalse(review.replies._is_recent('garbage', 14))
+        self.assertFalse(review.replies._is_recent(None, 14))
 
     def test_review_needs_draft(self):
         """Sent reviews are never drafted again; -i selects the patches"""
