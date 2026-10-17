@@ -58,7 +58,8 @@ def do_send(args):
 
 # pylint: disable=R0913,R0917
 def patchwork_status(branch, count, start, end, dest_branch, force,
-                     show_comments, url, single_thread=False):
+                     show_comments, url, single_thread=False,
+                     show_cover_comments=False):
     """Check the status of patches in patchwork
 
     This finds the series in patchwork using the Series-link tag, checks for new
@@ -82,6 +83,8 @@ def patchwork_status(branch, count, start, end, dest_branch, force,
             provides a Series-patchwork-url tag.
         single_thread (bool): True to use a single thread for
             patchwork access
+        show_cover_comments (bool): True to display snippets from the
+            comments on the cover letter
 
     Raises:
         ValueError: if the branch has no Series-link value
@@ -108,8 +111,8 @@ def patchwork_status(branch, count, start, end, dest_branch, force,
         raise ValueError('Branch has no Series-links value')
 
     status.find_link_and_show_status(
-        series, branch, url, dest_branch, force, show_comments, False,
-        single_thread)
+        series, branch, url, dest_branch, force, show_comments,
+        show_cover_comments, single_thread)
 
 
 
@@ -683,7 +686,8 @@ def do_patman(args, test_db=None, pwork=None, cser=None):
         if args.cmd == 'status':
             patchwork_status(args.branch, args.count, args.start, args.end,
                              args.dest_branch, args.force, args.show_comments,
-                             args.patchwork_url)
+                             args.patchwork_url,
+                             show_cover_comments=args.show_cover_comments)
         elif args.cmd == 'series':
             do_series(args, test_db, pwork, cser)
         elif args.cmd == 'upstream':

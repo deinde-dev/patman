@@ -474,6 +474,7 @@ def add_status_subparser(subparsers):
     status = subparsers.add_parser('status', aliases=ALIASES['status'],
                                    help='Check status of patches in patchwork')
     _add_show_comments(status)
+    _add_show_cover_comments(status)
     status.add_argument(
         '-d', '--dest-branch', type=str,
         help='Name of branch to create with collected responses')

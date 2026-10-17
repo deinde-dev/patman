@@ -58,8 +58,8 @@ new responses.
 Reading the comments
 --------------------
 
-Comments without tags still matter. Add ``-c`` to show them, along with the
-lines they quote::
+Comments without tags still matter. Add ``-c`` to show the comments on each
+patch, along with the lines they quote::
 
     $ patman status -c
       1 binman: Flesh out the p11-kit bintool docstring
@@ -149,7 +149,56 @@ for the version in the branch name, or the series' ``Series-version`` if the
 name has no number. So on ``align-fix2`` it reports that there is no link for
 v2 until this is done.
 
-This series needed no v2: the tag was added when it was applied, and it was
-merged in v2026.07. To keep track of a series across versions, with its
-patchwork links and review status in a database, see 'Series Management' in
-the manual, which covers the ``patman series`` commands.
+Comments on the cover letter
+----------------------------
+
+Replies to the cover letter are about the whole series, and ``-c`` does not
+show them. Use ``-C`` for those. Here it shows that ``align-fix`` needed no
+v2, since the maintainer applied it::
+
+    $ patman status -C
+    Cov [0/2] Repair boards broken by the 6.1 kbuild bump
+    From: Tom Rini <trini@konsulko.com>: 2026-06-15T18:52:59
+    On Sat, 13 Jun 2026 07:05:11 -0600, Simon Glass wrote:
+
+    > Commit bd3f9ee679b4 added FORCE to several if_changed rules whose
+    > recipes expand $^, so FORCE leaks in as a stray argument and the
+    > command fails. Use $< to restore the Edison and i.MX23/28 images.
+    ...
+
+    Applied to u-boot/master, thanks!
+
+    [1/2] x86: edison: Avoid passing FORCE to the align command
+          commit: 895d3c67cd58fee6815d0e2799ea7d22474accb9
+    [2/2] arm: mxs: Avoid passing FORCE to commands
+          commit: 3ac35afdd2cc73db0ac3911937ce75b58a6f90b8
+
+      1 x86: edison: Avoid passing FORCE to the align comm
+    ...
+
+The cover letter is listed first, as ``Cov``, followed by each reply to it
+and then the patches as before. Use ``-c`` and ``-C`` together to see all
+the comments. The tag was added to the first patch when it was applied, so
+it reached mainline even though no v2 was sent.
+
+A reviewer may also give a tag for the whole series by replying to the cover
+letter. On v2 of ``binj-us``, Quentin Schulz did just that::
+
+    $ patman status -C
+    Cov [v2,0/4] binman: Tidy up some missing bintool docs
+    From: Quentin Schulz <quentin.schulz@cherry.de>: 2026-05-08T12:01:32
+    ...
+    It's a detail and I don't have anything else to suggest for rephrasing.
+
+    Reviewed-by: Quentin Schulz <quentin.schulz@cherry.de>
+    ...
+      4 binman: Use bintool wrappers for PKCS#11 tools in
+    0 new responses available in patchwork
+
+``patman status`` collects only the tags given on each patch, so it does not
+count this one and ``-d`` does not add it. If you send another version, add
+such a tag to each commit by hand.
+
+To keep track of a series across versions, with its patchwork links and
+review status in a database, see 'Series Management' in the manual, which
+covers the ``patman series`` commands.

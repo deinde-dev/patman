@@ -611,7 +611,8 @@ are placed immediately after any existing ack/review/test/fixes tags, or at the
 end. The new branch does not track an upstream branch, so set one with
 'git branch --set-upstream-to' before sending from it.
 
-There is also a -c option to list the comments received for each patch.
+There is also a -c option to list the comments received for each patch, and a
+-C option to list those on the cover letter.
 
 For a worked example using real series, see ``doc/status-and-tags.rst``.
 

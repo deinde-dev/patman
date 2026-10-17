@@ -15,6 +15,8 @@ Added
   real U-Boot series which was merged in v2026.07, and
   ``doc/status-and-tags.rst`` shows checking its status and collecting
   review tags.
+- ``patman status -C`` shows the comments on the cover letter, as
+  ``patman series status -C`` does.
 - ``patman serve`` runs a web server showing series status, patchwork
   comments, draft reviews and todos on a mobile-friendly page, optionally
   syncing with patchwork periodically. Its JSON API is described in

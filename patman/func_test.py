@@ -24,6 +24,7 @@ from u_boot_pylib import terminal
 from u_boot_pylib import tools
 
 from patman.commit import Commit
+from patman import cmdline
 from patman import control
 from patman import patchstream
 from patman.patchstream import PatchStream
@@ -722,6 +723,23 @@ diff --git a/lib/efi_loader/efi_memory.c b/lib/efi_loader/efi_memory.c
         # The version in the branch name is used if there is one
         self.assertEqual('1234', find('fred3', '1:1000 3:1234'))
         self.assertEqual('1000', find('fred1', '1:1000 3:1234', '3'))
+
+    def test_status_cover_comments(self):
+        """Test that 'status -C' asks for the cover-letter comments"""
+        args = cmdline.parse_args(['status', '-C'])
+        self.assertTrue(args.show_cover_comments)
+        self.assertFalse(cmdline.parse_args(['status']).show_cover_comments)
+
+        series = Series()
+        series.links = '1234'
+        with mock.patch.object(patchstream, 'get_metadata',
+                               return_value=series):
+            with mock.patch.object(status,
+                                   'find_link_and_show_status') as show:
+                control.patchwork_status('fred', 1, 0, 0, None, False, False,
+                                         'https://example.com',
+                                         show_cover_comments=True)
+        self.assertTrue(show.call_args.args[6])
 
     def test_status_read_patch(self):
         """Test handling a single patch in Patchwork"""
