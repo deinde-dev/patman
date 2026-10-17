@@ -1665,7 +1665,7 @@ class CseriesHelper:
             int: Number of version which need a 'scan'
         """
         max_vers = self._series_max_version(ser.idnum)
-        name, desc, ups = self._get_series_info(ser.idnum)
+        name, desc, _ = self._get_series_info(ser.idnum)
         coloured = self.col.build(self.col.BLACK, desc, bright=False,
                                   back=self.col.YELLOW)
         versions = self._get_version_list(ser.idnum)
@@ -1711,7 +1711,7 @@ class CseriesHelper:
                 all series
         """
         max_vers = self._series_max_version(ser.idnum)
-        name, desc, ups = self._get_series_info(ser.idnum)
+        name, desc, _ = self._get_series_info(ser.idnum)
         stats, pwc = self._series_get_version_stats(ser.idnum, max_vers)
         states = {x.state for x in pwc.values()}
         state = 'accepted'

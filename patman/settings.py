@@ -9,7 +9,6 @@ except Exception:
     import ConfigParser
 
 import argparse
-from io import StringIO
 import os
 import re
 import sys

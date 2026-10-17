@@ -429,6 +429,36 @@ class TestWebServer(unittest.TestCase, TestCommon):
         status, _ = self.call(srv, 'GET', '/static/manifest.json')
         self.assertEqual(200, status)
 
+        # So do its script and style sheet
+        self.assertIn('static/app.js', text)
+        self.assertIn('static/app.css', text)
+        status, text = self.call(srv, 'GET', '/static/app.js')
+        self.assertEqual(200, status)
+        self.assertIn('function route()', text)
+        status, _ = self.call(srv, 'GET', '/static/app.css')
+        self.assertEqual(200, status)
+
+    def test_no_cache(self):
+        """The page and its files are checked before a browser reuses them"""
+        srv = server.Server(self.cser)
+
+        async def _go():
+            async with TestClient(TestServer(srv.make_app())) as client:
+                out = {}
+                for path in ('/', '/static/app.js', '/api/series'):
+                    resp = await client.get(path)
+                    out[path] = resp.headers.get('Cache-Control')
+                return out
+
+        loop = asyncio.new_event_loop()
+        try:
+            got = loop.run_until_complete(_go())
+        finally:
+            loop.close()
+        self.assertEqual('no-cache', got['/'])
+        self.assertEqual('no-cache', got['/static/app.js'])
+        self.assertIsNone(got['/api/series'])
+
     def test_sync_cmds(self):
         """The sync never gathers tags into branches"""
         srv = server.Server(self.cser)

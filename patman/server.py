@@ -546,6 +546,20 @@ def _get_int(data, key):
     return int(val)
 
 
+def _parts_text(seqs):
+    """Describe which parts of a review a job acts on
+
+    Args:
+        seqs (list of int): Patches (0 for the cover letter), or empty for all
+
+    Return:
+        str: Description, e.g. 'patch 2', 'the cover letter' or 'reviews'
+    """
+    if len(seqs) != 1:
+        return 'reviews'
+    return f'patch {seqs[0]}' if seqs[0] else 'the cover letter'
+
+
 def parse_review_req(data, upstreams):
     """Work out the 'patman review' arguments for a review request
 
@@ -1063,7 +1077,7 @@ class Server:
                 output and return code
         """
         tout.info(f"Job {job.idnum}: running {result['cmd']}")
-        env = review_mod._child_env()  # pylint: disable=W0212
+        env = review_mod.scan.child_env()
         env['PYTHONUNBUFFERED'] = '1'
         # Fail rather than wait for a password which nobody can type
         env['GIT_TERMINAL_PROMPT'] = '0'
@@ -1124,6 +1138,18 @@ class Server:
                 return web.json_response({'error': 'Unauthorised'},
                                          status=401)
         return await handler(request)
+
+    @web.middleware
+    async def _no_cache(self, request, handler):
+        """Have the browser check the page and its files before reusing them
+
+        The page is split into several files, so a browser which kept an old
+        app.js after patman is updated would run it with the new page
+        """
+        resp = await handler(request)
+        if request.path == '/' or request.path.startswith('/static/'):
+            resp.headers['Cache-Control'] = 'no-cache'
+        return resp
 
     @web.middleware
     async def _errors(self, request, handler):
@@ -1333,6 +1359,39 @@ class Server:
         return self._redraft_job(idnum, _get_int(data, 'version'),
                                  data.get('seqs') or [])
 
+    def _series_review_args(self, idnum, version, seqs, *action):
+        """Get the 'patman review' arguments to act on a reviewed series
+
+        Args:
+            idnum (int): Series ID in the review database
+            version (int or None): Version, or None for the latest
+            seqs (list of int): Patches to act on (0 for the cover letter),
+                or empty for all
+            action (list of str): Arguments giving the action, e.g. '--send'
+
+        Return:
+            tuple:
+                list of str: Arguments for 'patman review'
+                str: Series and version, for the job title, e.g. "'foo' v2"
+
+        Raises:
+            ValueError: The seqs are invalid, or the version has no link
+        """
+        if not isinstance(seqs, list) or not all(
+                isinstance(seq, int) and seq >= 0 for seq in seqs):
+            raise ValueError('Invalid seqs')
+        name, desc, ups = self.rcser.db.series_get_info(idnum)
+        version = version or self.rcser.db.series_get_max_version(idnum)
+        link = self.rcser.db.ser_ver_get_link(idnum, version)
+        if not link:
+            raise ValueError(f"Series '{name}' v{version} has no link")
+        args = ['-s', str(link), *action]
+        if seqs:
+            args += ['-i', ','.join(str(seq) for seq in sorted(seqs))]
+        if ups:
+            args += ['-U', ups]
+        return args, f"'{desc or name}' v{version}"
+
     def _redraft_job(self, idnum, version, seqs):
         """Start a job which recreates the Gmail drafts for a review
 
@@ -1345,43 +1404,17 @@ class Server:
         Return:
             web.Response: Response giving the job state
         """
-        name, desc, ups = self.rcser.db.series_get_info(idnum)
-        version = version or self.rcser.db.series_get_max_version(idnum)
-        link = self.rcser.db.ser_ver_get_link(idnum, version)
-        if not link:
-            raise ValueError(f"Series '{name}' v{version} has no link")
-        args = ['-s', str(link), '--redraft']
-        if not isinstance(seqs, list) or not all(
-                isinstance(seq, int) and seq >= 0 for seq in seqs):
-            raise ValueError('Invalid seqs')
-        if seqs:
-            args += ['-i', ','.join(str(seq) for seq in sorted(seqs))]
-        if ups:
-            args += ['-U', ups]
-        return self._review_job(f"Redraft '{desc or name}' v{version}", *args)
+        args, what = self._series_review_args(idnum, version, seqs,
+                                              '--redraft')
+        return self._review_job(f'Redraft {what}', *args)
 
     async def _send(self, request):
         idnum = int(request.match_info['idnum'])
         data = await self._read_json(request)
         seqs = data.get('seqs') or []
-        if not isinstance(seqs, list) or not all(
-                isinstance(seq, int) and seq >= 0 for seq in seqs):
-            raise ValueError('Invalid seqs')
-        name, desc, ups = self.rcser.db.series_get_info(idnum)
-        version = _get_int(data, 'version') or \
-            self.rcser.db.series_get_max_version(idnum)
-        link = self.rcser.db.ser_ver_get_link(idnum, version)
-        if not link:
-            raise ValueError(f"Series '{name}' v{version} has no link")
-        args = ['-s', str(link), '--send']
-        if seqs:
-            args += ['-i', ','.join(str(seq) for seq in sorted(seqs))]
-        if ups:
-            args += ['-U', ups]
-        what = (f'patch {seqs[0]}' if seqs[0] else 'the cover letter') \
-            if len(seqs) == 1 else 'reviews'
-        return self._review_job(
-            f"Send {what} of '{desc or name}' v{version}", *args)
+        args, what = self._series_review_args(
+            idnum, _get_int(data, 'version'), seqs, '--send')
+        return self._review_job(f'Send {_parts_text(seqs)} of {what}', *args)
 
     async def _revise(self, request):
         idnum = int(request.match_info['idnum'])
@@ -1397,26 +1430,12 @@ class Server:
             note = f'About this part of the review:\n\n{part.strip()}' \
                    f'\n\n{note}'
         seqs = data.get('seqs') or []
-        if not isinstance(seqs, list) or not all(
-                isinstance(seq, int) and seq >= 0 for seq in seqs):
-            raise ValueError('Invalid seqs')
-        name, desc, ups = self.rcser.db.series_get_info(idnum)
-        version = _get_int(data, 'version') or \
-            self.rcser.db.series_get_max_version(idnum)
-        link = self.rcser.db.ser_ver_get_link(idnum, version)
-        if not link:
-            raise ValueError(f"Series '{name}' v{version} has no link")
-        args = ['-s', str(link), '--revise', note]
-        if seqs:
-            args += ['-i', ','.join(str(seq) for seq in sorted(seqs))]
-        if ups:
-            args += ['-U', ups]
+        args, what = self._series_review_args(
+            idnum, _get_int(data, 'version'), seqs, '--revise', note)
         if data.get('drafts'):
             args.append('-d')
-        what = (f'patch {seqs[0]}' if seqs[0] else 'the cover letter') \
-            if len(seqs) == 1 else 'reviews'
-        return self._review_job(
-            f"Revise {what} of '{desc or name}' v{version}", *args)
+        return self._review_job(f'Revise {_parts_text(seqs)} of {what}',
+                                *args)
 
     async def _review_item(self, request):
         db = self.rcser.db
@@ -1487,7 +1506,8 @@ class Server:
         Return:
             web.Application: Application, ready to run
         """
-        app = web.Application(middlewares=[self._errors, self._auth])
+        app = web.Application(
+            middlewares=[self._errors, self._auth, self._no_cache])
         app.router.add_get('/api/series', self._series_list)
         app.router.add_get(r'/api/series/{idnum:\d+}', self._series_detail)
         app.router.add_get('/api/reviews', self._review_list)
