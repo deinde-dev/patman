@@ -70,7 +70,7 @@ Reviewing other people's patches
 
 The full manual
     The chapters which follow cover configuring patman, sending a series,
-    checking its status on patchwork, the tags patman reads, series
+    the tags patman reads, patchwork and checking the review status, series
     management, assisted review, the web server and managing the database.
     ``patman -H`` shows them all in the terminal.
 

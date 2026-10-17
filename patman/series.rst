@@ -1,6 +1,6 @@
 .. SPDX-License-Identifier: GPL-2.0+
 
-Series Management
+Series management
 =================
 
 Sometimes you might have several series in flight at the same time. Each of
@@ -116,6 +116,39 @@ Here is a sample 'progress' view:
 .. image:: pics/patman.jpg
   :width: 800
   :alt: Patman showing the progress view
+
+Following up
+------------
+
+patman keeps a record of what happens to each series and reminds you to come
+back to it. Sending a series with ``patman series send``, or reviewing one
+with ``patman review``, records when that happened, and marks the series to
+come back to a week later.
+
+``patman workflow todo`` marks a series to come back to after a number of
+days (14 if you do not give one), and ``--clear`` removes the mark::
+
+    $ patman workflow todo -s align-fix 7
+    Series 'align-fix' marked for todo on 2026-10-24 13:46:14
+
+``patman workflow todo-list`` lists the series which are due, or all those
+marked with ``--all``::
+
+    $ patman workflow todo-list --all
+    Series                        Due  Description
+    -----------------  --------------  ------------------------------
+    align-fix                   in 6d  Repair boards broken by the 6.1 kbuild bump
+
+``patman workflow list`` shows the record for each series, such as when it
+was sent and when it is next due::
+
+    $ patman workflow list
+    Type    Series             Ver        When  Description
+    ------  -----------------  ---  ----------  ------------------------------
+    todo    align-fix                    in 7d  Repair boards broken by the 6.1 kbuild bump
+
+The web page shows the series which are due in its Todo tab (see
+:doc:`the Web server chapter </serve>`).
 
 Multiple upstreams
 ------------------

@@ -57,6 +57,8 @@ Configure an upstream with its Patchwork URL::
         --patchwork-url https://patchwork.ozlabs.org
     patman patchwork set-project U-Boot us
 
+:doc:`The Patchwork chapter </patchwork>` describes the patchwork commands.
+
 Basic usage
 -----------
 
@@ -301,15 +303,6 @@ this much slower than a normal review.
 
 The new defects are passed to the review agent as context, so it can
 raise the ones that fall in the code each patch changes.
-
-Patchwork subcommands
----------------------
-
-Remove a patchwork project configuration::
-
-    patman patchwork rm [remote]
-
-If no remote is given, the default (no-upstream) entry is deleted.
 
 Review notes
 ------------

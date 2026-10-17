@@ -14,8 +14,8 @@
 
    configuration
    sending
-   patchwork
    tags
+   patchwork
    series
    review
    serve
