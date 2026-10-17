@@ -122,7 +122,8 @@ Changed
   drafted, and the summary reports how many were.
 - Review comments are no longer hard-wrapped: the agent is told to write
   each paragraph on a single line so the reader's mail client wraps it.
-  Quoted ``> `` lines and indented code are left as they are.
+  Quoted lines (starting with ``>``) and indented code are left as they
+  are.
 - The ``Created N Gmail draft(s)`` line (and the dry-run equivalent) now
   names the review branch and the series link, so it is clear which
   series the drafts belong to.
