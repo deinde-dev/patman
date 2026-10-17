@@ -4,9 +4,11 @@
 #
 """Functional tests for checking that patman behaves correctly"""
 
+import asyncio
 import os
 import shutil
 import tempfile
+import unittest
 from unittest import mock
 
 import pygit2
@@ -15,6 +17,10 @@ from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
 from u_boot_pylib import tools
 from u_boot_pylib import tout
+
+from patman import cmdline
+from patman import control
+from patman import cseries
 
 
 class TestCommon:
@@ -260,3 +266,72 @@ and a little more''')
 
         self.assertFalse(gitutil.check_dirty(self.gitdir, self.tmpdir))
         return repo
+
+
+class Namespace:
+    """Simple namespace for use instead of argparse in tests"""
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+class CseriesTester(unittest.TestCase, TestCommon):
+    """Fixtures for tests which use a git tree and a series database"""
+    def setUp(self):
+        TestCommon.setUp(self)
+        self.autolink_extra = None
+        self.loop = asyncio.get_event_loop()
+        self.cser = None
+
+    def tearDown(self):
+        TestCommon.tearDown(self)
+
+    def get_database(self):
+        """Open the database and silence the warning output
+
+        Return:
+            Cseries: Resulting Cseries object
+        """
+        cser = cseries.Cseries(self.tmpdir, terminal.COLOR_NEVER)
+        with terminal.capture() as _:
+            cser.open_database()
+        self.cser = cser
+        return cser
+
+    def get_cser(self):
+        """Set up a git tree and database
+
+        Return:
+            Cseries: object
+        """
+        self.make_git_tree()
+        return self.get_database()
+
+    def db_close(self):
+        """Close the database if open"""
+        if self.cser and self.cser.db.cur:
+            self.cser.close_database()
+            return True
+        return False
+
+    def db_open(self):
+        """Open the database if closed"""
+        if self.cser and not self.cser.db.cur:
+            self.cser.open_database()
+
+    def run_args(self, *argv, expect_ret=0, pwork=None, cser=None):
+        """Run patman with the given arguments
+
+        Args:
+            argv (list of str): List of arguments, excluding 'patman'
+            expect_ret (int): Expected return code, used to check errors
+            pwork (Patchwork): Patchwork object to use when executing the
+                command, or None to create one
+            cser (Cseries): Cseries object to use when executing the command,
+                or None to create one
+        """
+        was_open = self.db_close()
+        args = cmdline.parse_args(['-D'] + list(argv), config_fname=False)
+        exit_code = control.do_patman(args, self.tmpdir, pwork, cser)
+        self.assertEqual(expect_ret, exit_code)
+        if was_open:
+            self.db_open()
