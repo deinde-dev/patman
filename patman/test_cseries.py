@@ -6572,7 +6572,8 @@ Date:   .*
 
     def test_review_parse_approved(self):
         """Test parsing an approved review"""
-        from patman.review.core import parse_review_output, format_review_email
+        from patman.review.emails import (parse_review_output,
+                                          format_review_email)
 
         text = """GREETING: Marek
 VERDICT: approved"""
@@ -6595,7 +6596,7 @@ VERDICT: approved"""
 
     def test_review_parse_skip(self):
         """Test parsing a skipped review (e.g. cover letter with no issues)"""
-        from patman.review.core import parse_review_output
+        from patman.review.emails import parse_review_output
 
         text = """GREETING: Michal
 VERDICT: skip"""
@@ -6674,18 +6675,18 @@ VERDICT: skip"""
 
     def test_review_is_code_comment(self):
         """Test code comments are told apart from commit-message comments"""
-        from patman.review.core import _is_code_comment
+        from patman.review.emails import is_code_comment
 
-        self.assertTrue(_is_code_comment(
+        self.assertTrue(is_code_comment(
             '> diff --git a/foo.c b/foo.c\n> @@ -1 +1 @@\n> +code'))
-        self.assertTrue(_is_code_comment('> @@ -10,2 +10,3 @@ func()'))
-        self.assertFalse(_is_code_comment(
+        self.assertTrue(is_code_comment('> @@ -10,2 +10,3 @@ func()'))
+        self.assertFalse(is_code_comment(
             '> When CONFIG_SPL_SEPARATE_BSS is enabled'))
-        self.assertFalse(_is_code_comment(''))
+        self.assertFalse(is_code_comment(''))
 
     def test_review_commit_msg_comment_first(self):
         """Test commit-message comments come before code comments"""
-        from patman.review.core import format_review_email
+        from patman.review.emails import format_review_email
 
         ctx = self._make_review_ctx(author_name='Quentin',
             author_email='q@gmail.com', date='2026-06-19')
@@ -6719,7 +6720,7 @@ VERDICT: skip"""
 
     def test_review_commit_msg_comment_inline(self):
         """A commit-message comment is shown inline, not re-quoted below"""
-        from patman.review.core import format_review_email
+        from patman.review.emails import format_review_email
 
         ctx = self._make_review_ctx(author_name='Anshul Dalal',
             author_email='anshuld@ti.com', date='2026-07-09',
@@ -6748,7 +6749,7 @@ VERDICT: skip"""
 
     def test_review_commit_msg_comment_fallback(self):
         """A comment whose quote is not in the message is shown below"""
-        from patman.review.core import format_review_email
+        from patman.review.emails import format_review_email
 
         ctx = self._make_review_ctx(author_name='Anshul Dalal',
             author_email='anshuld@ti.com', date='2026-07-09')
@@ -6916,10 +6917,10 @@ VERDICT: skip"""
 
     def test_format_findings(self):
         """Test findings are formatted for storage"""
-        from patman.review.core import _format_findings
+        from patman.review.emails import format_findings
         self.assertEqual('Looks good; no issues found.',
-                         _format_findings('approved', []))
-        body = _format_findings('changes_needed', [('> code line', 'Do X.')])
+                         format_findings('approved', []))
+        body = format_findings('changes_needed', [('> code line', 'Do X.')])
         self.assertIn('> code line', body)
         self.assertIn('Do X.', body)
 
@@ -7292,7 +7293,7 @@ VERDICT: skip"""
 
     def test_review_guess_name(self):
         """Test guessing first name from email address"""
-        from patman.review.core import guess_name_from_email
+        from patman.review.emails import guess_name_from_email
 
         self.assertEqual('Simon', guess_name_from_email('simon.glass@xxx'))
         self.assertEqual('Michal', guess_name_from_email('michal@amd.com'))
@@ -7304,7 +7305,7 @@ VERDICT: skip"""
 
     def test_review_cleanup(self):
         """Test mechanical cleanup of review text"""
-        from patman.review.core import cleanup_review_text
+        from patman.review.emails import cleanup_review_text
 
         # Backticks removed
         self.assertEqual('Use foo here',
@@ -7342,7 +7343,7 @@ VERDICT: skip"""
 
     def test_review_greeting_fallback(self):
         """Test greeting falls back to email when name is empty"""
-        from patman.review.core import format_review_email
+        from patman.review.emails import format_review_email
 
         # Empty greeting should be guessed from email
         ctx = self._make_review_ctx(author_name='Simon Glass',
@@ -7365,7 +7366,7 @@ VERDICT: skip"""
         import asyncio
         from unittest.mock import patch, AsyncMock
 
-        from patman.review.core import refine_reviews
+        from patman.review.emails import refine_reviews
 
         # An approved review with only structural lines
         approved = ('On 2026-04-01, A <a@b.com> wrote:\n'
@@ -7414,13 +7415,14 @@ VERDICT: skip"""
                  review_mod.common, 'ClaudeAgentOptions', MagicMock()), \
              terminal.capture():
             result = loop.run_until_complete(
-                review_mod.core.refine_reviews({1: review_with_comments}))
+                review_mod.emails.refine_reviews({1: review_with_comments}))
         loop.close()
         self.assertIn('Fix this.', result[1])
 
     def test_review_parse_changes(self):
         """Test parsing a review with comments"""
-        from patman.review.core import parse_review_output, format_review_email
+        from patman.review.emails import (parse_review_output,
+                                          format_review_email)
 
         text = """GREETING: J.
 COMMENT:
@@ -7479,7 +7481,7 @@ VERDICT: changes_needed"""
 
     def test_review_commit_msg_with_body(self):
         """Test that subject + body are both quoted when body differs"""
-        from patman.review.core import format_review_email
+        from patman.review.emails import format_review_email
 
         ctx = self._make_review_ctx(author_name='Author',
             author_email='a@b.com', date='2026-04-01',
