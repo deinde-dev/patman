@@ -6,6 +6,12 @@
 
 .. toctree::
    :maxdepth: 2
+   :caption: Examples
+
+   first-series
+
+.. toctree::
+   :maxdepth: 2
    :caption: Technical documentation
 
    serve-protocol
