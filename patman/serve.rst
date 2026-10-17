@@ -17,8 +17,9 @@ page has these tabs:
   with their output
 - **Todo**: series marked with ``patman workflow todo``, due ones first
 
-The page uses the JSON API described in ``doc/serve-protocol.rst``, which other
-tools can use too.
+The page uses the JSON API described in
+:doc:`The patman serve protocol </serve-protocol>`, which other tools can use
+too.
 
 Starting the server
 -------------------
@@ -64,7 +65,8 @@ Each sync runs ``patman series gather-all -G`` in a separate process. The
 nothing changes in your git tree while you are working in it. Use ``patman
 series gather`` yourself when you are ready to pick up the tags. The ``-r``
 flag also runs ``patman review --sync`` to track sent review drafts and
-replies; this needs Gmail access (see the 'Assisted patch review' chapter).
+replies; this needs Gmail access (see
+:doc:`the Assisted patch review chapter </review>`).
 
 Each series is read from the patchwork server of its upstream, so a server
 which is down only affects its own series.

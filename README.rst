@@ -41,8 +41,8 @@ Install the latest release from PyPI::
 
 Optional features are available as extras::
 
-    pip install patch-manager[gmail]    # send/fetch review mail via Gmail
     pip install patch-manager[review]   # patch review using a Claude agent
+    pip install patch-manager[gmail]    # Gmail drafts of reviews and replies
     pip install patch-manager[all]      # everything
 
 The ``patman`` command is then on your path. It is also installed as
@@ -63,9 +63,13 @@ linked below.
 Documentation
 -------------
 
-Full documentation is hosted on Read the Docs:
+The documentation is on Read the Docs, at https://patman.readthedocs.io/
+Start with the guide, which goes through using patman step by step with a
+real U-Boot series:
 
-    https://patman.readthedocs.io/
+    https://patman.readthedocs.io/en/latest/guide/index.html
+
+There is a short introduction, with a demo, at https://deinde.dev/patman/
 
 Development
 -----------

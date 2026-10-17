@@ -6,7 +6,8 @@ Managing the database
 Patman stores series tracking, review and workflow state in a SQLite
 database (``.patman.db``) in the top-level git directory. The schema is
 versioned and migrated automatically when patman starts. For what the
-database records and the schema of each table, see ``doc/database.rst``.
+database records and the schema of each table, see
+:doc:`The patman database </database>`.
 
 Set the ``PATMAN_DB_DIR`` environment variable to use a database elsewhere
 (``~`` is expanded). The variable names a *directory* in which patman looks

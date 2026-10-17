@@ -7,17 +7,27 @@ Patman can review other people's patches from Patchwork using a Claude
 agent, and create Gmail draft replies with the review comments. Nothing
 is sent until you have checked a draft and chosen to send it.
 
-Prerequisites
--------------
+:doc:`How patch review works </review-internals>` describes what the agents
+do with each series.
 
-Install the required packages::
+Setting up
+----------
+
+Packages
+~~~~~~~~
+
+Patch review needs the Claude Agent SDK, and creating Gmail drafts needs the
+Google API packages. Install them along with patman::
+
+    pip install patch-manager[review,gmail]
+
+On Debian and Ubuntu, the Google packages are also available with apt::
 
     sudo apt install python3-google-auth python3-google-auth-oauthlib \
         python3-google-auth-httplib2 python3-googleapi
-    pip install claude-agent-sdk
 
-Setting up Gmail API access
----------------------------
+Gmail API access
+~~~~~~~~~~~~~~~~
 
 1. Go to https://console.cloud.google.com and create (or select) a project.
 
@@ -48,8 +58,8 @@ The first time you create drafts, a browser window opens for OAuth
 consent. After authentication, the token is cached in
 ``~/.config/patman.d/`` and reused for future runs.
 
-Setting up Patchwork
---------------------
+Patchwork
+~~~~~~~~~
 
 Configure an upstream with its Patchwork URL::
 
@@ -57,8 +67,32 @@ Configure an upstream with its Patchwork URL::
         --patchwork-url https://patchwork.ozlabs.org
     patman patchwork set-project U-Boot us
 
-Basic usage
------------
+:doc:`The Patchwork chapter </patchwork>` describes the patchwork commands.
+
+Settings
+~~~~~~~~
+
+Add these to your ``~/.patman`` file to avoid repeating flags:
+
+.. code-block:: ini
+
+    [settings]
+    signoff: Regards,\nSimon
+    spelling: British
+
+The ``signoff`` is appended to reviews that have comments (not to
+clean Reviewed-by-only replies). The ``spelling`` setting controls
+the spelling convention used in review comments.
+
+Reviewing a series
+------------------
+
+The review applies the series to a branch in its own worktree, has an agent
+review each patch and the cover letter, and stores the reviews in the
+database.
+
+Choosing what to review
+~~~~~~~~~~~~~~~~~~~~~~~
 
 Review a series by Patchwork link::
 
@@ -94,6 +128,9 @@ To review only specific patches by index within the series::
 
     patman review -s 497923 -i 1,3,5
 
+Choosing the model
+~~~~~~~~~~~~~~~~~~
+
 By default the review uses whatever your Claude default model resolves
 to. To review with a particular model instead, use ``--model``::
 
@@ -114,45 +151,8 @@ To see the aliases ``--model`` accepts::
 The aliases (``opus``, ``sonnet``, ``haiku``) each select the latest
 model in their tier; a full model id works too.
 
-To create Gmail drafts threaded under the original emails::
-
-    patman review -s 497923 -U us \
-        --reviewer 'Your Name <your@email>' \
-        -d --gmail-account your@email
-
-Use ``-n`` with ``-d`` for a dry run that shows what would be created
-without calling the Gmail API.
-
-If a draft failed to create or was lost, ``--redraft`` recreates the
-Gmail drafts from the stored reviews, even when the series has already
-been reviewed and the drafts already exist::
-
-    patman review -s 497923 --redraft --gmail-account your@email
-
-Any existing draft is deleted first, so it is not left as a duplicate
-in the thread.
-
-To have the agent change reviews which have not been sent yet, say what you
-want in a note with ``--revise``. It changes only what the note asks for,
-and can check the code using the review branch. Use ``-i`` to pick which
-patches' reviews it looks at (0 is the cover letter), and ``-d`` to update
-the Gmail drafts of the reviews which change::
-
-    patman review -s 497923 -U us -i 4 -d \
-        --revise 'Ask for a timeout rather than an unbounded loop'
-    patman review -s 497923 -U us --revise 'Drop the comments about style'
-
-The review approves the patch (with a ``Reviewed-by`` tag) if the note says
-the patch is fine, and stops approving it if the note asks for a change.
-
-Once you are happy with the drafts, you can send them without opening Gmail.
-``--send`` sends the Gmail drafts of a series' reviews, the cover letter's
-first, and records each review as sent, with the text which was sent, in
-case you changed it in Gmail. Use ``-i`` to send only some of them, and
-``-n`` to see what would be sent::
-
-    patman review -s 497923 -U us --send -n
-    patman review -s 497923 -U us --send -i 0,2
+Choosing the base branch
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 Use ``--apply-only`` to download and apply patches without running the
 review -- useful for checking that patches apply cleanly.
@@ -182,6 +182,55 @@ run::
     patman review -s 497923 -U us -b us/main \
         --reviewer 'Your Name <your@email>'
 
+Active series only
+~~~~~~~~~~~~~~~~~~
+
+By default patman only reviews a series when at least one of its
+patches is in an active patchwork state: new, RFC, under-review,
+changes-requested or needs-review-ack. Reviewing a series
+that patchwork has finished with (accepted, superseded, rejected and so
+on) fails with a message naming the override. Use ``--any-state`` to
+review regardless::
+
+    patman review -s 497923 --any-state
+
+Coverity static analysis
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+With ``--coverity``, patman runs Coverity on the series and feeds the
+new defects into the review. Coverity analyses a whole build rather
+than a diff, so patman builds and analyses the base branch and the
+patched branch separately and reports only the defects the series
+introduces (matched by Coverity's mergeKey)::
+
+    patman review -s 497923 -U us --coverity \
+        --reviewer 'Your Name <your@email>'
+
+This needs the ``cov-build``, ``cov-analyze`` and ``cov-format-errors``
+tools on your PATH; if they are missing the check is skipped with a
+warning. The build uses ``sandbox_defconfig`` by default; use
+``--coverity-defconfig`` to pick another board. Building twice makes
+this much slower than a normal review.
+
+The new defects are passed to the review agent as context, so it can
+raise the ones that fall in the code each patch changes.
+
+New versions and reviewing again
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When reviewing a new version of a previously reviewed series, patman
+loads the most recent earlier version that has reviews as context for
+the agent, so it can check whether earlier issues were addressed and avoid
+raising fresh points the earlier versions did not. Versions are linked
+by their cleaned cover-letter title.
+
+An older database may have stored each version as a separate, unlinked
+record, leaving follow-up reviews without this context. Repair it by
+merging the split records, which backs up the database (to
+``<db>.bak``) first::
+
+    patman review --relink
+
 Use ``-f`` / ``--force`` to re-review a series that has already been
 reviewed. This deletes the old review records and runs the review
 again::
@@ -191,12 +240,8 @@ again::
 With ``-d``, the Gmail drafts from the previous review are deleted too,
 so the re-review does not leave duplicates in the thread.
 
-If the reviewer email (from ``--reviewer`` or git config) differs from
-the ``--gmail-account``, patman sets the From header on the draft so
-the email is sent with the correct identity.
-
 Reviewing your own series before sending
-----------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To have your own series reviewed before sending it, add the series with
 ``patman series add`` and then run::
@@ -218,148 +263,67 @@ needs no patchwork link and creates no drafts -- it is purely a local
 pre-send check. Reviews from the previous version are used as context,
 so a follow-up review focuses on what changed.
 
-Active series only
-------------------
-
-By default patman only reviews a series when at least one of its
-patches is in an active patchwork state: new, RFC, under-review,
-changes-requested or needs-review-ack. Reviewing a series
-that patchwork has finished with (accepted, superseded, rejected and so
-on) fails with a message naming the override. Use ``--any-state`` to
-review regardless::
-
-    patman review -s 497923 --any-state
-
-How the review works
---------------------
-
-For each patch, the agent:
-
-1. Studies all patches in the series to understand the overall design
-2. Re-reads the specific patch in detail
-3. Examines surrounding source code for context
-4. Checks existing comments from other reviewers on Patchwork and
-   avoids repeating points already made
-5. Produces a structured review (GREETING/COMMENT/VERDICT format)
-
-After all patches are reviewed, a refinement agent makes a second pass
-over the drafts to tighten the language, remove cross-patch duplicates
-and check voice consistency. Approved reviews without comments are
-excluded from refinement to preserve their quoted commit messages.
-
-If the agent has nothing to say about a patch -- no comments and not an
-approval -- no review is produced for it, rather than an empty
-greeting-only reply.
-
-Comments on the commit message are placed before comments on the code,
-matching the usual reply order.
-
-A mechanical cleanup step also runs to remove backticks and fix function
-quoting style (e.g. ``malloc()`` not ```malloc```).
-
-Only one review of a given series runs at a time. If a review for the
-same series is already in progress -- from another patman invocation or
-a scan -- the second is refused rather than corrupting the shared
-review worktree and database records.
-
-Apply step
-~~~~~~~~~~
-
-Before checking out the review branch, patman stashes any uncommitted
-changes -- including untracked files -- so build artefacts on the
-current branch don't leak into the review. The original branch and
-stash are restored at the end of the run, including on failure.
-
-If the apply agent applies some but not all of the patches -- for
-example one depends on a prerequisite series that is not yet upstream
--- patman warns (``Only N of M patches applied to <branch>; reviewing
-what is there``) and reviews the patches that did apply. Only when
-nothing applies at all does it fail and roll back the new version's
-database row.
-
-Each review is matched to its patchwork patch by subject, not by
-position, so a patch that failed to apply does not shift the remaining
-reviews onto the wrong patches.
-
-Coverity static analysis
+Working with the reviews
 ------------------------
 
-With ``--coverity``, patman runs Coverity on the series and feeds the
-new defects into the review. Coverity analyses a whole build rather
-than a diff, so patman builds and analyses the base branch and the
-patched branch separately and reports only the defects the series
-introduces (matched by Coverity's mergeKey)::
+Reviews are kept in the database until you send them, as Gmail drafts which
+reply to each patch.
 
-    patman review -s 497923 -U us --coverity \
-        --reviewer 'Your Name <your@email>'
+Gmail drafts
+~~~~~~~~~~~~
 
-This needs the ``cov-build``, ``cov-analyze`` and ``cov-format-errors``
-tools on your PATH; if they are missing the check is skipped with a
-warning. The build uses ``sandbox_defconfig`` by default; use
-``--coverity-defconfig`` to pick another board. Building twice makes
-this much slower than a normal review.
+To create Gmail drafts threaded under the original emails::
 
-The new defects are passed to the review agent as context, so it can
-raise the ones that fall in the code each patch changes.
+    patman review -s 497923 -U us \
+        --reviewer 'Your Name <your@email>' \
+        -d --gmail-account your@email
 
-Patchwork subcommands
----------------------
+Use ``-n`` with ``-d`` for a dry run that shows what would be created
+without calling the Gmail API.
 
-Remove a patchwork project configuration::
+If a draft failed to create or was lost, ``--redraft`` recreates the
+Gmail drafts from the stored reviews, even when the series has already
+been reviewed and the drafts already exist::
 
-    patman patchwork rm [remote]
+    patman review -s 497923 --redraft --gmail-account your@email
 
-If no remote is given, the default (no-upstream) entry is deleted.
+Any existing draft is deleted first, so it is not left as a duplicate
+in the thread.
 
-Review notes
-------------
+If the reviewer email (from ``--reviewer`` or git config) differs from
+the ``--gmail-account``, patman sets the From header on the draft so
+the email is sent with the correct identity.
 
-The ``handle-reviews`` workflow produces a ``review-notes.txt`` file
-describing how feedback was addressed. Store it in the database so
-future versions can reference it::
+Revising reviews
+~~~~~~~~~~~~~~~~
 
-    patman series save-notes [notes-file]
+To have the agent change reviews which have not been sent yet, say what you
+want in a note with ``--revise``. It changes only what the note asks for,
+and can check the code using the review branch. Use ``-i`` to pick which
+patches' reviews it looks at (0 is the cover letter), and ``-d`` to update
+the Gmail drafts of the reviews which change::
 
-The default filename is ``review-notes.txt``. Display notes from all
-previous versions::
+    patman review -s 497923 -U us -i 4 -d \
+        --revise 'Ask for a timeout rather than an unbounded loop'
+    patman review -s 497923 -U us --revise 'Drop the comments about style'
 
-    patman series show-notes
+The review approves the patch (with a ``Reviewed-by`` tag) if the note says
+the patch is fine, and stops approving it if the note asks for a change.
 
-Settings
---------
+Sending the reviews
+~~~~~~~~~~~~~~~~~~~
 
-Add these to your ``~/.patman`` file to avoid repeating flags:
+Once you are happy with the drafts, you can send them without opening Gmail.
+``--send`` sends the Gmail drafts of a series' reviews, the cover letter's
+first, and records each review as sent, with the text which was sent, in
+case you changed it in Gmail. Use ``-i`` to send only some of them, and
+``-n`` to see what would be sent::
 
-.. code-block:: ini
-
-    [settings]
-    signoff: Regards,\nSimon
-    spelling: British
-
-The ``signoff`` is appended to reviews that have comments (not to
-clean Reviewed-by-only replies). The ``spelling`` setting controls
-the spelling convention used in review comments.
-
-Voice learning
---------------
-
-Build a voice profile so draft reviews match your writing style::
-
-    # From Gmail (searches your sent reviews to the mailing list)
-    patman review --learn-voice gmail -U us \
-        --gmail-account your@email --reviewer 'Your Name <your@email>'
-
-    # From Patchwork (scans your comments on recent patches)
-    patman review --learn-voice patchwork -U us \
-        --reviewer 'Your Name <your@email>'
-
-Use ``--voice-count N`` to control how many reviews to collect
-(default: 20). The voice profile is saved to
-``~/.config/patman.d/voice.md`` and automatically used in subsequent
-reviews.
+    patman review -s 497923 -U us --send -n
+    patman review -s 497923 -U us --send -i 0,2
 
 Syncing drafts
---------------
+~~~~~~~~~~~~~~
 
 After editing and sending (or deleting) Gmail drafts::
 
@@ -398,7 +362,7 @@ Only messages which reply to your review are recorded; other messages in
 the same thread, and your own, are ignored.
 
 Responding to replies
----------------------
+~~~~~~~~~~~~~~~~~~~~~
 
 To see the replies which still need a response, and act on them::
 
@@ -419,7 +383,7 @@ The response can also be edited, drafted and sent from the Reviews tab of
 send'. Both need a second tap to confirm.
 
 Scanning for new versions
--------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Rather than reviewing one series at a time, ``--scan`` looks on
 patchwork for new versions of series you have already reviewed and
@@ -464,33 +428,20 @@ Use ``-n`` / ``--dry-run`` to see which series would be reviewed,
 waiting or skipped -- and, with ``-d``, which would be drafted --
 without launching any reviews or creating any drafts.
 
-Review lifecycle
-----------------
+Learning your writing voice
+---------------------------
 
-Each review goes through these states:
+Build a voice profile so draft reviews match your writing style::
 
-- **new**: Review drafted, not yet sent
-- **draft**: Gmail draft created
-- **sent**: Draft was sent; body updated with actual sent content
-- **deleted**: Draft was deleted without sending
-- **replied**: Author or another reviewer has replied to our review
+    # From Gmail (searches your sent reviews to the mailing list)
+    patman review --learn-voice gmail -U us \
+        --gmail-account your@email --reviewer 'Your Name <your@email>'
 
-When reviewing a new version of a previously reviewed series, patman
-loads the most recent earlier version that has reviews as context for
-the agent, so it can check whether earlier issues were addressed and avoid
-raising fresh points the earlier versions did not. Versions are linked
-by their cleaned cover-letter title.
+    # From Patchwork (scans your comments on recent patches)
+    patman review --learn-voice patchwork -U us \
+        --reviewer 'Your Name <your@email>'
 
-An older database may have stored each version as a separate, unlinked
-record, leaving follow-up reviews without this context. Repair it by
-merging the split records, which backs up the database (to
-``<db>.bak``) first::
-
-    patman review --relink
-
-Aliases
--------
-
-The ``review`` command supports aliases ``r`` and ``rev``::
-
-    patman r -l 497923 -U us --reviewer 'Your Name <your@email>'
+Use ``--voice-count N`` to control how many reviews to collect
+(default: 20). The voice profile is saved to
+``~/.config/patman.d/voice.md`` and automatically used in subsequent
+reviews.

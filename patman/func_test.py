@@ -659,10 +659,16 @@ diff --git a/lib/efi_loader/efi_memory.c b/lib/efi_loader/efi_memory.c
         gothelp = re.sub(r'^:{14}\n.*\n:{14}\n', '', result.stdout)
         self.assertEqual(control.full_help_text(), gothelp)
 
-        # Each part of the manual is shown
+        # Each part of the manual is shown, with links as plain text
         for fname in control.HELP_FILES:
             with open(PATMAN_DIR / fname, encoding='utf-8') as inf:
-                self.assertIn(inf.read(), gothelp)
+                self.assertIn(control.plain_links(inf.read()), gothelp)
+        self.assertNotIn(':doc:', gothelp)
+        self.assertIn('see the Tags chapter', gothelp)
+        self.assertEqual('see the guide, then the reference',
+                         control.plain_links(
+                             'see :doc:`the guide </guide/index>`, then '
+                             ':doc:`the reference\n</reference/index>`'))
         unexpected = [l for l in result.stderr.splitlines()
                       if not l.startswith('WARNING:')]
         self.assertEqual(0, len(unexpected))

@@ -37,13 +37,21 @@ Building the documentation
 
 The manual lives in ``patman/``: the introduction in ``patman.rst``, then
 one file for each chapter, such as ``sending.rst`` and ``tags.rst``.
-``control.HELP_FILES`` lists them in order. ``patman -H`` shows them all, and ``doc/`` wraps them for Sphinx, so edit the
-manual there. The command reference in ``doc/reference/`` is generated from
-the argument parser by ``doc/_ext/patman_cmdref.py``, so give each new
-command and option a help string. ``doc/guide/`` holds the step-by-step
-guide. ``doc/database.rst`` describes the database schema; update it along
-with any schema migration. ``doc/serve-protocol.rst`` describes the JSON API
-provided by ``patman serve``; update it along with any change to the API.
+``control.HELP_FILES`` lists them in order. ``patman -H`` shows them all, and
+``doc/`` wraps them for Sphinx, so edit the manual there. To link to another
+page, use a :doc: link with its own text, such as
+``:doc:`the Tags chapter </tags>```, since ``patman -H`` shows just the text.
+
+The command reference in ``doc/reference/`` is generated from the argument
+parser by ``doc/_ext/patman_cmdref.py``, so give each new command and option
+a help string. ``doc/guide/`` holds the step-by-step guide, with output from
+real series.
+
+The technical documentation is in ``doc/`` too. ``doc/database.rst``
+describes the database schema; update it along with any schema migration.
+``doc/serve-protocol.rst`` describes the JSON API provided by
+``patman serve``; update it along with any change to the API.
+``doc/review-internals.rst`` describes how the review works.
 
 Building the package
 --------------------

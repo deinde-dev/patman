@@ -1,6 +1,6 @@
 .. SPDX-License-Identifier: GPL-2.0+
 
-Series Management
+Series management
 =================
 
 Sometimes you might have several series in flight at the same time. Each of
@@ -52,8 +52,8 @@ Series subcommands
 'patman series' has subcommands to add a series, send it, link it to
 patchwork, gather its tags, start the next version and archive it, along with
 others to list, show and tidy up series. 'patman series -h' lists them, and
-the command reference (``doc/reference/series.rst``) describes each one with
-its options. 'patman series' can be abbreviated to 'patman s'.
+:doc:`the command reference </reference/series>` describes each one with its
+options. 'patman series' can be abbreviated to 'patman s'.
 
 The workflow below shows the main ones in the order you use them.
 
@@ -61,8 +61,8 @@ Patman series workflow
 ----------------------
 
 These are the commands for the life of a series, in order.
-``doc/guide/series-workflow.rst`` goes through them with a real U-Boot series
-and the output of each.
+:doc:`Tracking a series with the database </guide/series-workflow>` goes
+through them with a real U-Boot series and the output of each.
 
 1. Tell patman the patchwork project for the upstream remote, once for each
    clone. The remote defaults to the one the current branch tracks, or the
@@ -117,6 +117,53 @@ Here is a sample 'progress' view:
   :width: 800
   :alt: Patman showing the progress view
 
+Review notes
+------------
+
+The ``handle-reviews`` workflow produces a ``review-notes.txt`` file
+describing how feedback was addressed. Store it in the database so
+future versions can reference it::
+
+    patman series save-notes [notes-file]
+
+The default filename is ``review-notes.txt``. Display notes from all
+previous versions::
+
+    patman series show-notes
+
+Following up
+------------
+
+patman keeps a record of what happens to each series and reminds you to come
+back to it. Sending a series with ``patman series send``, or reviewing one
+with ``patman review``, records when that happened, and marks the series to
+come back to a week later.
+
+``patman workflow todo`` marks a series to come back to after a number of
+days (14 if you do not give one), and ``--clear`` removes the mark::
+
+    $ patman workflow todo -s align-fix 7
+    Series 'align-fix' marked for todo on 2026-10-24 13:46:14
+
+``patman workflow todo-list`` lists the series which are due, or all those
+marked with ``--all``::
+
+    $ patman workflow todo-list --all
+    Series                        Due  Description
+    -----------------  --------------  ------------------------------
+    align-fix                   in 6d  Repair boards broken by the 6.1 kbuild bump
+
+``patman workflow list`` shows the record for each series, such as when it
+was sent and when it is next due::
+
+    $ patman workflow list
+    Type    Series             Ver        When  Description
+    ------  -----------------  ---  ----------  ------------------------------
+    todo    align-fix                    in 7d  Repair boards broken by the 6.1 kbuild bump
+
+The web page shows the series which are due in its Todo tab (see
+:doc:`the Web server chapter </serve>`).
+
 Multiple upstreams
 ------------------
 
@@ -126,7 +173,8 @@ that each series automatically uses the correct send settings for its
 destination. The trees may use different mailing lists, patchwork servers and
 SMTP credentials.
 
-For a worked example with real output, see ``doc/guide/upstreams.rst``.
+For a worked example with real output, see
+:doc:`Sending to more than one upstream </guide/upstreams>`.
 
 The key concepts are:
 
