@@ -50,6 +50,7 @@ def run_patman():
             args.test_preserve_dirs, None, to_run, None,
             [test_checkpatch.TestPatch, func_test.TestFunctional,
              'patman.settings', test_cseries.TestCseries,
+             test_cseries.TestGetUpstreamBranch,
              test_settings.TestSettings, test_server.TestWebServer,
              test_command.TestRunInteractive])
         sys.exit(0 if result.wasSuccessful() else 1)
