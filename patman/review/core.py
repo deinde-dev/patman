@@ -36,6 +36,7 @@ from u_boot_pylib import terminal
 from u_boot_pylib import tools
 from u_boot_pylib import tout
 
+import patman
 from patman import coverity
 from patman import cser_helper
 from patman import database
@@ -3548,15 +3549,15 @@ def _child_env():
     patman is run from a source checkout rather than an installed package,
     a fresh interpreter cannot import it, so put the directory that holds
     the patman package on PYTHONPATH. This is where the parent found it:
-    two levels up from this module (patman/review.py -> patman -> parent).
-    For an installed patman the directory is already importable, so adding
-    it changes nothing.
+    the directory above the patman package. For an installed patman the
+    directory is already importable, so adding it changes nothing.
 
     Returns:
         dict: Environment for the child process
     """
     env = os.environ.copy()
-    pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    pkg_parent = os.path.dirname(os.path.dirname(
+        os.path.abspath(patman.__file__)))
     existing = env.get('PYTHONPATH', '')
     env['PYTHONPATH'] = (pkg_parent + os.pathsep + existing if existing
                          else pkg_parent)

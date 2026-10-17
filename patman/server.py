@@ -1077,7 +1077,7 @@ class Server:
                 output and return code
         """
         tout.info(f"Job {job.idnum}: running {result['cmd']}")
-        env = review_mod._child_env()  # pylint: disable=W0212
+        env = review_mod.core._child_env()  # pylint: disable=W0212
         env['PYTHONUNBUFFERED'] = '1'
         # Fail rather than wait for a password which nobody can type
         env['GIT_TERMINAL_PROMPT'] = '0'
