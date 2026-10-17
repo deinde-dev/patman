@@ -14,7 +14,8 @@ Added
   ``doc/first-series.rst`` walks through sending a first series, using a
   real U-Boot series which was merged in v2026.07, and
   ``doc/status-and-tags.rst`` shows checking its status and collecting
-  review tags, and ``doc/next-version.rst`` shows sending its v2.
+  review tags, ``doc/next-version.rst`` shows sending its v2 and
+  ``doc/series-workflow.rst`` shows tracking it with ``patman series``.
 - ``patman status -C`` shows the comments on the cover letter, as
   ``patman series status -C`` does.
 - ``patman serve`` runs a web server showing series status, patchwork

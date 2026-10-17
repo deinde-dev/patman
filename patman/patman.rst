@@ -96,8 +96,9 @@ This tool requires a certain way of working:
 For the setup needed to send patches, see ``doc/getting-started.rst``. For a
 worked example using a real U-Boot series, from a branch of commits to the
 email on the mailing list, see ``doc/first-series.rst``. For checking its
-status and collecting review tags, see ``doc/status-and-tags.rst``, and for
-sending the next version, see ``doc/next-version.rst``.
+status and collecting review tags, see ``doc/status-and-tags.rst``, for
+sending the next version, see ``doc/next-version.rst``, and for tracking it
+all with the ``patman series`` database, see ``doc/series-workflow.rst``.
 
 
 How to configure it
@@ -953,6 +954,8 @@ Patman series workflow
 ~~~~~~~~~~~~~~~~~~~~~~
 
 Here is a run-through of how to incorporate 'patman series' into your workflow.
+For the same with real output from a U-Boot series, see
+``doc/series-workflow.rst``.
 
 Firstly, set up your project::
 

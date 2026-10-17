@@ -244,5 +244,4 @@ Other tags which help with new versions:
 
 These and the other tags are described in 'How to add tags' in the manual.
 To have patman track the versions of a series for you, with the patchwork
-links and review status in a database, see 'Series Management' in the
-manual, which covers the ``patman series`` commands.
+links and review status in a database, see :doc:`series-workflow`.

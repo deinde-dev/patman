@@ -12,6 +12,7 @@
    first-series
    status-and-tags
    next-version
+   series-workflow
 
 .. toctree::
    :maxdepth: 2
