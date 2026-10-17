@@ -9,7 +9,8 @@ binman documentation patches for U-Boot, sent in April 2026 and merged in
 v2026.07 (the first is commit 4dc8f10edf9 in mainline).
 
 Nothing here needs the ``patman series`` database: plain ``patman send``
-is enough to turn a branch of commits into a series and send it.
+is enough to turn a branch of commits into a series and send it. If patman
+is not set up yet, see :doc:`getting-started` first.
 
 The branch
 ----------

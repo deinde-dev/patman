@@ -93,8 +93,9 @@ This tool requires a certain way of working:
   patches. Weeks later, change the patches and repeat, knowing that you
   will get a consistent result each time.
 
-For a worked example using a real U-Boot series, from a branch of commits to
-the email on the mailing list, see ``doc/first-series.rst``.
+For the setup needed to send patches, see ``doc/getting-started.rst``. For a
+worked example using a real U-Boot series, from a branch of commits to the
+email on the mailing list, see ``doc/first-series.rst``.
 
 
 How to configure it

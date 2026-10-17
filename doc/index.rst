@@ -8,6 +8,7 @@
    :maxdepth: 2
    :caption: Examples
 
+   getting-started
    first-series
 
 .. toctree::
