@@ -311,6 +311,56 @@ def _read_context(spec):
     return spec
 
 
+# Rules for quoting and punctuation in the agent's comments, which apply to
+# both patch and cover-letter reviews
+QUOTING_RULES = """\
+- NEVER use backticks — this is plain-text email, not markdown.
+  For functions, always use parentheses with no quotes: malloc() not
+  'malloc()' or `malloc`. For all other quoting (identifiers,
+  filenames, string literals, misspelled words, etc.) use single
+  quotes: 'my_var' and 'handoff' not "my_var" or "handoff". Do not
+  quote identifiers that are obviously code (e.g. CONFIG_FOO)
+- These quoting and spelling conventions are for YOUR comment text
+  only. In the '> ' quoted lines, reproduce the author's text exactly:
+  never change double quotes to single, add or remove quotes, or
+  restyle anything — a quote of "some_key" must stay "some_key"
+- Never put a period directly after a code identifier — rephrase,
+  omit the period, or use an em dash to start the next clause"""
+
+
+def _voice_section():
+    """Get the prompt section asking the agent to write in the user's voice
+
+    Returns:
+        str: Section text, or '' if no voice has been learned
+    """
+    voice = get_voice()
+    if not voice:
+        return ''
+    return f'''
+WRITING STYLE:
+Match this voice when writing your comments:
+{voice}
+'''
+
+
+def _context_section(ctx):
+    """Get the prompt section with the reviewer's notes for this run
+
+    Args:
+        ctx (ReviewContext): Review context (uses context)
+
+    Returns:
+        str: Section text, or '' if there are no notes
+    """
+    if not ctx.context:
+        return ''
+    return f'''
+USER CONTEXT (extra notes from the reviewer for this run):
+{ctx.context}
+'''
+
+
 def _build_review_prompt(ctx, commit_hash, seq, all_commits,
                          previous_review):
     """Build the Claude agent prompt for reviewing a single patch
@@ -357,14 +407,7 @@ time round. Apply that convention here:
   approve. Prefer 'approved' over fishing for something to say.
 '''
 
-    voice = get_voice()
-    voice_section = ''
-    if voice:
-        voice_section = f'''
-WRITING STYLE:
-Match this voice when writing your comments:
-{voice}
-'''
+    voice_section = _voice_section()
 
     # Build the series overview
     series_lines = []
@@ -388,12 +431,7 @@ author has already been told. Simply skip that issue entirely and focus
 on things that have NOT been said.
 '''
 
-    context_section = ''
-    if ctx.context:
-        context_section = f'''
-USER CONTEXT (extra notes from the reviewer for this run):
-{ctx.context}
-'''
+    context_section = _context_section(ctx)
 
     coverity_section = ''
     if getattr(ctx, 'coverity_text', None):
@@ -504,18 +542,7 @@ Rules:
   in the patch is worse than no comment at all.
 - Be specific and constructive, but brief — use as few words as
   possible to make the point. Avoid restating what the code does;
-- NEVER use backticks — this is plain-text email, not markdown.
-  For functions, always use parentheses with no quotes: malloc() not
-  'malloc()' or `malloc`. For all other quoting (identifiers,
-  filenames, string literals, misspelled words, etc.) use single
-  quotes: 'my_var' and 'handoff' not "my_var" or "handoff". Do not
-  quote identifiers that are obviously code (e.g. CONFIG_FOO)
-- These quoting and spelling conventions are for YOUR comment text
-  only. In the '> ' quoted lines, reproduce the author's text exactly:
-  never change double quotes to single, add or remove quotes, or
-  restyle anything — a quote of "some_key" must stay "some_key"
-- Never put a period directly after a code identifier — rephrase,
-  omit the period, or use an em dash to start the next clause
+{QUOTING_RULES}
 - If another reviewer has already made a point, do NOT repeat it,
   rephrase it, or add to it — skip it entirely
 - Focus on what is wrong and what to do instead
@@ -544,14 +571,7 @@ def _build_cover_review_prompt(ctx, all_commits, previous_review=None):
     Returns:
         str: The prompt text
     """
-    voice = get_voice()
-    voice_section = ''
-    if voice:
-        voice_section = f'''
-WRITING STYLE:
-Match this voice when writing your comments:
-{voice}
-'''
+    voice_section = _voice_section()
     series_lines = []
     for s, h, subj in all_commits:
         series_lines.append(f"  {s}. {h[:12]} {subj}")
@@ -571,12 +591,7 @@ EXISTING COMMENTS:
 (see file: {ctx.comments_path})
 '''
 
-    context_section = ''
-    if ctx.context:
-        context_section = f'''
-USER CONTEXT (extra notes from the reviewer for this run):
-{ctx.context}
-'''
+    context_section = _context_section(ctx)
 
     prev_section = ''
     if previous_review:
@@ -639,18 +654,7 @@ Your comment.
 VERDICT: changes_needed
 
 Rules:
-- NEVER use backticks — this is plain-text email, not markdown.
-  For functions, always use parentheses with no quotes: malloc() not
-  'malloc()' or `malloc`. For all other quoting (identifiers,
-  filenames, string literals, misspelled words, etc.) use single
-  quotes: 'my_var' and 'handoff' not "my_var" or "handoff". Do not
-  quote identifiers that are obviously code (e.g. CONFIG_FOO)
-- These quoting and spelling conventions are for YOUR comment text
-  only. In the '> ' quoted lines, reproduce the author's text exactly:
-  never change double quotes to single, add or remove quotes, or
-  restyle anything — a quote of "some_key" must stay "some_key"
-- Never put a period directly after a code identifier — rephrase,
-  omit the period, or use an em dash to start the next clause
+{QUOTING_RULES}
 - Do NOT quote code fragments in the cover-letter reply — code
   belongs in the per-patch reviews. Describe series-level issues in
   prose only.
