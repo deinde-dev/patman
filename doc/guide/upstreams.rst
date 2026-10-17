@@ -216,5 +216,5 @@ Each upstream's patchwork server is used for its series, so ``autolink``,
 ``status`` and ``gather`` look for ``typos`` on patchwork.deinde.dev and for
 ``binj-us`` on patchwork.ozlabs.org, with no options needed.
 
-'Multiple upstreams' in the manual describes the ``patman upstream`` commands
-in full.
+'Multiple upstreams' in :doc:`/series` describes the ``patman upstream``
+commands in full.

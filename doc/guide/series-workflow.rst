@@ -61,7 +61,7 @@ cover letter::
 
 ``-/3`` means patman does not yet know the state of the three patches. The
 ``Us`` column shows the series' upstream, which is only needed with more than
-one upstream (see 'Multiple upstreams' in the manual).
+one upstream (see :doc:`upstreams`).
 
 The branch name gives the version: ``binj-us`` is v1, and v2 goes in
 ``binj-us2``. So the name for v1 must not end in a number.
@@ -245,5 +245,5 @@ series no longer appears in most listings::
 Use ``-A`` to include archived series, and ``patman series unarchive`` to
 bring back the branches if you need to do more with it.
 
-The other ``patman series`` commands, such as ``summary``, ``find``,
-``open`` and ``rm``, are listed under 'Series subcommands' in the manual.
+The other ``patman series`` commands, such as ``summary``, ``find``, ``open``
+and ``rm``, are described in :doc:`/reference/series`.

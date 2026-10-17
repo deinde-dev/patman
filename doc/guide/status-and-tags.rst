@@ -201,5 +201,4 @@ count this one and ``-d`` does not add it. If you send another version, add
 such a tag to each commit by hand.
 
 To keep track of a series across versions, with its patchwork links and
-review status in a database, see 'Series Management' in the manual, which
-covers the ``patman series`` commands.
+review status in a database, see :doc:`series-workflow`.

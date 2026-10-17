@@ -7,6 +7,7 @@
    :caption: Manual
 
    tags
+   series
    review
    serve
 

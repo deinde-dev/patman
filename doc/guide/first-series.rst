@@ -247,5 +247,4 @@ patches were merged in v2026.07.
 
 To see the reviews and collect their tags before sending the next version,
 see :doc:`status-and-tags`. To keep track of versions like this, with
-patchwork links and review status, see 'Series Management' in the manual,
-which covers the ``patman series`` commands.
+patchwork links and review status, see :doc:`series-workflow`.

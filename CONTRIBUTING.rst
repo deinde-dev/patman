@@ -37,7 +37,8 @@ Building the documentation
 
 The manual itself lives in ``patman/patman.rst``, with the chapters on
 assisted review and the web server in ``patman/review.rst`` and
-``patman/serve.rst``, and the list of tags in ``patman/tags.rst``.
+``patman/serve.rst``, series management in ``patman/series.rst`` and the
+list of tags in ``patman/tags.rst``.
 ``patman -H`` shows them all, and ``doc/`` wraps them for Sphinx, so edit the
 manual there. The command reference in ``doc/reference/`` is generated from
 the argument parser by ``doc/_ext/patman_cmdref.py``, so give each new
