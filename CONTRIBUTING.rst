@@ -35,11 +35,9 @@ Building the documentation
     pip install -r doc/requirements.txt
     make -C doc html        # output in doc/_build/html
 
-The manual itself lives in ``patman/patman.rst``, with the chapters on
-assisted review and the web server in ``patman/review.rst`` and
-``patman/serve.rst``, series management in ``patman/series.rst`` and the
-list of tags in ``patman/tags.rst``.
-``patman -H`` shows them all, and ``doc/`` wraps them for Sphinx, so edit the
+The manual lives in ``patman/``: the introduction in ``patman.rst``, then
+one file for each chapter, such as ``sending.rst`` and ``tags.rst``.
+``control.HELP_FILES`` lists them in order. ``patman -H`` shows them all, and ``doc/`` wraps them for Sphinx, so edit the
 manual there. The command reference in ``doc/reference/`` is generated from
 the argument parser by ``doc/_ext/patman_cmdref.py``, so give each new
 command and option a help string. ``doc/guide/`` holds the step-by-step

@@ -6,7 +6,7 @@ The patman database
 Patman stores series tracking, review and workflow state in a SQLite
 database (``.patman.db``) in the top-level git directory. The schema is
 versioned and migrated automatically when patman starts; it is currently at
-v11. The 'The database' chapter of the manual covers where the database is
+v11. The :doc:`db` chapter of the manual covers where the database is
 kept, the separate review database and sharing it between patman runs.
 
 The database allows patman to track a patch series across multiple

@@ -39,8 +39,9 @@ from patman import workflow
 from patman.patchwork import Patchwork
 
 # The parts of the manual, in the order 'patman -H' shows them
-HELP_FILES = ('patman.rst', 'tags.rst', 'series.rst', 'review.rst',
-              'serve.rst')
+HELP_FILES = ('patman.rst', 'configuration.rst', 'sending.rst',
+              'patchwork.rst', 'tags.rst', 'series.rst', 'review.rst',
+              'serve.rst', 'db.rst')
 
 
 def full_help_text():

@@ -3,9 +3,26 @@
 Tags
 ====
 
-patman reads these tags from the commit messages of a series, and removes
-them from the patches it sends. Add them to any commit; most can only appear
-once in the whole series. Tags are case sensitive.
+patman reads tags from your commit messages to know where to send the series,
+what its cover letter says, its version, its change logs and so on. It
+removes them from the patches it sends. For example, the top commit of a
+series might end::
+
+    Series-to: u-boot
+    Series-cc: heinrich
+    Series-version: 2
+    Cover-letter:
+    binman: Tidy up some missing bintool docs
+    Some of the bintools are missing documentation. This series adds the
+    missing pieces to bring things up to scratch.
+    END
+
+Most tags can only appear once in the series, and they usually go in the top
+commit, where ``git commit --amend`` reaches them. Change logs go in the
+commit they describe. Tags are case sensitive: ``series-to:`` is not
+recognised.
+
+The tags are:
 
 Series-to: email / alias
     Email address / alias to send patch series to (you can add this

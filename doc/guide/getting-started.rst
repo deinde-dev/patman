@@ -144,7 +144,7 @@ When that looks right, ``patman send`` sends it for real. Unlike
 ``git send-email``, the relay does not open an editor or ask before each
 message, so check the dry run first. To use ``git send-email`` for a single
 run instead, add ``--no-relay``. More details are in 'Sending through a web
-relay' in the manual.
+relay' in :doc:`/sending`.
 
 Setting up the tree
 -------------------
@@ -199,7 +199,7 @@ can refer to other aliases.
 Nothing else is needed for the simple case: patman finds U-Boot's
 ``scripts/checkpatch.pl`` to check the patches and its
 ``scripts/get_maintainer.pl`` to find who to copy. The other settings are
-described in 'How to configure it' in the manual.
+described in :doc:`/configuration`.
 
 Checking the setup
 ------------------

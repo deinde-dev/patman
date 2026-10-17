@@ -8,7 +8,7 @@ argument parser, so it always matches the code. ``patman <command> -h``
 shows the same for one command.
 
 For how the commands fit together, see the :doc:`/guide/index`. Options can
-also be set in ``~/.patman``; see 'How to configure it' in the manual.
+also be set in ``~/.patman``; see :doc:`/configuration`.
 
 The commands are:
 

@@ -6,10 +6,14 @@
    :maxdepth: 2
    :caption: Manual
 
+   configuration
+   sending
+   patchwork
    tags
    series
    review
    serve
+   db
 
 .. toctree::
    :maxdepth: 2

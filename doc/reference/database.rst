@@ -4,6 +4,6 @@ patman database
 ===============
 
 Move reviews between the main and review databases, and copy series from
-another database. See 'The database' in the manual.
+another database. See :doc:`/db`.
 
 .. patman-command:: database
