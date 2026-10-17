@@ -6,8 +6,8 @@ Guide
 These pages show how to use patman, step by step, with a real U-Boot series:
 three binman documentation patches, ``binj-us``, which went to two versions
 and were merged in v2026.07. A second small series, ``align-fix``, shows
-collecting review tags. All the output is from running patman on these
-branches.
+collecting review tags, and a third, ``typos``, sending to the concept tree.
+All the output is from running patman on these branches.
 
 Read them in order the first time. Each one follows on from the one before.
 
@@ -32,6 +32,10 @@ Read them in order the first time. Each one follows on from the one before.
     patchwork links, gathering tags, starting each version and archiving the
     series once merged
 
+:doc:`upstreams`
+    Send to more than one tree, such as mainline and the concept tree, each
+    with its own mailing list, patchwork server and send settings
+
 The manual covers each command and tag in full, and the setup for features
 not shown here, such as reviewing other people's series with
 ``patman review`` and following everything on a phone with ``patman serve``.
@@ -44,3 +48,4 @@ not shown here, such as reviewing other people's series with
    status-and-tags
    next-version
    series-workflow
+   upstreams

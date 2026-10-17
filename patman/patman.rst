@@ -961,6 +961,8 @@ that each series automatically uses the correct send settings for its
 destination. The trees may use different mailing lists, patchwork servers and
 SMTP credentials.
 
+For a worked example with real output, see ``doc/guide/upstreams.rst``.
+
 The key concepts are:
 
 **Upstream**

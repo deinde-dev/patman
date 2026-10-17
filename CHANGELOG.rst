@@ -13,7 +13,8 @@ Added
 - A guide in ``doc/guide/`` shows how to use patman step by step with a
   real U-Boot series which was merged in v2026.07: setting up, sending a
   first series, checking its status and collecting review tags, sending the
-  next version, and tracking it all with ``patman series``.
+  next version, tracking it all with ``patman series``, and sending to more
+  than one upstream.
 - ``patman status -C`` shows the comments on the cover letter, as
   ``patman series status -C`` does.
 - ``patman serve`` runs a web server showing series status, patchwork
