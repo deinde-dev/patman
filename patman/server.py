@@ -1140,6 +1140,18 @@ class Server:
         return await handler(request)
 
     @web.middleware
+    async def _no_cache(self, request, handler):
+        """Have the browser check the page and its files before reusing them
+
+        The page is split into several files, so a browser which kept an old
+        app.js after patman is updated would run it with the new page
+        """
+        resp = await handler(request)
+        if request.path == '/' or request.path.startswith('/static/'):
+            resp.headers['Cache-Control'] = 'no-cache'
+        return resp
+
+    @web.middleware
     async def _errors(self, request, handler):
         """Turn errors into a JSON response"""
         try:
@@ -1494,7 +1506,8 @@ class Server:
         Return:
             web.Application: Application, ready to run
         """
-        app = web.Application(middlewares=[self._errors, self._auth])
+        app = web.Application(
+            middlewares=[self._errors, self._auth, self._no_cache])
         app.router.add_get('/api/series', self._series_list)
         app.router.add_get(r'/api/series/{idnum:\d+}', self._series_detail)
         app.router.add_get('/api/reviews', self._review_list)
