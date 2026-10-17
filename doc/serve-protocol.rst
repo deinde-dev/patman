@@ -1,15 +1,14 @@
 .. SPDX-License-Identifier: GPL-2.0+
 
-=========================
 The patman serve protocol
 =========================
 
 ``patman serve`` runs a web server in a git tree which provides a JSON API over
 HTTP, covering the patman database and, where needed, the patchwork servers of
 the upstreams. This document describes that API, for anyone working on the
-server or writing a client. See the 'Web server' chapter of the manual for how
-to run the server. The page which the server provides is one such client; see
-`The page`_.
+server or writing a client. See :doc:`the Web server chapter </serve>` of the
+manual for how to run the server. The page which the server provides is one
+such client; see `The page`_.
 
 Overview
 --------
