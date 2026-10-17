@@ -75,6 +75,14 @@ def _state_counts(pcommits):
     return dict(Counter(pcm.state or 'unknown' for pcm in pcommits))
 
 
+class BadRequest(ValueError):
+    """A request is not valid, e.g. a missing field or a bad value"""
+
+
+class JobBusyError(Exception):
+    """A job is already acting on a review which a request would change"""
+
+
 def _patch_info(pcm):
     """Convert a pcommit record to a JSON-friendly dict
 
@@ -187,7 +195,7 @@ async def read_blob(topdir, hashes):
     """
     for oid in hashes:
         if not RE_BLOB.match(oid):
-            raise ValueError(f"Invalid blob hash '{oid}'")
+            raise BadRequest(f"Invalid blob hash '{oid}'")
         proc = await asyncio.create_subprocess_exec(
             'git', 'cat-file', 'blob', oid, cwd=topdir,
             stdout=asyncio.subprocess.PIPE,
@@ -502,7 +510,7 @@ def _get_int(data, key):
     if val in (None, ''):
         return None
     if isinstance(val, bool) or not str(val).isdigit() or not int(val):
-        raise ValueError(f"Invalid {key} '{val}'")
+        raise BadRequest(f"Invalid {key} '{val}'")
     return int(val)
 
 
@@ -563,7 +571,7 @@ def parse_review_req(data, upstreams):
             args += ['-s', mseries.group(1)]
             desc = f'series {mseries.group(1)}'
         else:
-            raise ValueError(f"Cannot find a series or patch in '{target}'")
+            raise BadRequest(f"Cannot find a series or patch in '{target}'")
     if patch:
         args += ['-p', str(patch)]
         desc = f'patch {patch}'
@@ -577,28 +585,24 @@ def parse_review_req(data, upstreams):
         if version:
             args += ['-V', str(version)]
     if not args:
-        raise ValueError('Please give a series, patch or title to review')
+        raise BadRequest('Please give a series, patch or title to review')
     if len([1 for opt in ('-s', '-p', '-S') if opt in args]) != 1:
-        raise ValueError('Please give only one of a series, patch or title')
+        raise BadRequest('Please give only one of a series, patch or title')
     index = str(data.get('index') or '').replace(' ', '')
     if index:
         if not RE_INDEX.match(index):
-            raise ValueError(f"Invalid patch selection '{index}'")
+            raise BadRequest(f"Invalid patch selection '{index}'")
         args += ['-i', index]
     ups = data.get('ups')
     if ups:
         if ups not in upstreams:
-            raise ValueError(f"Unknown upstream '{ups}'")
+            raise BadRequest(f"Unknown upstream '{ups}'")
         args += ['-U', ups]
     if data.get('drafts'):
         args.append('-d')
     if data.get('force'):
         args.append('-f')
     return args, f'Review {desc}'
-
-
-class JobBusyError(Exception):
-    """A job is already acting on a review which a request would change"""
 
 
 class Job:
@@ -1130,6 +1134,8 @@ class Server:
             return await handler(request)
         except JobBusyError as exc:
             return web.json_response({'error': str(exc)}, status=409)
+        except BadRequest as exc:
+            return web.json_response({'error': str(exc)}, status=400)
         except ValueError as exc:
             return web.json_response({'error': str(exc)}, status=404)
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
@@ -1305,9 +1311,9 @@ class Server:
         try:
             data = await request.json()
         except ValueError as exc:
-            raise ValueError('Invalid JSON in request') from exc
+            raise BadRequest('Invalid JSON in request') from exc
         if not isinstance(data, dict):
-            raise ValueError('Request must be a JSON object')
+            raise BadRequest('Request must be a JSON object')
         return data
 
     def _review_job(self, title, *args, target=None):
@@ -1406,7 +1412,7 @@ class Server:
         """
         if not isinstance(seqs, list) or not all(
                 isinstance(seq, int) and seq >= 0 for seq in seqs):
-            raise ValueError('Invalid seqs')
+            raise BadRequest('Invalid seqs')
         name, desc, ups = self.rcser.db.series_get_info(idnum)
         version = version or self.rcser.db.series_get_max_version(idnum)
         link = self.rcser.db.ser_ver_get_link(idnum, version)
@@ -1465,12 +1471,12 @@ class Server:
         data = await self._read_json(request)
         note = data.get('note')
         if not isinstance(note, str) or not note.strip():
-            raise ValueError('Please say what to change')
+            raise BadRequest('Please say what to change')
         note = note.strip()
         part = data.get('part')
         if part:
             if not isinstance(part, str):
-                raise ValueError('Invalid part')
+                raise BadRequest('Invalid part')
             note = f'About this part of the review:\n\n{part.strip()}' \
                    f'\n\n{note}'
         seqs = data.get('seqs') or []
@@ -1490,7 +1496,7 @@ class Server:
                 {'error': 'This review has already been sent'}, status=409)
         body = data.get('body', rev.body)
         if not isinstance(body, str) or not body.strip():
-            raise ValueError('The review cannot be empty')
+            raise BadRequest('The review cannot be empty')
         svr = db.ser_ver_get_by_id(rev.svid)
         self.check_free(svr.series_id, svr.version, [rev.seq], [rev.seq])
         # Unless told otherwise, the review approves if it gives the tag
@@ -1513,7 +1519,7 @@ class Server:
         if 'response' in data:
             response = data['response']
             if not isinstance(response, str):
-                raise ValueError('Invalid response')
+                raise BadRequest('Invalid response')
             db.reply_set_response(
                 reply.idnum, response if response.strip() else None,
                 database.REPLY_SUGGESTED if response.strip() else
@@ -1538,7 +1544,7 @@ class Server:
             return web.json_response(
                 {'error': 'The response has already been sent'}, status=409)
         if not (reply.response or '').strip():
-            raise ValueError('There is no response to send')
+            raise BadRequest('There is no response to send')
         return self._review_job(f'Send the response to reply {reply.idnum}',
                                 '--send-reply', str(reply.idnum))
 
