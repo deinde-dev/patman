@@ -1944,6 +1944,10 @@ A review which has not been sent can be edited on the page. Saving it can also
 update its Gmail draft, so that the draft matches. Whether the review approves
 the patch follows from whether the text includes a ``Reviewed-by:`` line.
 
+To change just one comment, tap 'Edit' under it. The comment opens for editing
+in place, between the lines it quotes and the rest of the review. Saving it
+with no text drops the comment along with the lines it quotes.
+
 To have the agent change a review which has not been sent, tap 'Revise' under
 it and say what should change, or tap 'Revise this' under one comment to talk
 about just that part. 'Revise all' at the top applies a note to every unsent

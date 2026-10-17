@@ -22,7 +22,8 @@ Added
 - The ``patman serve`` page shows the commit message, diff and comments of
   each patch and cover letter, also beside its review, and the code around
   each chunk of a diff.
-- Reviews which have not been sent can be edited on the ``patman serve`` page.
+- Reviews which have not been sent can be edited on the ``patman serve`` page,
+  either whole or one comment at a time.
 - The ``patman serve`` page shows replies to reviews, and a response can be
   edited, drafted and sent there.
 - The ``patman serve`` sync fetches the upstreams which reviews use, so that

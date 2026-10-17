@@ -193,8 +193,11 @@ a.card:active { background: var(--code-bg); }
 .mail summary { color: var(--link); cursor: pointer; font-family: system-ui, sans-serif;
                 font-size: 12px; list-style: none; padding: 2px 0; }
 .mail summary::-webkit-details-marker { display: none; }
+.mail .chunk-btns { display: flex; gap: 16px; padding: 2px 0 6px; }
 .mail .chunk-btn { font: 12px system-ui, sans-serif; color: var(--link); background: none;
-                   border: 0; padding: 2px 0 6px; cursor: pointer; display: block; }
+                   border: 0; padding: 0; cursor: pointer; }
+.mail .form { white-space: normal; font-family: system-ui, sans-serif; margin: 4px 0 8px; }
+.mail .form textarea { min-height: 6em; }
 .revise-part { margin: 4px 0 8px; max-height: 160px; overflow: auto; }
 .form textarea.note { min-height: 6em; font: inherit; }
 
@@ -377,11 +380,20 @@ function npatches(n) { return `${n} patch${n === 1 ? '' : 'es'}`; }
 // Show an email, collapsing long quotes. If onChunk is given, each comment
 // which follows a quote gets a button which calls onChunk() with the quote
 // and the comment
-function renderMail(text, onChunk) {
+//
+// onChunk(part) is called when 'Revise this' is tapped under a comment, with
+// the comment and the end of the quote it is about.
+//
+// onEdit(comment, splice, cancel) is called when 'Edit' is tapped under a
+// comment. It returns a form to show in place of the comment; splice(text)
+// gives the whole mail with the comment changed to text (or dropped, along
+// with its quote, if text is empty) and cancel() puts the comment back.
+function renderMail(text, onChunk, onEdit) {
   const out = h('div', { class: 'mail' });
   const lines = (text || '').replace(/\s+$/, '').split('\n');
   let i = 0;
   let lastQuote = null;
+  let quoteStart = 0;
   while (i < lines.length) {
     if (lines[i].startsWith('>')) {
       let j = i;
@@ -401,6 +413,7 @@ function renderMail(text, onChunk) {
         out.append(quote(run));
       }
       lastQuote = run;
+      quoteStart = i;
       i = j;
     } else {
       let j = i;
@@ -409,12 +422,37 @@ function renderMail(text, onChunk) {
       let k = i;
       while (k < j && !/^(Reviewed-by:|Regards,)/.test(lines[k])) k++;
       const comment = lines.slice(i, k).join('\n');
-      out.append(comment + '\n');
-      if (onChunk && lastQuote && comment.trim()) {
+      const textEl = h('span', {}, comment + '\n');
+      out.append(textEl);
+      if ((onChunk || onEdit) && lastQuote && comment.trim()) {
         // Send the end of the quote, which is what the comment is about
         const part = [...lastQuote.slice(-8), '', comment.trim()].join('\n');
-        out.append(h('button', { class: 'chunk-btn', onclick: () => onChunk(part) },
-                     '✎ Revise this'));
+        const btns = h('div', { class: 'chunk-btns' },
+          onChunk && h('button', { class: 'chunk-btn', onclick: () => onChunk(part) },
+                       '✎ Revise this'),
+          onEdit && h('button', { class: 'chunk-btn', onclick: () => edit() }, 'Edit'));
+        out.append(btns);
+        const [start, end, qstart] = [i, k, quoteStart];
+        const splice = (newText) => {
+          const body = newText.trim();
+          let res;
+          if (body) {
+            // Keep the blank lines around the comment
+            const old = lines.slice(start, end);
+            const lead = old.findIndex((l) => l.trim());
+            const trail = old.length - 1 - old.findLastIndex((l) => l.trim());
+            res = [...lines.slice(0, start), ...old.slice(0, lead), ...body.split('\n'),
+                   ...old.slice(old.length - trail), ...lines.slice(end)];
+          } else {
+            res = [...lines.slice(0, qstart), ...lines.slice(end)];
+          }
+          return res.join('\n') + '\n';
+        };
+        const edit = () => {
+          const form = onEdit(comment.trim(), splice, () => form.replaceWith(textEl, btns));
+          textEl.replaceWith(form);
+          btns.remove();
+        };
       }
       if (k < j) out.append(lines.slice(k, j).join('\n') + '\n');
       lastQuote = null;
@@ -993,8 +1031,11 @@ async function viewReview(id, wantVer) {
     const ask = (part) => card.replaceChildren(header, reviseForm(
       part, r.status === 'draft', show,
       (note, drafts, msg) => revise([r.seq], part, note, drafts, msg)));
+    const editChunk = (comment, splice, cancel) => chunkForm(
+      comment, r.status === 'draft', cancel,
+      (text, redraft) => saveReview(r, splice(text), redraft));
     const show = () => card.replaceChildren(header,
-      renderMail(r.body, unsent(r) ? ask : null),
+      renderMail(r.body, unsent(r) ? ask : null, unsent(r) ? editChunk : null),
       (mailBtn || unsent(r)) && h('div', { class: 'actions' },
         mailBtn,
         unsent(r) && [
@@ -1166,6 +1207,46 @@ function reviseForm(part, drafted, cancel, submit) {
   return form;
 }
 
+// Save the text of a review which has not been sent, then show the job which
+// updates its Gmail draft, if requested, or the review again
+async function saveReview(r, body, redraft) {
+  const res = await api(`review-items/${r.id}`, { json: { body, redraft } });
+  if (res.kind) {
+    location.hash = `#/jobs/${res.id}`;
+  } else {
+    Object.assign(r, res);
+    route();
+  }
+}
+
+// A form to change one comment of a review, shown in its place.
+// Calls submit(text, redraft) when the user saves it
+function chunkForm(comment, drafted, cancel, submit) {
+  // Allow for long lines wrapping on a narrow screen
+  const rows = comment.split('\n').reduce((n, l) => n + Math.ceil((l.length + 1) / 60), 1);
+  const text = h('textarea', { spellcheck: 'true', rows: Math.min(rows, 20) });
+  text.value = comment;
+  const box = h('input', { type: 'checkbox', checked: drafted });
+  const msg = h('div', { class: 'msg' });
+  const save = h('button', { class: 'btn small', onclick: async () => {
+    save.disabled = true;
+    msg.textContent = '';
+    try {
+      await submit(text.value, box.checked);
+    } catch (err) {
+      msg.textContent = err.message;
+      save.disabled = false;
+    }
+  } }, 'Save');
+  const form = h('div', { class: 'form' }, text,
+    h('label', { class: 'check' }, box, 'Update the Gmail draft'),
+    h('div', { class: 'hint' }, 'Leave it empty to drop the comment and its quote'),
+    h('div', { class: 'actions' }, save,
+      h('button', { class: 'btn light small', onclick: cancel }, 'Cancel')), msg);
+  setTimeout(() => text.focus(), 0);
+  return form;
+}
+
 // Change the text of a review which has not been sent
 function editReview(card, r, header, show) {
   const text = h('textarea', { spellcheck: 'true' });
@@ -1176,14 +1257,7 @@ function editReview(card, r, header, show) {
     save.disabled = true;
     msg.textContent = '';
     try {
-      const res = await api(`review-items/${r.id}`,
-                            { json: { body: text.value, redraft: box.checked } });
-      if (res.kind) {
-        location.hash = `#/jobs/${res.id}`;
-      } else {
-        Object.assign(r, res);
-        route();
-      }
+      await saveReview(r, text.value, box.checked);
     } catch (err) {
       msg.textContent = err.message;
       save.disabled = false;
