@@ -199,23 +199,27 @@ def add_patchwork_subparser(subparsers):
         ['set-project', 'U-Boot', 'us'],
     ]
     patchwork_subparsers = patchwork.add_subparsers(dest='subcmd')
-    gproj = patchwork_subparsers.add_parser('get-project')
+    gproj = patchwork_subparsers.add_parser(
+        'get-project', help='Show the patchwork project for a remote')
     gproj.add_argument(
         'remote', nargs='?',
         help='Remote to get the project for (default: the one the current '
         'branch tracks, or the only remote)')
-    uset = patchwork_subparsers.add_parser('set-project')
+    uset = patchwork_subparsers.add_parser(
+        'set-project', help='Set the patchwork project for a remote')
     uset.add_argument(
         'project_name', help="Patchwork project name, e.g. 'U-Boot'")
     uset.add_argument(
         'remote', nargs='?',
         help='Remote to associate with this project (default: the one the '
         'current branch tracks, or the only remote)')
-    pdel = patchwork_subparsers.add_parser('rm')
+    pdel = patchwork_subparsers.add_parser(
+        'rm', help='Remove the patchwork project for a remote')
     pdel.add_argument(
         'remote', nargs='?',
         help='Remote to delete the project for, or omit for the default')
-    patchwork_subparsers.add_parser('ls', aliases=['list'])
+    patchwork_subparsers.add_parser(
+        'ls', aliases=['list'], help='List the patchwork projects')
     return patchwork
 
 
@@ -281,7 +285,8 @@ def add_series_subparser(subparsers):
     # settings
     # series_subparsers.required = True
 
-    add = series_subparsers.add_parser('add')
+    add = series_subparsers.add_parser(
+        'add', help='Add a series, or a new version of one, from its branch')
     add.add_argument('-D', '--desc',
                      help='Series description / cover-letter title')
     add.add_argument(
@@ -296,17 +301,21 @@ def add_series_subparser(subparsers):
     _add_allow_unmarked(add)
     _upstream_add(add)
 
-    series_subparsers.add_parser('archive', aliases=ALIASES['archive'])
+    series_subparsers.add_parser(
+        'archive', aliases=ALIASES['archive'],
+        help='Archive a finished series, keeping its branches as tags')
 
-    auto = series_subparsers.add_parser('autolink',
-                                        aliases=ALIASES['autolink'])
+    auto = series_subparsers.add_parser(
+        'autolink', aliases=ALIASES['autolink'],
+        help='Find the patchwork link for a series')
     auto.add_argument('-u', '--update', action='store_true', default=True,
                       help='Update the branch commit (default)')
     auto.add_argument('--no-update', action='store_false', dest='update',
                       help='Do not update the branch commit')
     _add_wait(auto, 0)
 
-    aall = series_subparsers.add_parser('autolink-all')
+    aall = series_subparsers.add_parser(
+        'autolink-all', help='Find the patchwork links for all series')
     aall.add_argument('-a', '--link-all-versions', action='store_true',
                       help='Link all series versions, not just the latest')
     aall.add_argument('-r', '--replace-existing', action='store_true',
@@ -325,14 +334,19 @@ def add_series_subparser(subparsers):
                      help='Use Cover-changes (cover-letter only) instead '
                           'of Series-changes')
 
-    series_subparsers.add_parser('dec')
+    series_subparsers.add_parser(
+        'dec', help='Remove the latest version of a series, and its branch')
 
-    gat = series_subparsers.add_parser('gather', aliases=ALIASES['gather'])
+    gat = series_subparsers.add_parser(
+        'gather', aliases=ALIASES['gather'],
+        help='Collect review tags and patch states from patchwork')
     _add_gather(gat)
     _add_show_comments(gat)
     _add_show_cover_comments(gat)
 
-    sall = series_subparsers.add_parser('gather-all')
+    sall = series_subparsers.add_parser(
+        'gather-all',
+        help='Collect review tags and patch states for all series')
     sall.add_argument(
         '-a', '--gather-all-versions', action='store_true',
         help='Gather tags from all series versions, not just the latest')
@@ -345,38 +359,48 @@ def add_series_subparser(subparsers):
     find.add_argument('query', help='Text to search for')
     _add_archived(find)
 
-    series_subparsers.add_parser('get-link')
-    series_subparsers.add_parser('inc')
-    info = series_subparsers.add_parser('info')
+    series_subparsers.add_parser(
+        'get-link', help='Show the patchwork link for a series')
+    series_subparsers.add_parser(
+        'inc', help='Start the next version of a series, in a new branch')
+    info = series_subparsers.add_parser(
+        'info', help='Show a series, with its versions and patches')
     info.add_argument('-r', '--reviews', nargs='*', type=int, default=None,
                       help='Show review text (optionally for specific patches)')
-    ls = series_subparsers.add_parser('ls', aliases=['list'])
+    ls = series_subparsers.add_parser(
+        'ls', aliases=['list'], help='List the series in the database')
     _add_archived(ls)
     ls.add_argument('-r', '--reviews', action='store_true',
                     help='Show only review series')
 
-    mar = series_subparsers.add_parser('mark')
+    mar = series_subparsers.add_parser(
+        'mark', help='Add Change-Id tags to the commits of a series')
     mar.add_argument('-m', '--allow-marked', action='store_true',
                      default=False,
                      help="Don't require commits to be unmarked")
 
-    series_subparsers.add_parser('open', aliases=ALIASES['open'])
+    series_subparsers.add_parser(
+        'open', aliases=ALIASES['open'],
+        help='Open a series in patchwork, in a web browser')
     pat = series_subparsers.add_parser(
-        'patches', epilog='Show a list of patches and optional details')
+        'patches', epilog='Show a list of patches and optional details',
+        help='Show the patches in a series')
     pat.add_argument('-t', '--commit', action='store_true',
                      help='Show the commit and diffstat')
     pat.add_argument('-p', '--patch', action='store_true',
                      help='Show the patch body')
 
-    prog = series_subparsers.add_parser('progress',
-                                        aliases=ALIASES['progress'])
+    prog = series_subparsers.add_parser(
+        'progress', aliases=ALIASES['progress'],
+        help='Show the upstream progress of one or all series')
     prog.add_argument('-a', '--show-all-versions', action='store_true',
                       help='Show all series versions, not just the latest')
     prog.add_argument('-l', '--list-patches', action='store_true',
                       help='List patch subject and status')
     _add_archived(prog)
 
-    ren = series_subparsers.add_parser('rename')
+    ren = series_subparsers.add_parser(
+        'rename', help='Rename a series')
     ren.add_argument('-N', '--new-name', help='New name for the series')
 
     rev = series_subparsers.add_parser(
@@ -389,26 +413,35 @@ def add_series_subparser(subparsers):
                      help="Extra context for the review agent, or '@path' "
                           'to read it from a file')
 
-    series_subparsers.add_parser('rm')
+    series_subparsers.add_parser(
+        'rm', help='Remove a series, with all its versions')
 
-    snotes = series_subparsers.add_parser('save-notes')
+    snotes = series_subparsers.add_parser(
+        'save-notes', help='Store review-handling notes for a series')
     snotes.add_argument(
         'notes_file', nargs='?', default='review-notes.txt',
         help='Path to the review notes file (default: review-notes.txt)')
 
-    series_subparsers.add_parser('show-notes')
+    series_subparsers.add_parser(
+        'show-notes',
+        help='Show the stored review-handling notes for a series')
 
-    sup = series_subparsers.add_parser('set-upstream')
+    sup = series_subparsers.add_parser(
+        'set-upstream', help='Set the upstream for a series')
     sup.add_argument('upstream_name', nargs='?',
                      help='Name of the upstream for this series')
-    series_subparsers.add_parser('rm-version', aliases=ALIASES['rm-version'])
+    series_subparsers.add_parser(
+        'rm-version', aliases=ALIASES['rm-version'],
+        help='Remove one version of a series')
 
-    scan = series_subparsers.add_parser('scan')
+    scan = series_subparsers.add_parser(
+        'scan', help="Update the database from a series' branch")
     _add_mark(scan)
     _add_allow_unmarked(scan)
     _upstream_add(scan)
 
-    ssend = series_subparsers.add_parser('send')
+    ssend = series_subparsers.add_parser(
+        'send', help='Send a series, then find its patchwork link')
     add_send_args(ssend)
     ssend.add_argument(
         '--no-autolink', action='store_false', default=True, dest='autolink',
@@ -416,20 +449,27 @@ def add_series_subparser(subparsers):
         'so it is not autolinked')
     _add_wait(ssend, 120)
 
-    setl = series_subparsers.add_parser('set-link')
+    setl = series_subparsers.add_parser(
+        'set-link', help='Set the patchwork link for a series')
     _add_update(setl)
 
     setl.add_argument(
         'link', help='Link to use, i.e. patchwork series number (e.g. 452329)')
-    stat = series_subparsers.add_parser('status', aliases=ALIASES['status'])
+    stat = series_subparsers.add_parser(
+        'status', aliases=ALIASES['status'],
+        help='Show review tags and comments from patchwork')
     _add_show_comments(stat)
     _add_show_cover_comments(stat)
 
-    series_subparsers.add_parser('summary')
+    series_subparsers.add_parser(
+        'summary', help='Show a summary of the state of each series')
 
-    series_subparsers.add_parser('unarchive', aliases=ALIASES['unarchive'])
+    series_subparsers.add_parser(
+        'unarchive', aliases=ALIASES['unarchive'],
+        help='Restore an archived series and its branches')
 
-    unm = series_subparsers.add_parser('unmark')
+    unm = series_subparsers.add_parser(
+        'unmark', help='Remove Change-Id tags from the commits of a series')
     _add_allow_unmarked(unm)
 
     ver = series_subparsers.add_parser(
@@ -461,7 +501,10 @@ def add_send_subparser(subparsers):
         '--cc-cmd', dest='cc_cmd', type=str, action='store',
         default=None, help='Output cc list for patch file (used by git)')
     add_send_args(send)
-    send.add_argument('patchfiles', nargs='*')
+    send.add_argument(
+        'patchfiles', nargs='*',
+        help='With --cc-cmd, the patch to list the Cc addresses for (used '
+        'when git send-email runs patman)')
     return send
 
 
@@ -505,7 +548,8 @@ def add_upstream_subparser(subparsers):
         ['set', 'us'],
     ]
     upstream_subparsers = upstream.add_subparsers(dest='subcmd')
-    uadd = upstream_subparsers.add_parser('add')
+    uadd = upstream_subparsers.add_parser(
+        'add', help='Add an upstream')
     uadd.add_argument('remote_name',
                       help="Git remote name used for this upstream, e.g. 'us'")
     uadd.add_argument(
@@ -530,12 +574,15 @@ def add_upstream_subparser(subparsers):
     uadd.add_argument(
         'project_name', nargs='?',
         help="Patchwork project name, e.g. 'U-Boot'")
-    udel = upstream_subparsers.add_parser('delete')
+    udel = upstream_subparsers.add_parser(
+        'delete', help='Remove an upstream')
     udel.add_argument(
         'remote_name',
         help="Git remote name used for this upstream, e.g. 'us'")
-    upstream_subparsers.add_parser('ls', aliases=['list'])
-    uset = upstream_subparsers.add_parser('set')
+    upstream_subparsers.add_parser(
+        'ls', aliases=['list'], help='List the upstreams')
+    uset = upstream_subparsers.add_parser(
+        'set', help='Change the settings of an upstream')
     uset.add_argument('remote_name',
                       help="Git remote name used for this upstream, e.g. 'us'")
     uset.add_argument(
@@ -559,7 +606,8 @@ def add_upstream_subparser(subparsers):
     uset.add_argument(
         '--tags', action='store_true', default=None,
         help='Enable subject-tag alias processing for this upstream')
-    udef = upstream_subparsers.add_parser('default')
+    udef = upstream_subparsers.add_parser(
+        'default', help='Show, set or unset the default upstream')
     udef.add_argument('-u', '--unset', action='store_true',
                       help='Unset the default upstream')
     udef.add_argument('remote_name', nargs='?',
@@ -579,21 +627,23 @@ def add_workflow_subparser(subparsers):
     workflow = subparsers.add_parser('workflow', aliases=ALIASES['workflow'],
                                      help='Manage workflow items')
     workflow_subparsers = workflow.add_subparsers(dest='subcmd')
-    todo = workflow_subparsers.add_parser('todo')
+    todo = workflow_subparsers.add_parser(
+        'todo', help='Mark a series to come back to in some days')
     todo.add_argument('-s', '--series', help='Name of series')
     todo.add_argument('days', nargs='?', type=int, default=14,
                       help='Number of days until due (default: 14)')
     todo.add_argument('--clear', action='store_true',
                       help='Clear the todo marker instead of setting it')
 
-    tlist = workflow_subparsers.add_parser('todo-list',
-                                           aliases=ALIASES['todo-list'])
+    tlist = workflow_subparsers.add_parser(
+        'todo-list', aliases=ALIASES['todo-list'],
+        help='List the series marked as todo')
     tlist.add_argument('--all', action='store_true', dest='show_all',
                        help='Show all scheduled todos, not just due ones')
 
-    wlist = workflow_subparsers.add_parser('list',
-                                           aliases=[*ALIASES['workflow-list'],
-                                                    'ls'])
+    wlist = workflow_subparsers.add_parser(
+        'list', aliases=[*ALIASES['workflow-list'], 'ls'],
+        help='List workflow entries, such as when each series was sent')
     wlist.add_argument('-a', '--all', action='store_true', dest='show_all',
                        help='Include archived entries')
     return workflow
@@ -883,7 +933,7 @@ def setup_parser():
         help='Preserve and display test-created directories')
     parser.add_argument(
         '-H', '--full-help', action='store_true', dest='full_help',
-        default=False, help='Display the README file')
+        default=False, help='Display the full manual')
 
     subparsers = parser.add_subparsers(dest='cmd')
     add_send_subparser(subparsers)
