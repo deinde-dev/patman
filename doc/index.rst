@@ -33,6 +33,7 @@
 
    database
    serve-protocol
+   review-internals
 
 .. toctree::
    :maxdepth: 1

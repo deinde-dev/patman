@@ -117,6 +117,20 @@ Here is a sample 'progress' view:
   :width: 800
   :alt: Patman showing the progress view
 
+Review notes
+------------
+
+The ``handle-reviews`` workflow produces a ``review-notes.txt`` file
+describing how feedback was addressed. Store it in the database so
+future versions can reference it::
+
+    patman series save-notes [notes-file]
+
+The default filename is ``review-notes.txt``. Display notes from all
+previous versions::
+
+    patman series show-notes
+
 Following up
 ------------
 
