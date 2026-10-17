@@ -7,6 +7,7 @@
 import asyncio
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -360,6 +361,13 @@ class CseriesTester(unittest.TestCase, TestCommon):
         was_open = self.db_close()
         args = cmdline.parse_args(['-D'] + list(argv), config_fname=False)
         exit_code = control.do_patman(args, self.tmpdir, pwork, cser)
-        self.assertEqual(expect_ret, exit_code)
+        if exit_code != expect_ret:
+            # Show what patman said, which is usually captured, so that a
+            # failure in another environment can be understood
+            out = ''.join(getattr(stream, 'getvalue', str)()
+                          for stream in (sys.stdout, sys.stderr))
+            self.fail(f"'patman {' '.join(argv)}' gave exit code "
+                      f'{exit_code} rather than {expect_ret}; its output '
+                      f'ended:\n{out[-3000:]}')
         if was_open:
             self.db_open()
