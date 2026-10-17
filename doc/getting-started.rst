@@ -140,9 +140,11 @@ relay email the series back to you only, not to the list or anyone copied::
 
     patman send --reflect
 
-When that looks right, ``patman send`` sends it for real. To use ``git
-send-email`` for a single run instead, add ``--no-relay``. More details are in
-'Sending through a web relay' in the manual.
+When that looks right, ``patman send`` sends it for real. Unlike
+``git send-email``, the relay does not open an editor or ask before each
+message, so check the dry run first. To use ``git send-email`` for a single
+run instead, add ``--no-relay``. More details are in 'Sending through a web
+relay' in the manual.
 
 Setting up the tree
 -------------------

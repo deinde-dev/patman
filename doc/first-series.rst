@@ -192,8 +192,35 @@ When the dry run looks right, send the series::
 
     patman send
 
-This runs the ``git send-email`` command shown above, which sends the
-cover letter and the three patches as one thread.
+This runs the ``git send-email`` command shown above. Because of
+``--annotate``, git first opens the cover letter and the patches in your
+editor (set by ``core.editor`` or ``$EDITOR``), as a last chance to read
+or change them. Save and close the editor to carry on.
+
+git then shows each message's headers in turn and asks before sending it::
+
+    Send this email? ([y]es|[n]o|[e]dit|[q]uit|[a]ll):
+
+The answers are:
+
+``y``
+    send this message
+``n``
+    skip this message, but carry on with the rest
+``e``
+    open this message in the editor again, then ask again
+``q``
+    stop, without sending this message or any after it
+``a``
+    send this message and all the rest without asking again
+
+Answering ``a`` at the cover letter sends the whole series. Whether git asks
+is controlled by the ``sendemail.confirm`` setting; see
+``git help send-email``. The four messages go out as one thread, with each
+patch a reply to the cover letter.
+
+If you are sending through the web relay (see :doc:`getting-started`), there
+is no editor and no question: ``patman send`` posts the whole series at once.
 
 What happened next
 ------------------
