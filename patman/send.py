@@ -395,7 +395,7 @@ def send(args, git_dir=None, cwd=None):
         print(f"Using sendemail identity '{identity}'")
 
     its_a_go = ok or args.ignore_errors
-    cmd, num_sent = email_patches(
+    _, num_sent = email_patches(
         col, series, cover_fname, patch_files, args.process_tags,
         its_a_go, args.ignore_bad_tags, args.add_maintainers,
         args.get_maintainer_script, args.limit, args.dry_run,

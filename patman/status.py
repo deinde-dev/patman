@@ -10,8 +10,6 @@ collected from patchwork.
 
 import asyncio
 from collections import defaultdict
-import concurrent.futures
-from itertools import repeat
 
 import aiohttp
 import pygit2
@@ -401,9 +399,7 @@ def find_link_and_show_status(series, branch, url, dest_branch, force,
         show_cover_comments (bool): True to show cover letter comments
         single_thread (bool): True to use a single thread for patchwork
     """
-    from patman import patchstream
     from patman.patchwork import Patchwork
-    from u_boot_pylib import tout
 
     _, version = patchstream.split_name_version(branch)
     if version is None:

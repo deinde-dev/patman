@@ -19,7 +19,6 @@ import os
 import shutil
 import subprocess
 
-from u_boot_pylib import tout
 
 # Default board config to build for analysis (host build, no toolchain)
 DEFAULT_DEFCONFIG = 'sandbox_defconfig'

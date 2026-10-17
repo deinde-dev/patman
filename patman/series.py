@@ -15,7 +15,6 @@ from patman import get_maintainer
 from patman import settings
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
-from u_boot_pylib import tools
 
 # Series-xxx tags that we understand
 valid_series = ['to', 'cc', 'version', 'changes', 'prefix', 'notes', 'name',
