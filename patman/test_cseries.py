@@ -154,35 +154,35 @@ class TestCseries(unittest.TestCase, TestCommon):
             captured.update(kwargs)
             return kwargs
 
-        with mock.patch.object(review.core, 'ClaudeAgentOptions',
+        with mock.patch.object(review.common, 'ClaudeAgentOptions',
                                side_effect=fake_opts):
             # No model chosen: nothing is added, SDK default is used
-            with mock.patch.object(review.core, '_AGENT_MODEL', None):
-                review.core._agent_options(allowed_tools=[])
+            with mock.patch.object(review.common, '_AGENT_MODEL', None):
+                review.common.agent_options(allowed_tools=[])
                 self.assertNotIn('model', captured)
 
             # A chosen model is passed through
-            with mock.patch.object(review.core, '_AGENT_MODEL', 'sonnet'):
-                review.core._agent_options(allowed_tools=[])
+            with mock.patch.object(review.common, '_AGENT_MODEL', 'sonnet'):
+                review.common.agent_options(allowed_tools=[])
                 self.assertEqual('sonnet', captured.get('model'))
 
                 # An explicit model wins over the run-wide default
-                review.core._agent_options(model='opus')
+                review.common.agent_options(model='opus')
                 self.assertEqual('opus', captured.get('model'))
 
     def test_agent_options_cli_path(self):
         """_agent_options uses the installed claude, if any"""
-        with mock.patch.object(review.core, 'ClaudeAgentOptions',
+        with mock.patch.object(review.common, 'ClaudeAgentOptions',
                                side_effect=lambda **kw: kw):
             with mock.patch('shutil.which', return_value='/bin/claude'):
                 self.assertEqual('/bin/claude',
-                                 review.core._agent_options()['cli_path'])
-                self.assertEqual('/x/claude', review.core._agent_options(
+                                 review.common.agent_options()['cli_path'])
+                self.assertEqual('/x/claude', review.common.agent_options(
                     cli_path='/x/claude')['cli_path'])
 
             # With no installed claude, the SDK picks its bundled one
             with mock.patch('shutil.which', return_value=None):
-                self.assertNotIn('cli_path', review.core._agent_options())
+                self.assertNotIn('cli_path', review.common.agent_options())
 
     def test_review_list_models(self):
         """--list-models prints the accepted aliases and exits cleanly"""
@@ -5703,7 +5703,7 @@ Date:   .*
                          (replies[0]['message_id'], replies[0]['references'],
                           replies[0]['body']))
 
-        ctx = review.core.ReviewContext(None, cser, {})
+        ctx = review.common.ReviewContext(None, cser, {})
         ctx.reviewer_name = 'Simon Glass'
         ctx.reviewer_email = 'sjg@chromium.org'
         with mock.patch.object(review.core, 'handle_reply_sync',
@@ -5994,7 +5994,7 @@ Date:   .*
                                side_effect=mock_agent), \
                 mock.patch.object(review.core.claude_mod, 'check_available',
                                   return_value=True), \
-                mock.patch.object(review.core, 'ClaudeAgentOptions',
+                mock.patch.object(review.common, 'ClaudeAgentOptions',
                                   mock.MagicMock()), \
                 mock.patch.object(review.core, '_review_commits',
                                   return_value=['abc1 dm: Fix it']), \
@@ -6145,7 +6145,7 @@ Date:   .*
         git(work, 'checkout', '-q', '-b', 'local')
         local = commit(work, 'local only')
 
-        ctx = review.core.ReviewContext(None, None, {})
+        ctx = review.common.ReviewContext(None, None, {})
         ctx.main_repo = work
 
         def base(text):
@@ -6559,7 +6559,7 @@ Date:   .*
                          author_name='', author_email='', date='', signoff=None,
                          diffstat=None):
         """Build a ReviewContext for testing format_review_email()"""
-        from patman.review.core import ReviewContext
+        from patman.review.common import ReviewContext
 
         ctx = ReviewContext(None, None,
             {'submitter': {'name': author_name, 'email': author_email},
@@ -6622,7 +6622,7 @@ VERDICT: skip"""
         loop = asyncio.new_event_loop()
         with mock.patch.object(review_mod.core.claude_mod, 'run_agent_collect',
                                side_effect=mock_agent), \
-             mock.patch.object(review_mod.core, 'ClaudeAgentOptions',
+             mock.patch.object(review.common, 'ClaudeAgentOptions',
                                mock.MagicMock()), \
              mock.patch.object(review_mod.core, '_build_review_prompt',
                                return_value='prompt'), \
@@ -6702,7 +6702,8 @@ VERDICT: skip"""
 
     def test_review_draft_location(self):
         """The draft summary names the branch and series link"""
-        from patman.review.core import _draft_location, ReviewContext
+        from patman.review.core import _draft_location
+        from patman.review.common import ReviewContext
 
         ctx = ReviewContext(None, None, {'id': 511354})
         ctx.branch_name = 'rockchip-fixes'
@@ -6873,7 +6874,7 @@ VERDICT: skip"""
     def test_review_aligns_by_subject(self):
         """Test reviews attach to the patchwork patch by subject, not order"""
         from patman import review as review_mod
-        from patman.review.core import ReviewContext
+        from patman.review.common import ReviewContext
 
         ctx = ReviewContext(None, None, {'patches': [
             {'name': '[v2,1/3] alpha'},
@@ -7410,7 +7411,7 @@ VERDICT: skip"""
              patch.object(review_mod.core.claude_mod, 'run_agent_collect',
                           side_effect=mock_agent), \
              patch.object(
-                 review_mod.core, 'ClaudeAgentOptions', MagicMock()), \
+                 review_mod.common, 'ClaudeAgentOptions', MagicMock()), \
              terminal.capture():
             result = loop.run_until_complete(
                 review_mod.core.refine_reviews({1: review_with_comments}))

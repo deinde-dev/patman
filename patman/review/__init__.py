@@ -10,5 +10,6 @@ This package provides 'patman review' and 'patman series review'. The main
 flow is in the core module.
 """
 
+from patman.review import common
 from patman.review import core
 from patman.review.core import do_review, review_series

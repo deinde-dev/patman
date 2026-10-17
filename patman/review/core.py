@@ -13,7 +13,6 @@ a Claude agent, and (in later stages) reviews each patch and creates
 Gmail draft replies.
 """
 
-import asyncio
 from collections import namedtuple
 from concurrent import futures
 from datetime import datetime, timedelta
@@ -43,146 +42,7 @@ from patman import database
 from patman import gmail
 from patman import patchstream
 from patman import workflow
-
-try:
-    from claude_agent_sdk import ClaudeAgentOptions
-except ImportError:
-    ClaudeAgentOptions = None
-
-# Claude model to use for the current review run, or None to let the SDK
-# use whatever model the user's Claude default resolves to. Set once at the
-# start of do_review() from --model / the 'model' setting, then read by
-# _agent_options() so every agent in the run uses the same model
-_AGENT_MODEL = None
-
-
-def _run(coro):
-    """Run a coroutine on the event loop and wait for it to finish
-
-    Args:
-        coro (coroutine): Coroutine to run
-
-    Returns:
-        The coroutine's result
-    """
-    return asyncio.get_event_loop().run_until_complete(coro)
-
-
-def _pw_call(method, *args):
-    """Call a Patchwork method which needs a client session, and wait for it
-
-    Args:
-        method (coroutine function): Patchwork method, which takes the client
-            session as its first argument
-        args: Further arguments for the method
-
-    Returns:
-        The method's result
-    """
-    async def _call():
-        async with aiohttp.ClientSession() as client:
-            return await method(client, *args)
-    return _run(_call())
-
-
-def _agent_options(**kwargs):
-    """Create ClaudeAgentOptions with the selected review model applied
-
-    A model chosen with --model (or the 'model' setting) overrides the
-    user's global Claude default for the whole review run, so a review
-    always uses the intended model even if the user's default is something
-    else. With no model selected the SDK default is used unchanged.
-
-    The SDK prefers the Claude Code CLI bundled with it, which may be too
-    old to use the current models. Use the installed 'claude' instead, if
-    there is one, so that updating Claude Code is enough to keep reviews
-    working.
-
-    Args:
-        kwargs: Fields to pass to ClaudeAgentOptions
-
-    Returns:
-        ClaudeAgentOptions: Configured options
-    """
-    if _AGENT_MODEL:
-        kwargs.setdefault('model', _AGENT_MODEL)
-    cli = shutil.which('claude')
-    if cli:
-        kwargs.setdefault('cli_path', cli)
-    return ClaudeAgentOptions(**kwargs)
-
-
-class ReviewContext:  # pylint: disable=R0902
-    """Common context for review operations
-
-    Attributes:
-        reviewer_name (str): Reviewer's name
-        reviewer_email (str): Reviewer's email
-        series_data (dict): Series data from patchwork
-        main_repo (str): Top-level of the user's main checkout (where
-            the .git dir lives and where shared refs are resolved)
-        repo_path (str): Path to the per-review worktree (used as cwd
-            for apply/build/agent)
-        signoff (str or None): Sign-off text for reviews with comments
-        spelling (str): Spelling convention
-        comments_path (str or None): Path to existing patchwork comments
-        pwork (Patchwork or None): Patchwork instance
-        cser (Cseries or None): Open cseries instance
-        series_id (int or None): Series database ID
-        svid (int or None): ser_ver database ID
-        version (int or None): Series version number
-        branch_name (str or None): Branch with applied patches
-        upstream_branch (str or None): Upstream branch ref
-        patch_count (int or None): Number of patches
-        patch_selection (set of int or None): Patch indices to review
-            (None means all)
-        context (str or None): Extra user-supplied context to pass to
-            the review agent (e.g. 'this is RFC, ignore whitespace')
-    """
-
-    def __init__(self, pwork, cser, series_data):
-        self.pwork = pwork
-        self.cser = cser
-        self.series_data = series_data
-        self.reviewer_name = None
-        self.reviewer_email = None
-        self.main_repo = None
-        self.repo_path = None
-        self.signoff = None
-        self.spelling = 'British'
-        self.comments_path = None
-        self.series_id = None
-        self.svid = None
-        self.version = None
-        self.branch_name = None
-        self.upstream_branch = None
-        self.patch_count = None
-        self.patch_selection = None
-        self.cover_content = None
-        self.previous_reviews = {}
-        self.diffstat = None
-        self.context = None
-        self.coverity_text = None
-
-    @property
-    def reviewer_tag(self):
-        """Get 'Name <email>' string for the reviewer"""
-        return f'{self.reviewer_name} <{self.reviewer_email}>'
-
-    @property
-    def author_name(self):
-        """Get the series submitter's name"""
-        return self.series_data.get('submitter', {}).get('name', '')
-
-    @property
-    def author_email(self):
-        """Get the series submitter's email"""
-        return self.series_data.get('submitter', {}).get('email', '')
-
-    @property
-    def date(self):
-        """Get the series date string"""
-        return self.series_data.get('date', '')
+from patman.review import common
 
 
 async def fetch_mbox(pwork, link):
@@ -312,7 +172,7 @@ async def apply_series(pwork, link, branch_name, upstream_branch,
 
     # Build the prompt and run the agent
     prompt = _build_apply_prompt(mbox_path, branch_name, upstream_branch)
-    options = _agent_options(
+    options = common.agent_options(
         allowed_tools=['Bash', 'Read', 'Grep', 'Edit', 'Write'],
         cwd=repo_path, max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
 
@@ -1159,7 +1019,7 @@ Match this voice when editing the reviews:
     prompt = _REFINE_REVIEWS_PROMPT.format(drafts=drafts_text,
         voice_section=voice_section, spelling=spelling)
 
-    options = _agent_options(allowed_tools=[],
+    options = common.agent_options(allowed_tools=[],
         max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
 
     tout.notice('Refining review drafts...')
@@ -1180,7 +1040,7 @@ Match this voice when editing the reviews:
 
 def refine_reviews_sync(review_bodies, spelling='British'):
     """Synchronous wrapper for refine_reviews()"""
-    return _run(refine_reviews(review_bodies, spelling))
+    return common.run(refine_reviews(review_bodies, spelling))
 
 
 def _format_comment(what, comment):
@@ -1230,7 +1090,7 @@ def _write_comments_file(series_data, pwork):
 
         return all_comments
 
-    comments = _run(_fetch_comments())
+    comments = common.run(_fetch_comments())
 
     if not comments:
         return None
@@ -1257,7 +1117,7 @@ async def _run_cover_review(ctx, all_commits):
     tout.notice('Reviewing series (cover letter)...')
     prompt = _build_cover_review_prompt(
         ctx, all_commits, previous_review=ctx.previous_reviews.get(0))
-    options = _agent_options(
+    options = common.agent_options(
         allowed_tools=['Bash', 'Read', 'Grep'], cwd=ctx.repo_path,
         max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
     success, log = await claude_mod.run_agent_collect(prompt, options)
@@ -1310,7 +1170,7 @@ async def _run_patch_review(ctx, cmt, seq, all_commits):
     previous_review = ctx.previous_reviews.get(seq)
     prompt = _build_review_prompt(ctx, cmt.hash, seq, all_commits,
                                   previous_review)
-    options = _agent_options(allowed_tools=['Bash', 'Read', 'Grep'],
+    options = common.agent_options(allowed_tools=['Bash', 'Read', 'Grep'],
         cwd=ctx.repo_path, max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
     success, log = await claude_mod.run_agent_collect(prompt, options)
     if not success or not log.strip():
@@ -1341,30 +1201,6 @@ async def _review_single_patch(ctx, cmt, seq, all_commits):
     if verdict != 'approved' and not comments:
         return None
     return format_review_email(ctx, greeting, verdict, comments, commit_msg)
-
-
-def parse_patch_selection(spec):
-    """Parse a patch selection string into a set of patch numbers
-
-    Supports comma-separated numbers and ranges, e.g. '1,3,5' or '2-7'
-    or '1,3-5,8'.
-
-    Args:
-        spec (str or None): Selection string, or None for all patches
-
-    Returns:
-        set of int or None: Selected patch numbers, or None for all
-    """
-    if not spec:
-        return None
-    result = set()
-    for part in spec.split(','):
-        if '-' in part:
-            start, end = part.split('-', 1)
-            result.update(range(int(start), int(end) + 1))
-        else:
-            result.add(int(part))
-    return result
 
 
 async def review_patches(ctx):
@@ -1458,17 +1294,17 @@ def review_patches_sync(ctx):
     Returns:
         dict: Map of patch index (1-based) to review body text
     """
-    return _run(review_patches(ctx))
+    return common.run(review_patches(ctx))
 
 
 def _run_patch_review_sync(ctx, cmt, seq, all_commits):
     """Synchronous wrapper for _run_patch_review()"""
-    return _run(_run_patch_review(ctx, cmt, seq, all_commits))
+    return common.run(_run_patch_review(ctx, cmt, seq, all_commits))
 
 
 def _run_cover_review_sync(ctx, all_commits):
     """Synchronous wrapper for _run_cover_review()"""
-    return _run(_run_cover_review(ctx, all_commits))
+    return common.run(_run_cover_review(ctx, all_commits))
 
 
 def _format_findings(verdict, comments):
@@ -1556,7 +1392,7 @@ def review_series(cser, series_id, svid, version, branch, series,
         return
 
     repo = gitutil.get_top_level()
-    ctx = ReviewContext(None, cser, {})
+    ctx = common.ReviewContext(None, cser, {})
     ctx.main_repo = repo
     ctx.repo_path = repo
     ctx.branch_name = branch
@@ -1622,7 +1458,7 @@ def apply_series_sync(pwork, link, branch_name, upstream_branch, repo_path):
     Returns:
         tuple: (success, branch_name)
     """
-    return _run(apply_series(
+    return common.run(apply_series(
         pwork, link, branch_name, upstream_branch, repo_path))
 
 
@@ -1644,7 +1480,7 @@ def search_patch(pwork, title):
     """
     from urllib.parse import quote_plus
 
-    results = _pw_call(pwork.search_patches, quote_plus(title, safe=':'))
+    results = common.pw_call(pwork.search_patches, quote_plus(title, safe=':'))
 
     if not results:
         raise ValueError(f"No patch found matching '{title}'")
@@ -1674,7 +1510,7 @@ def lookup_patch_series(pwork, patch_id):
     Raises:
         ValueError: if the patch or its series cannot be found
     """
-    data = _pw_call(pwork.get_patch, patch_id)
+    data = common.pw_call(pwork.get_patch, patch_id)
 
     series_list = data.get('series', [])
     if not series_list:
@@ -1717,7 +1553,7 @@ def search_series(pwork, title, version=None):
     if not pwork.proj_id:
         raise ValueError('Patchwork project not configured; use '
             "'patman patchwork set-project' or provide -l <link>")
-    results = _pw_call(pwork.query_series, title)
+    results = common.pw_call(pwork.query_series, title)
 
     if not results:
         raise ValueError(f"No series found matching '{title}'")
@@ -1804,7 +1640,7 @@ def create_drafts(ctx, args, review_bodies, review_ids):
                 data = await ctx.pwork.get_patch(client, str(patch['id']))
                 patch_headers[i + 1] = data.get('headers', {})
 
-    _run(_fetch_patch_headers())
+    common.run(_fetch_patch_headers())
 
     sender = None
     if ctx.reviewer_email and args.gmail_account:
@@ -1823,37 +1659,6 @@ def create_drafts(ctx, args, review_bodies, review_ids):
                 ctx.cser.db.review_set_draft_id(review_ids[seq], draft_id)
         ctx.cser.commit()
         tout.notice(f'Created {len(draft_ids)} Gmail draft(s){where}')
-
-
-def _parse_reviewer(args):
-    """Extract reviewer name and email from args
-
-    Uses --reviewer if provided, otherwise falls back to git config.
-
-    Args:
-        args (Namespace): Command-line arguments
-
-    Returns:
-        tuple: (reviewer_name, reviewer_email)
-
-    Raises:
-        ValueError: if the reviewer identity cannot be determined
-    """
-
-    if args.reviewer:
-        match = re.match(r'(.+?)\s*<(.+?)>', args.reviewer)
-        if not match:
-            raise ValueError(
-                f"Invalid reviewer format '{args.reviewer}';"
-                " use 'Name <email>'")
-        return match.group(1).strip(), match.group(2).strip()
-    name = gitutil.get_default_user_name()
-    email = gitutil.get_default_user_email()
-    if not name or not email:
-        raise ValueError(
-            'Cannot determine reviewer identity; set git user.name'
-            ' and user.email, or use --reviewer')
-    return name, email
 
 
 def _show_reviews(reviews, series_data):
@@ -1917,7 +1722,7 @@ def _do_learn_voice(args, pwork):
                     return proj.get('list_email')
             return None
 
-        list_email = _run(_get_list_email())
+        list_email = common.run(_get_list_email())
 
     if args.reviewer:
         match = re.match(r'(.+?)\s*<(.+?)>', args.reviewer)
@@ -2293,8 +2098,8 @@ def _make_reply_ctx(args, cser):
     Return:
         ReviewContext: Context
     """
-    ctx = ReviewContext(None, cser, {})
-    ctx.reviewer_name, ctx.reviewer_email = _parse_reviewer(args)
+    ctx = common.ReviewContext(None, cser, {})
+    ctx.reviewer_name, ctx.reviewer_email = common.parse_reviewer(args)
     ctx.repo_path = gitutil.get_top_level()
     ctx.signoff = getattr(args, 'signoff', '') or None
     if ctx.signoff:
@@ -2494,7 +2299,7 @@ def _fetch_series(pwork, link):
     Raises:
         ValueError: if the series is incomplete
     """
-    series_data = _pw_call(pwork.get_series, link)
+    series_data = common.pw_call(pwork.get_series, link)
 
     series_name = series_data.get('name', f'series-{link}')
     version = series_data.get('version', 1)
@@ -2573,7 +2378,7 @@ def _draft_stored_reviews(args, reviews, series_data, pwork, cser):
         pwork (Patchwork): Patchwork instance
         cser (Cseries): Cseries instance
     """
-    sel = parse_patch_selection(getattr(args, 'patches', None))
+    sel = common.parse_patch_selection(getattr(args, 'patches', None))
     need_draft = [rev for rev in reviews
                   if _needs_draft(rev, args.redraft) and
                   (not sel or rev.seq in sel)]
@@ -2594,7 +2399,7 @@ def _draft_stored_reviews(args, reviews, series_data, pwork, cser):
             rname = match.group(1).strip()
             remail = match.group(2).strip()
             break
-    ctx = ReviewContext(pwork, cser, series_data)
+    ctx = common.ReviewContext(pwork, cser, series_data)
     ctx.reviewer_name = rname or ''
     ctx.reviewer_email = remail or ''
     create_drafts(ctx, args, review_bodies, review_ids)
@@ -2637,7 +2442,7 @@ def _do_send(args, cser, link):
     if not existing:
         raise ValueError(f'Series {link} has not been reviewed')
     _, name, version, svid = existing
-    sel = parse_patch_selection(args.patches)
+    sel = common.parse_patch_selection(args.patches)
     reviews = sorted((rev for rev in cser.db.review_get_for_version(svid)
                       if rev.status == database.REVIEW_DRAFT and
                       rev.draft_id and (not sel or rev.seq in sel)),
@@ -2799,7 +2604,7 @@ async def revise_reviews(ctx, reviews, note, commits):
         prompt = _REVISE_PROMPT.format(
             note=note, reviews_path=reviews_path, patches=patches,
             tag=ctx.reviewer_tag, spelling=ctx.spelling)
-        options = _agent_options(
+        options = common.agent_options(
             allowed_tools=['Bash', 'Read', 'Grep'], cwd=ctx.repo_path,
             max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
         tout.notice('Revising reviews...')
@@ -2814,7 +2619,7 @@ async def revise_reviews(ctx, reviews, note, commits):
 
 def revise_reviews_sync(ctx, reviews, note, commits):
     """Synchronous wrapper for revise_reviews()"""
-    return _run(revise_reviews(ctx, reviews, note, commits))
+    return common.run(revise_reviews(ctx, reviews, note, commits))
 
 
 def _do_revise(args, pwork, cser, link):
@@ -2837,7 +2642,7 @@ def _do_revise(args, pwork, cser, link):
     if not existing:
         raise ValueError(f'Series {link} has not been reviewed')
     _, name, version, svid = existing
-    sel = parse_patch_selection(args.patches)
+    sel = common.parse_patch_selection(args.patches)
     reviews = [rev for rev in cser.db.review_get_for_version(svid)
                if rev.status not in (database.REVIEW_SENT,
                                      database.REVIEW_REPLIED) and
@@ -2846,8 +2651,8 @@ def _do_revise(args, pwork, cser, link):
         raise ValueError(f"No unsent reviews to revise in '{name}' "
                          f'v{version}')
 
-    ctx = ReviewContext(pwork, cser, {})
-    ctx.reviewer_name, ctx.reviewer_email = _parse_reviewer(args)
+    ctx = common.ReviewContext(pwork, cser, {})
+    ctx.reviewer_name, ctx.reviewer_email = common.parse_reviewer(args)
     ctx.repo_path = gitutil.get_top_level()
     ctx.spelling = args.spelling
     ups = pwork.upstream if pwork else None
@@ -2988,7 +2793,7 @@ def _base_text(ctx):
     if not patches:
         return ''
 
-    data = _pw_call(ctx.pwork.get_patch, str(patches[-1]['id']))
+    data = common.pw_call(ctx.pwork.get_patch, str(patches[-1]['id']))
     return f"{data.get('content') or ''}\n{data.get('diff') or ''}"
 
 
@@ -3120,7 +2925,7 @@ def _fetch_cover_content(pwork, series_data):
     if not cover:
         return None
 
-    return _pw_call(pwork.get_cover, cover['id']).get('content', '')
+    return common.pw_call(pwork.get_cover, cover['id']).get('content', '')
 
 
 def _run_coverity(ctx, args):
@@ -3250,7 +3055,7 @@ def _find_or_register(ctx, args, clean_name, link):
         return series_id, svid
 
     # When reviewing specific patches, allow adding to existing reviews
-    patch_sel = parse_patch_selection(args.patches)
+    patch_sel = common.parse_patch_selection(args.patches)
     if patch_sel:
         reviewed_seqs = {r.seq for r in reviews}
         new_seqs = patch_sel - reviewed_seqs
@@ -3298,7 +3103,7 @@ def _get_patch_states(pwork, link):
     Returns:
         list of str: State slug for each patch
     """
-    return _pw_call(pwork.get_series_patch_states, link)
+    return common.pw_call(pwork.get_series_patch_states, link)
 
 
 def _acquire_review_lock(repo, branch_name):
@@ -3385,7 +3190,7 @@ def _review_link(args, pwork, cser, link):
                     f'(patch states: {shown}); use --any-state to review it '
                     'anyway')
 
-        ctx = ReviewContext(pwork, cser, series_data)
+        ctx = common.ReviewContext(pwork, cser, series_data)
         ctx.version = version
         ctx.patch_count = patch_count
 
@@ -3418,8 +3223,8 @@ def _review_link(args, pwork, cser, link):
             tout.notice('Apply-only mode; skipping review')
             return 0
 
-        ctx.patch_selection = parse_patch_selection(args.patches)
-        ctx.reviewer_name, ctx.reviewer_email = _parse_reviewer(args)
+        ctx.patch_selection = common.parse_patch_selection(args.patches)
+        ctx.reviewer_name, ctx.reviewer_email = common.parse_reviewer(args)
         ctx.signoff = args.signoff or None
         if ctx.signoff:
             ctx.signoff = ctx.signoff.replace('\\n', '\n')
@@ -3489,7 +3294,7 @@ def _scan_new_versions(pwork, cser):
                                         latest['id'], received >= total,
                                         active))
 
-    _run(_scan())
+    common.run(_scan())
     return found
 
 
@@ -3863,8 +3668,7 @@ def do_review(args, pwork, cser):
 
     # Fix the model for the whole run, so every agent uses the one chosen
     # with --model / the 'model' setting rather than the user's default
-    global _AGENT_MODEL
-    _AGENT_MODEL = getattr(args, 'model', None)
+    common.set_agent_model(getattr(args, 'model', None))
 
     if args.learn_voice:
         return _do_learn_voice(args, pwork)
@@ -4028,7 +3832,7 @@ async def learn_voice(vp):
     tools.write_file(reviews_path, combined, binary=False)
 
     prompt = _VOICE_PROMPT.format(emails=f'(see file: {reviews_path})')
-    options = _agent_options(allowed_tools=['Read'],
+    options = common.agent_options(allowed_tools=['Read'],
         max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
 
     success, result = await claude_mod.run_agent_collect(prompt, options)
@@ -4052,7 +3856,7 @@ async def learn_voice(vp):
 
 def learn_voice_sync(vp):
     """Synchronous wrapper for learn_voice()"""
-    return _run(learn_voice(vp))
+    return common.run(learn_voice(vp))
 
 
 def get_voice():
@@ -4119,7 +3923,7 @@ async def refine_voice(draft_body, sent_body):
 
     prompt = _REFINE_PROMPT.format(draft_path=draft_path,
         sent_path=sent_path, voice_path=VOICE_PATH)
-    options = _agent_options(allowed_tools=['Read'],
+    options = common.agent_options(allowed_tools=['Read'],
         max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
 
     tout.notice('Analysing draft vs sent differences...')
@@ -4141,7 +3945,7 @@ async def refine_voice(draft_body, sent_body):
 
 def refine_voice_sync(draft_body, sent_body):
     """Synchronous wrapper for refine_voice()"""
-    return _run(refine_voice(draft_body, sent_body))
+    return common.run(refine_voice(draft_body, sent_body))
 
 
 _REPLY_PROMPT = '''You are a U-Boot maintainer. You previously reviewed a
@@ -4225,7 +4029,7 @@ async def handle_reply(ctx, review_body, reply_from, reply_body):
     prompt = _REPLY_PROMPT.format(review_path=review_path,
         reply_path=reply_path, reply_from=reply_from,
         spelling=ctx.spelling)
-    options = _agent_options(allowed_tools=['Bash', 'Read', 'Grep'],
+    options = common.agent_options(allowed_tools=['Bash', 'Read', 'Grep'],
         cwd=ctx.repo_path, max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
 
     success, log = await claude_mod.run_agent_collect(prompt, options)
@@ -4251,7 +4055,7 @@ async def handle_reply(ctx, review_body, reply_from, reply_body):
 
     # Build a context for the reply — the "author" here is the person
     # we are replying to, not the original series submitter
-    reply_ctx = ReviewContext(ctx.pwork, ctx.cser,
+    reply_ctx = common.ReviewContext(ctx.pwork, ctx.cser,
         {'submitter': {'name': reply_name, 'email': reply_email}, 'date': ''})
     reply_ctx.reviewer_name = ctx.reviewer_name
     reply_ctx.reviewer_email = ctx.reviewer_email
@@ -4262,4 +4066,4 @@ async def handle_reply(ctx, review_body, reply_from, reply_body):
 
 def handle_reply_sync(ctx, review_body, reply_from, reply_body):
     """Synchronous wrapper for handle_reply()"""
-    return _run(handle_reply(ctx, review_body, reply_from, reply_body))
+    return common.run(handle_reply(ctx, review_body, reply_from, reply_body))
