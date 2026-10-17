@@ -5945,7 +5945,7 @@ Date:   .*
 
         with mock.patch.object(gmail, 'sync_drafts', side_effect=fake_sync), \
                 mock.patch.object(
-                    review.core, 'refine_voice_sync') as refine, \
+                    review.voice, 'refine_voice_sync') as refine, \
                 terminal.capture() as (out, _):
             review.core._sync_drafts(None, cser)
         self.assertIn('Synced 5 sent, 0 deleted', out.getvalue())
@@ -6865,7 +6865,7 @@ VERDICT: skip"""
         ctx.spelling = 'British'
         ctx.coverity_text = '- RESOURCE_LEAK: drivers/foo.c:42: Handle leaked'
         with mock.patch.object(
-                review_mod.core, 'get_voice', return_value=None):
+                review_mod.voice, 'get_voice', return_value=None):
             prompt = review_mod.core._build_review_prompt(
                 ctx, 'abc1234', 1, [(1, 'abc1234', 'subj')], None)
         self.assertIn('COVERITY', prompt)
@@ -7377,7 +7377,7 @@ VERDICT: skip"""
 
         # Should be returned unchanged without calling the agent
         loop = asyncio.new_event_loop()
-        with patch('patman.review.core.get_voice', return_value=None):
+        with patch('patman.review.voice.get_voice', return_value=None):
             result = loop.run_until_complete(
                 refine_reviews({1: approved}))
         loop.close()
@@ -7407,7 +7407,7 @@ VERDICT: skip"""
         from patman import review as review_mod
 
         loop = asyncio.new_event_loop()
-        with patch.object(review_mod.core, 'get_voice', return_value=None), \
+        with patch.object(review_mod.voice, 'get_voice', return_value=None), \
              patch.object(review_mod.core.claude_mod, 'run_agent_collect',
                           side_effect=mock_agent), \
              patch.object(
