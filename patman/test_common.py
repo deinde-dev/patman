@@ -23,6 +23,25 @@ from patman import control
 from patman import cseries
 
 
+def find_source_dir():
+    """Find patman's source tree, which holds checkpatch.pl and its config
+
+    This is the directory above the patman package, or the current directory,
+    e.g. when a packager runs the tests from the sources after installing
+    patman.
+
+    Returns:
+        str or None: Directory holding scripts/checkpatch.pl and
+            .checkpatch.conf, or None if the sources are not there
+    """
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for path in (here, os.getcwd()):
+        if (os.path.isfile(os.path.join(path, 'scripts', 'checkpatch.pl')) and
+                os.path.isfile(os.path.join(path, '.checkpatch.conf'))):
+            return path
+    return None
+
+
 class TestCommon:
     """Contains common test functions"""
     leb = (b'Lord Edmund Blackadd\xc3\xabr <weasel@blackadder.org>'.
@@ -80,8 +99,17 @@ class TestCommon:
                   allow_colour=False)
         tout.stdout_is_tty = False
 
+        # Run from the source tree, if it is here, so that checkpatch.pl is
+        # the one kept with the sources and reads their .checkpatch.conf,
+        # whichever directory the tests are started from
+        self._old_cwd = os.getcwd()
+        source = find_source_dir()
+        if source:
+            os.chdir(source)
+
     def tearDown(self):
         """Delete the temporary dir"""
+        os.chdir(self._old_cwd)
         self._env.stop()
         if self.preserve_outdirs:
             print(f'Output dir: {self.tmpdir}')
