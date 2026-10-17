@@ -19,6 +19,8 @@ Running the tests
     patman test                 # the whole suite
     patman test <name>          # a single test, e.g. test_series_send
 
+The suite can also be run with ``pytest``.
+
 The suite is self-contained: a pinned ``checkpatch.pl`` and its helper
 files live in ``scripts/`` and ``u_boot_pylib`` is installed from PyPI as
 ``u-boot-pylib`` (https://github.com/deinde-dev/u-boot-pylib), so no
@@ -33,10 +35,15 @@ Building the documentation
     pip install -r doc/requirements.txt
     make -C doc html        # output in doc/_build/html
 
-The manual itself lives in ``patman/patman.rst``; ``doc/`` wraps it for
-Sphinx, so edit the manual there. ``doc/serve-protocol.rst`` describes the
-JSON API provided by ``patman serve``; update it along with any change to
-the API.
+The manual lives in ``patman/``: the introduction in ``patman.rst``, then
+one file for each chapter, such as ``sending.rst`` and ``tags.rst``.
+``control.HELP_FILES`` lists them in order. ``patman -H`` shows them all, and ``doc/`` wraps them for Sphinx, so edit the
+manual there. The command reference in ``doc/reference/`` is generated from
+the argument parser by ``doc/_ext/patman_cmdref.py``, so give each new
+command and option a help string. ``doc/guide/`` holds the step-by-step
+guide. ``doc/database.rst`` describes the database schema; update it along
+with any schema migration. ``doc/serve-protocol.rst`` describes the JSON API
+provided by ``patman serve``; update it along with any change to the API.
 
 Building the package
 --------------------

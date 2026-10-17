@@ -406,6 +406,10 @@ def find_link_and_show_status(series, branch, url, dest_branch, force,
     from u_boot_pylib import tout
 
     _, version = patchstream.split_name_version(branch)
+    if version is None:
+        # The branch name has no version, so use the series' own version,
+        # which get_links() also uses for a link without a version
+        version = int(series.version) if 'version' in series else 1
     links = series.get('links')
     link = series.get_link_for_version(version, links)
     if not link:

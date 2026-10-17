@@ -10,6 +10,15 @@ Unreleased
 
 Added
 ~~~~~
+- A guide in ``doc/guide/`` shows how to use patman step by step with a
+  real U-Boot series which was merged in v2026.07: setting up, sending a
+  first series, checking its status and collecting review tags, sending the
+  next version, tracking it all with ``patman series``, and sending to more
+  than one upstream.
+- ``patman status -C`` shows the comments on the cover letter, as
+  ``patman series status -C`` does.
+- ``patman series add`` sets the series' upstream to the remote which its
+  branch tracks, if that remote is an upstream and ``-S`` is not given.
 - ``patman serve`` runs a web server showing series status, patchwork
   comments, draft reviews and todos on a mobile-friendly page, optionally
   syncing with patchwork periodically. Its JSON API is described in
@@ -58,6 +67,15 @@ Changed
 
 Fixed
 ~~~~~
+- The columns of ``patman series summary`` line up with its header.
+- ``patman status`` finds the patchwork link on a branch whose name has no
+  version number, using the series' own version (from ``Series-version``,
+  or 1), rather than reporting that there is no link for ``vNone``.
+- ``patman status -T`` reads patchwork with a single thread, as its help
+  says; the option is otherwise ignored.
+- ``patman patchwork set-project`` and ``get-project`` use the remote which
+  the current branch tracks, or the only remote, when none is given, rather
+  than always asking for one. The error lists the remotes to choose from.
 - Reviews which have been sent are not drafted again by ``review -d``,
   ``--scan`` or ``--redraft``, and ``--redraft`` only drafts the patches
   chosen with ``-i``.
@@ -120,7 +138,8 @@ Changed
   drafted, and the summary reports how many were.
 - Review comments are no longer hard-wrapped: the agent is told to write
   each paragraph on a single line so the reader's mail client wraps it.
-  Quoted ``> `` lines and indented code are left as they are.
+  Quoted lines (starting with ``>``) and indented code are left as they
+  are.
 - The ``Created N Gmail draft(s)`` line (and the dry-run equivalent) now
   names the review branch and the series link, so it is clear which
   series the drafts belong to.

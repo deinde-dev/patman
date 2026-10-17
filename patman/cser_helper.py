@@ -143,6 +143,27 @@ class CseriesHelper:
             # If a previous test has already checked the schema, just open it
             self.db.open_it()
 
+    def _branch_upstream(self, branch):
+        """Find the upstream which a branch tracks
+
+        Args:
+            branch (str): Name of the branch
+
+        Return:
+            str or None: Name of the remote which the branch tracks, if that
+            remote is a configured upstream, else None
+        """
+        try:
+            us_ref, _ = gitutil.get_upstream(self.gitdir or '.git', branch)
+        except ValueError:
+            return None
+        if not us_ref or '/' not in us_ref or us_ref.startswith('refs/'):
+            return None
+        remote = us_ref.split('/')[0]
+        if remote not in self.db.upstream_get_dict():
+            return None
+        return remote
+
     def _check_null_upstreams(self):
         """Detect and warn about series that have no upstream set
 
@@ -1699,7 +1720,9 @@ class CseriesHelper:
                     'handled-elsewhere']:
             if val in states:
                 state = val
-        state_str, pad = self._build_col(state, base_str=name)
+        # Pad the name to the width of the 'Name' column in the header
+        state_str, _ = self._build_col(state, base_str=name)
+        pad = ' ' * max(17 - len(name), 0)
         marker = ''
         ts = self.db.workflow_get(Wtype.TODO, ser.idnum)
         if ts and ts <= self.get_now().strftime('%Y-%m-%d %H:%M:%S'):

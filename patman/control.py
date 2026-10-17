@@ -21,6 +21,7 @@ except ImportError:
     # for Python 3.6
     import importlib_resources as resources
 
+from u_boot_pylib import command
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
 from u_boot_pylib import tools
@@ -36,6 +37,21 @@ from patman import settings
 from patman import status
 from patman import workflow
 from patman.patchwork import Patchwork
+
+# The parts of the manual, in the order 'patman -H' shows them
+HELP_FILES = ('patman.rst', 'configuration.rst', 'sending.rst',
+              'patchwork.rst', 'tags.rst', 'series.rst', 'review.rst',
+              'serve.rst', 'db.rst')
+
+
+def full_help_text():
+    """Get the text of the whole manual, as shown by 'patman -H'
+
+    Returns:
+        str: The parts of the manual, one after the other
+    """
+    return '\n'.join(resources.files('patman').joinpath(fname).read_text(
+        encoding='utf-8') for fname in HELP_FILES)
 
 
 def setup():
@@ -58,7 +74,8 @@ def do_send(args):
 
 # pylint: disable=R0913,R0917
 def patchwork_status(branch, count, start, end, dest_branch, force,
-                     show_comments, url, single_thread=False):
+                     show_comments, url, single_thread=False,
+                     show_cover_comments=False):
     """Check the status of patches in patchwork
 
     This finds the series in patchwork using the Series-link tag, checks for new
@@ -82,6 +99,8 @@ def patchwork_status(branch, count, start, end, dest_branch, force,
             provides a Series-patchwork-url tag.
         single_thread (bool): True to use a single thread for
             patchwork access
+        show_cover_comments (bool): True to display snippets from the
+            comments on the cover letter
 
     Raises:
         ValueError: if the branch has no Series-link value
@@ -108,8 +127,8 @@ def patchwork_status(branch, count, start, end, dest_branch, force,
         raise ValueError('Branch has no Series-links value')
 
     status.find_link_and_show_status(
-        series, branch, url, dest_branch, force, show_comments, False,
-        single_thread)
+        series, branch, url, dest_branch, force, show_comments,
+        show_cover_comments, single_thread)
 
 
 
@@ -341,6 +360,57 @@ def upstream(args, test_db=None):
         cser.close_database()
 
 
+def _default_remote():
+    """Work out which remote to use when the user does not give one
+
+    This is the remote which the current branch tracks, or else the only
+    remote, if there is just one.
+
+    Returns:
+        tuple:
+            str or None: Remote to use, or None if it is not clear which
+            list of str: Names of all the remotes
+    """
+    try:
+        remotes = command.output('git', 'remote').split()
+    except command.CommandExc:
+        return None, []
+    try:
+        branch = command.output_one_line('git', 'symbolic-ref', '--short',
+                                         'HEAD')
+        remote = command.output_one_line('git', 'config',
+                                         f'branch.{branch}.remote')
+        if remote in remotes:
+            return remote, remotes
+    except command.CommandExc:
+        pass
+    if len(remotes) == 1:
+        return remotes[0], remotes
+    return None, remotes
+
+
+def _get_remote(args):
+    """Get the remote for a patchwork subcommand
+
+    Args:
+        args (Namespace): Arguments to process, using the 'remote' value if
+            the user gave one
+
+    Returns:
+        str: Remote to use
+
+    Raises:
+        ValueError: if no remote is given and it is not clear which to use
+    """
+    if args.remote:
+        return args.remote
+    remote, remotes = _default_remote()
+    if not remote:
+        raise ValueError('Please specify the remote name (remotes: '
+                         f"{', '.join(remotes) or 'none'})")
+    return remote
+
+
 # pylint: disable=R0912
 def patchwork(args, test_db=None, pwork=None):
     """Process a 'patchwork' subcommand
@@ -354,24 +424,20 @@ def patchwork(args, test_db=None, pwork=None):
     try:
         cser.open_database()
         if args.subcmd == 'set-project':
-            if not args.remote:
-                raise ValueError('Please specify the remote name')
+            ups = _get_remote(args)
             if not pwork:
-                pw_url = cser.db.upstream_get_patchwork_url(args.remote)
+                pw_url = cser.db.upstream_get_patchwork_url(ups)
                 if not pw_url:
                     pw_url = args.patchwork_url
                 if not pw_url:
                     raise ValueError(
-                        f"No patchwork URL for remote '{args.remote}'"
+                        f"No patchwork URL for remote '{ups}'"
                         "; use 'patman upstream add' with -p"
                         ' or pass --patchwork-url')
                 pwork = Patchwork(pw_url)
-            cser.project_set(pwork, args.project_name,
-                             ups=args.remote)
+            cser.project_set(pwork, args.project_name, ups=ups)
         elif args.subcmd == 'get-project':
-            if not args.remote:
-                raise ValueError('Please specify the remote name')
-            ups = args.remote
+            ups = _get_remote(args)
             info = cser.project_get(ups)
             if not info:
                 raise ValueError(
@@ -646,8 +712,16 @@ def do_patman(args, test_db=None, pwork=None, cser=None):
     if getattr(args, 'patchwork_timeout', None):
         Patchwork.set_timeout(args.patchwork_timeout)
     if args.full_help:
-        with resources.path('patman', 'patman.rst') as readme:
-            tools.print_full_help(str(readme))
+        # The pager takes a single file, so put the parts of the manual
+        # together in one
+        with tempfile.NamedTemporaryFile('w', prefix='patman-help-',
+                                         suffix='.rst', encoding='utf-8',
+                                         delete=False) as outf:
+            outf.write(full_help_text())
+        try:
+            tools.print_full_help(outf.name)
+        finally:
+            os.unlink(outf.name)
         return 0
     if args.cmd == 'send':
         # Called from git with a patch filename as argument
@@ -683,7 +757,9 @@ def do_patman(args, test_db=None, pwork=None, cser=None):
         if args.cmd == 'status':
             patchwork_status(args.branch, args.count, args.start, args.end,
                              args.dest_branch, args.force, args.show_comments,
-                             args.patchwork_url)
+                             args.patchwork_url,
+                             single_thread=args.single_thread,
+                             show_cover_comments=args.show_cover_comments)
         elif args.cmd == 'series':
             do_series(args, test_db, pwork, cser)
         elif args.cmd == 'upstream':

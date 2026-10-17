@@ -14,6 +14,7 @@ import re
 import shutil
 import sys
 import unittest
+from unittest import mock
 
 import pygit2
 
@@ -23,6 +24,7 @@ from u_boot_pylib import terminal
 from u_boot_pylib import tools
 
 from patman.commit import Commit
+from patman import cmdline
 from patman import control
 from patman import patchstream
 from patman.patchstream import PatchStream
@@ -653,11 +655,14 @@ diff --git a/lib/efi_loader/efi_memory.c b/lib/efi_loader/efi_memory.c
         """Test getting full help"""
         command.TEST_RESULT = None
         result = self.run_patman('-H')
-        help_file = str(PATMAN_DIR / 'patman.rst')
-        # Remove possible extraneous strings
-        extra = '::::::::::::::\n' + help_file + '\n::::::::::::::\n'
-        gothelp = result.stdout.replace(extra, '')
-        self.assertEqual(len(gothelp), os.path.getsize(help_file))
+        # Remove the file-name banner which 'more' may add
+        gothelp = re.sub(r'^:{14}\n.*\n:{14}\n', '', result.stdout)
+        self.assertEqual(control.full_help_text(), gothelp)
+
+        # Each part of the manual is shown
+        for fname in control.HELP_FILES:
+            with open(PATMAN_DIR / fname, encoding='utf-8') as inf:
+                self.assertIn(inf.read(), gothelp)
         unexpected = [l for l in result.stderr.splitlines()
                       if not l.startswith('WARNING:')]
         self.assertEqual(0, len(unexpected))
@@ -699,6 +704,53 @@ diff --git a/lib/efi_loader/efi_memory.c b/lib/efi_loader/efi_memory.c
             status.check_patch_count(0, len(patches))
         self.assertIn('Warning: Patchwork reports 1 patches, series has 0',
                       err.getvalue())
+
+    def test_status_find_link(self):
+        """Test finding the patchwork link for the version being checked"""
+        def find(branch, links, version=None):
+            series = Series()
+            series.links = links
+            if version:
+                series.version = version
+            with mock.patch.object(status, 'check_and_show_status') as show:
+                status.find_link_and_show_status(
+                    series, branch, 'https://example.com', None, False, False,
+                    False)
+            return show.call_args.args[1]
+
+        # A branch with no version uses the series' version, defaulting to 1
+        self.assertEqual('1234', find('fred', '1234'))
+        self.assertEqual('1234', find('fred', '1:1234'))
+        self.assertEqual('1234', find('fred', '1:1000 2:1234', '2'))
+
+        # The version in the branch name is used if there is one
+        self.assertEqual('1234', find('fred3', '1:1000 3:1234'))
+        self.assertEqual('1000', find('fred1', '1:1000 3:1234', '3'))
+
+    def test_status_cover_comments(self):
+        """Test that 'status -C' asks for the cover-letter comments"""
+        args = cmdline.parse_args(['status', '-C'])
+        self.assertTrue(args.show_cover_comments)
+        self.assertFalse(cmdline.parse_args(['status']).show_cover_comments)
+
+        series = Series()
+        series.links = '1234'
+        with mock.patch.object(patchstream, 'get_metadata',
+                               return_value=series):
+            with mock.patch.object(status,
+                                   'find_link_and_show_status') as show:
+                control.patchwork_status('fred', 1, 0, 0, None, False, False,
+                                         'https://example.com',
+                                         show_cover_comments=True)
+        self.assertTrue(show.call_args.args[6])
+
+    def test_status_args(self):
+        """Test that the status options reach patchwork_status()"""
+        args = cmdline.parse_args(['status', '-T', '-C'])
+        with mock.patch.object(control, 'patchwork_status') as pstat:
+            self.assertEqual(0, control.do_patman(args))
+        self.assertTrue(pstat.call_args.kwargs['single_thread'])
+        self.assertTrue(pstat.call_args.kwargs['show_cover_comments'])
 
     def test_status_read_patch(self):
         """Test handling a single patch in Patchwork"""

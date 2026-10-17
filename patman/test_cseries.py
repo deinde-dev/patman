@@ -1030,6 +1030,48 @@ Tested-by: Mary Smith <msmith@wibble.com>   # yak
         ser = slist.get('first')
         self.assertEqual('origin', ser.upstream)
 
+    def test_do_series_add_branch_upstream(self):
+        """Test that series add uses the upstream which the branch tracks"""
+        cser = self.get_cser()
+        repo = pygit2.Repository(self.gitdir)
+        base = repo.revparse_single('base').id
+        repo.references.create('refs/remotes/us/master', base)
+        repo.references.create('refs/remotes/ci/master', base)
+        repo.config['branch.first.remote'] = 'us'
+        repo.config['branch.first.merge'] = 'refs/heads/master'
+        repo.config['branch.second.remote'] = 'ci'
+        repo.config['branch.second.merge'] = 'refs/heads/master'
+        cser.db.upstream_add('us', 'https://us.example.com')
+        cser.db.commit()
+        self.db_close()
+
+        def add(name, set_upstream=None):
+            args = Namespace(subcmd='add', desc='my-description', series=name,
+                             mark=False, allow_unmarked=True, upstream=None,
+                             set_upstream=set_upstream,
+                             use_first_commit=False, dry_run=False)
+            with terminal.capture() as (out, _):
+                control.do_series(args, test_db=self.tmpdir, pwork=True)
+            return out.getvalue()
+
+        # 'first' tracks 'us', which is an upstream, so that is used
+        out = add('first')
+        self.assertIn("Using upstream 'us', which branch 'first' tracks", out)
+
+        # 'second' tracks 'ci', which is not an upstream, so none is set
+        out = add('second')
+        self.assertNotIn('Using upstream', out)
+
+        # -S takes precedence over the branch
+        out = add('third4', set_upstream='us')
+        self.assertNotIn('Using upstream', out)
+
+        cser = self.get_database()
+        slist = cser.db.series_get_dict()
+        self.assertEqual('us', slist['first'].upstream)
+        self.assertIsNone(slist['second'].upstream)
+        self.assertEqual('us', slist['third'].upstream)
+
     def test_do_series_add_cmdline(self):
         """Add a new cseries using the cmdline"""
         self.make_git_tree()
@@ -2840,6 +2882,49 @@ Tested-by: Mary Smith <msmith@wibble.com>   # yak
             f"link-name 'uboot' remote 'us'",
             out.getvalue().strip())
 
+    def test_patchwork_default_remote(self):
+        """Test choosing the remote when 'set-project' is not given one"""
+        def git(*args):
+            command.run_one('git', *args, cwd=repo, capture=True)
+
+        def default():
+            orig = os.getcwd()
+            try:
+                os.chdir(repo)
+                return control._default_remote()
+            finally:
+                os.chdir(orig)
+
+        repo = os.path.join(self.tmpdir, 'remotes')
+        os.mkdir(repo)
+        git('init', '-q', '-b', 'video')
+        self.assertEqual((None, []), default())
+
+        # With one remote, use it
+        git('remote', 'add', 'us', 'https://us.example.com')
+        self.assertEqual(('us', ['us']), default())
+
+        # With several, use the one the branch tracks, if any
+        git('remote', 'add', 'ci', 'https://ci.example.com')
+        self.assertEqual((None, ['ci', 'us']), default())
+        git('config', 'branch.video.remote', 'ci')
+        self.assertEqual(('ci', ['ci', 'us']), default())
+
+        # The error lists the remotes to choose from
+        git('config', '--unset', 'branch.video.remote')
+        orig = os.getcwd()
+        try:
+            os.chdir(repo)
+            with self.assertRaises(ValueError) as exc:
+                control._get_remote(types.SimpleNamespace(remote=None))
+            self.assertEqual(
+                'Please specify the remote name (remotes: ci, us)',
+                str(exc.exception))
+            self.assertEqual(
+                'us', control._get_remote(types.SimpleNamespace(remote='us')))
+        finally:
+            os.chdir(orig)
+
     def test_patchwork_list(self):
         """Test listing patchwork project configurations"""
         cser = self.get_cser()
@@ -4024,8 +4109,12 @@ Date:   .*
         self.assertEqual(
             '-----------------  ------  ------------------------------',
             lines[1])
-        self.assertEqual('first          -/2  ', lines[2])
-        self.assertEqual('second         1/3  Series for my board', lines[3])
+        # The status column lines up with the 'Status' heading
+        self.assertEqual('first                 -/2  ', lines[2])
+        self.assertEqual('second                1/3  Series for my board',
+                         lines[3])
+        self.assertEqual(lines[0].index('Status') + len('Status'),
+                         lines[3].index('1/3') + len('1/3'))
 
     def test_series_open(self):
         """Test opening a series in a web browser"""

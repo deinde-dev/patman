@@ -139,7 +139,8 @@ class Cseries(cser_helper.CseriesHelper):
                 provided in 'desc'
             force_version (bool): True if ignore a Series-version tag that
                 doesn't match its branch name
-            ups (str or None): Name of the upstream for this series
+            ups (str or None): Name of the upstream for this series, or None
+                to use the upstream which the branch tracks, if it is one
             dry_run (bool): True to do a dry run
         """
         name, ser, version, msg = self.prep_series(branch_name, end)
@@ -166,6 +167,11 @@ class Cseries(cser_helper.CseriesHelper):
         added = False
         series_id = self.db.series_find_by_name(ser.name)
         if not series_id:
+            if not ups:
+                ups = self._branch_upstream(name)
+                if ups:
+                    tout.notice(f"Using upstream '{ups}', which branch "
+                                f"'{name}' tracks")
             series_id = self.db.series_add(ser.name, desc, ups=ups)
             added = True
             msg += f" series '{ser.name}'"
