@@ -1182,6 +1182,23 @@ def refine_reviews_sync(review_bodies, spelling='British'):
     return _run(refine_reviews(review_bodies, spelling))
 
 
+def _format_comment(what, comment):
+    """Format a patchwork comment for the agent to read
+
+    Args:
+        what (str): What the comment is on, e.g. 'cover letter'
+        comment (dict): Comment from patchwork
+
+    Returns:
+        str: Comment, with a heading and its sender and date
+    """
+    sub = comment.get('submitter', {})
+    return (f"=== Comment on {what} ===\n"
+            f"From: {sub.get('name', '')} <{sub.get('email', '')}>\n"
+            f"Date: {comment.get('date', '')}\n\n"
+            f"{comment.get('content', '')}\n")
+
+
 def _write_comments_file(series_data, pwork):
     """Fetch and write existing patchwork comments to a temp file
 
@@ -1192,38 +1209,23 @@ def _write_comments_file(series_data, pwork):
     Returns:
         str or None: Path to the comments file, or None if no comments
     """
-
-
     patches = series_data.get('patches', [])
     cover = series_data.get('cover_letter')
 
     async def _fetch_comments():
         all_comments = []
         async with aiohttp.ClientSession() as client:
-            # Cover letter comments
             if cover:
-                cover_comments = await pwork.get_cover_comments(
-                    client, cover['id'])
-                for comment in cover_comments:
-                    sub = comment.get('submitter', {})
-                    all_comments.append(f"=== Comment on cover letter ===\n"
-                        f"From: {sub.get('name', '')} "
-                        f"<{sub.get('email', '')}>\n"
-                        f"Date: {comment.get('date', '')}\n\n"
-                        f"{comment.get('content', '')}\n")
+                for comment in await pwork.get_cover_comments(
+                        client, cover['id']):
+                    all_comments.append(
+                        _format_comment('cover letter', comment))
 
-            # Patch comments
             for i, patch in enumerate(patches):
-                patch_comments = await pwork.get_patch_comments(
-                    client, str(patch['id']))
-                for comment in patch_comments:
-                    sub = comment.get('submitter', {})
-                    all_comments.append(f"=== Comment on patch {i + 1}: "
-                        f"{patch.get('name', '')} ===\n"
-                        f"From: {sub.get('name', '')} "
-                        f"<{sub.get('email', '')}>\n"
-                        f"Date: {comment.get('date', '')}\n\n"
-                        f"{comment.get('content', '')}\n")
+                for comment in await pwork.get_patch_comments(
+                        client, str(patch['id'])):
+                    all_comments.append(_format_comment(
+                        f"patch {i + 1}: {patch.get('name', '')}", comment))
 
         return all_comments
 
