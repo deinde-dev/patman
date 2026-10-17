@@ -5302,19 +5302,37 @@ Date:   .*
         return self.run_args('review', '--reviewer', self.REVIEWER,
                              *argv, **kwargs)
 
+    @contextlib.contextmanager
     def _mock_review(self):
-        """Context manager to mock apply, upstream, git and AI review"""
+        """Mock applying the series, the upstream, git and the AI review"""
         fake_review = {1: f'Reviewed-by: {self.REVIEWER}'}
-        return (mock.patch('patman.review._apply_and_check',
-                           return_value=True),
+        with mock.patch('patman.review._apply_and_check',
+                        return_value=True), \
                 mock.patch('patman.review._get_upstream_branch',
-                           return_value='origin/master'),
+                           return_value='origin/master'), \
                 mock.patch('patman.review.review_patches_sync',
-                           return_value=fake_review),
+                           return_value=fake_review), \
                 mock.patch('patman.review.gitutil.get_top_level',
-                           return_value=self.tmpdir),
+                           return_value=self.tmpdir), \
                 mock.patch('patman.review.gitutil.ensure_worktree',
-                           return_value=self.tmpdir))
+                           return_value=self.tmpdir):
+            yield
+
+    @contextlib.contextmanager
+    def _mock_gmail(self):
+        """Mock Gmail, so that creating a draft gives the ID 'draft123'
+
+        Yields:
+            Mock: The mocked Gmail service
+        """
+        with mock.patch('patman.gmail.check_available', return_value=True), \
+                mock.patch('patman.gmail.get_service') as mock_svc:
+            users = mock_svc.return_value.users.return_value
+            users.drafts.return_value.create.return_value \
+                .execute.return_value = {'id': 'draft123'}
+            users.messages.return_value.list.return_value \
+                .execute.return_value = {'messages': []}
+            yield mock_svc.return_value
 
     def test_review_new_series(self):
         """Test reviewing a new series creates database records"""
@@ -5322,10 +5340,7 @@ Date:   .*
         pwork = Patchwork.for_testing(self._fake_patchwork_review)
         pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
 
-        mocks = self._mock_review()
-        with contextlib.ExitStack() as stack:
-            for m in mocks:
-                stack.enter_context(m)
+        with self._mock_review():
             with terminal.capture() as _:
                 self.run_review('-s', str(self.REVIEW_LINK), pwork=pwork)
 
@@ -5353,18 +5368,12 @@ Date:   .*
         pwork = Patchwork.for_testing(self._fake_patchwork_review)
         pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
 
-        mocks = self._mock_review()
-        with contextlib.ExitStack() as stack:
-            for m in mocks:
-                stack.enter_context(m)
+        with self._mock_review():
             with terminal.capture() as _:
                 self.run_review('-s', str(self.REVIEW_LINK), pwork=pwork)
 
         # Review the same link again
-        mocks = self._mock_review()
-        with contextlib.ExitStack() as stack:
-            for m in mocks:
-                stack.enter_context(m)
+        with self._mock_review():
             with terminal.capture() as (out, err):
                 self.run_review('-s', str(self.REVIEW_LINK), pwork=pwork)
         self.assertIn('Already reviewed', out.getvalue())
@@ -5376,18 +5385,12 @@ Date:   .*
         pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
 
         # Review v1 first
-        mocks = self._mock_review()
-        with contextlib.ExitStack() as stack:
-            for m in mocks:
-                stack.enter_context(m)
+        with self._mock_review():
             with terminal.capture() as _:
                 self.run_review('-s', str(self.REVIEW_LINK), pwork=pwork)
 
         # Now review v2 - should detect the previous review
-        mocks = self._mock_review()
-        with contextlib.ExitStack() as stack:
-            for m in mocks:
-                stack.enter_context(m)
+        with self._mock_review():
             with terminal.capture() as (out, _):
                 self.run_review('-s', str(self.REVIEW_LINK_V2), pwork=pwork)
         self.assertIn('Previously reviewed', out.getvalue())
@@ -5406,10 +5409,7 @@ Date:   .*
         pwork = Patchwork.for_testing(self._fake_patchwork_review)
         pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
 
-        mocks = self._mock_review()
-        with contextlib.ExitStack() as stack:
-            for m in mocks:
-                stack.enter_context(m)
+        with self._mock_review():
             with terminal.capture() as (out, _):
                 self.run_review('-S', 'Disable interrupts', pwork=pwork)
         # Should pick the most recent (v2)
@@ -5565,10 +5565,7 @@ Date:   .*
         pwork = Patchwork.for_testing(self._fake_patchwork_review)
         pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
 
-        mocks = self._mock_review()
-        with contextlib.ExitStack() as stack:
-            for m in mocks:
-                stack.enter_context(m)
+        with self._mock_review():
             with terminal.capture() as (out, _):
                 self.run_review('-s', str(self.REVIEW_LINK), '--create-drafts',
                                 '-n', pwork=pwork)
@@ -5583,24 +5580,10 @@ Date:   .*
         pwork = Patchwork.for_testing(self._fake_patchwork_review)
         pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
 
-        mocks = self._mock_review()
-        with contextlib.ExitStack() as stack:
-            for m in mocks:
-                stack.enter_context(m)
-            with mock.patch('patman.gmail.check_available',
-                            return_value=True):
-                with mock.patch('patman.gmail.get_service') as mock_svc:
-                    mock_svc.return_value.users.return_value \
-                        .drafts.return_value \
-                        .create.return_value \
-                        .execute.return_value = {'id': 'draft123'}
-                    mock_svc.return_value.users.return_value \
-                        .messages.return_value \
-                        .list.return_value \
-                        .execute.return_value = {'messages': []}
-                    with terminal.capture() as (out, _):
-                        self.run_review('-s', str(self.REVIEW_LINK),
-                                        '--create-drafts', pwork=pwork)
+        with self._mock_review(), self._mock_gmail():
+            with terminal.capture() as (out, _):
+                self.run_review('-s', str(self.REVIEW_LINK),
+                                '--create-drafts', pwork=pwork)
         output = out.getvalue()
         self.assertIn('Created 1 Gmail draft', output)
 
@@ -6234,24 +6217,10 @@ Date:   .*
         pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
 
         def run(*extra):
-            mocks = self._mock_review()
-            with contextlib.ExitStack() as stack:
-                for m in mocks:
-                    stack.enter_context(m)
-                with mock.patch('patman.gmail.check_available',
-                                return_value=True):
-                    with mock.patch('patman.gmail.get_service') as mock_svc:
-                        mock_svc.return_value.users.return_value \
-                            .drafts.return_value \
-                            .create.return_value \
-                            .execute.return_value = {'id': 'draft123'}
-                        mock_svc.return_value.users.return_value \
-                            .messages.return_value \
-                            .list.return_value \
-                            .execute.return_value = {'messages': []}
-                        with terminal.capture() as (out, _):
-                            self.run_review('-s', str(self.REVIEW_LINK),
-                                            *extra, pwork=pwork)
+            with self._mock_review(), self._mock_gmail():
+                with terminal.capture() as (out, _):
+                    self.run_review('-s', str(self.REVIEW_LINK), *extra,
+                                    pwork=pwork)
             return out.getvalue()
 
         # The first review stores the reviews and creates the drafts
@@ -6295,22 +6264,10 @@ Date:   .*
         pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
 
         def run(*extra):
-            mocks = self._mock_review()
-            with contextlib.ExitStack() as stack:
-                for m in mocks:
-                    stack.enter_context(m)
-                with mock.patch('patman.gmail.check_available',
-                                return_value=True), \
-                        mock.patch('patman.gmail.get_service') as mock_svc:
-                    mock_svc.return_value.users.return_value \
-                        .drafts.return_value.create.return_value \
-                        .execute.return_value = {'id': 'draft123'}
-                    mock_svc.return_value.users.return_value \
-                        .messages.return_value.list.return_value \
-                        .execute.return_value = {'messages': []}
-                    with terminal.capture() as (out, _):
-                        self.run_review('-s', str(self.REVIEW_LINK), *extra,
-                                        pwork=pwork)
+            with self._mock_review(), self._mock_gmail():
+                with terminal.capture() as (out, _):
+                    self.run_review('-s', str(self.REVIEW_LINK), *extra,
+                                    pwork=pwork)
             return out.getvalue()
 
         # First review creates a draft
@@ -6334,10 +6291,7 @@ Date:   .*
 
     def _review_v1(self, pwork, link=None):
         """Review the given series in-process, to seed the database"""
-        mocks = self._mock_review()
-        with contextlib.ExitStack() as stack:
-            for m in mocks:
-                stack.enter_context(m)
+        with self._mock_review():
             with terminal.capture() as _:
                 self.run_review('-s', str(link or self.REVIEW_LINK),
                                 pwork=pwork)
@@ -6430,10 +6384,7 @@ Date:   .*
         pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
         self.review_states = {self.REVIEW_LINK: ['superseded']}
 
-        mocks = self._mock_review()
-        with contextlib.ExitStack() as stack:
-            for m in mocks:
-                stack.enter_context(m)
+        with self._mock_review():
             with terminal.capture() as (out, _):
                 self.run_review('-s', str(self.REVIEW_LINK), pwork=pwork,
                                 expect_ret=1)
@@ -6452,10 +6403,7 @@ Date:   .*
         pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
         self.review_states = {self.REVIEW_LINK: ['superseded']}
 
-        mocks = self._mock_review()
-        with contextlib.ExitStack() as stack:
-            for m in mocks:
-                stack.enter_context(m)
+        with self._mock_review():
             with terminal.capture() as _:
                 self.run_review('-s', str(self.REVIEW_LINK), '--any-state',
                                 pwork=pwork)
@@ -6586,10 +6534,7 @@ Date:   .*
         branch = review._make_review_name(str(self.REVIEW_LINK), ups)
         lock_fd = review._acquire_review_lock(self.tmpdir, branch)
         try:
-            mocks = self._mock_review()
-            with contextlib.ExitStack() as stack:
-                for m in mocks:
-                    stack.enter_context(m)
+            with self._mock_review():
                 with terminal.capture() as (out, err):
                     self.run_review('-s', str(self.REVIEW_LINK), pwork=pwork)
             self.assertIn('already in progress', err.getvalue())
@@ -6601,10 +6546,7 @@ Date:   .*
         self.assertIsNone(cser.db.series_find_by_link(str(self.REVIEW_LINK)))
 
         # With the lock released, the review now runs
-        mocks = self._mock_review()
-        with contextlib.ExitStack() as stack:
-            for m in mocks:
-                stack.enter_context(m)
+        with self._mock_review():
             with terminal.capture() as _:
                 self.run_review('-s', str(self.REVIEW_LINK), pwork=pwork)
         self.db_open()
