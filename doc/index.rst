@@ -2,8 +2,6 @@
 
 .. include:: ../patman/patman.rst
 
-.. include:: ../CHANGELOG.rst
-
 .. toctree::
    :maxdepth: 2
    :caption: Guide
@@ -16,3 +14,9 @@
 
    database
    serve-protocol
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Project
+
+   changelog
