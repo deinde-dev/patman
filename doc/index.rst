@@ -14,4 +14,5 @@
    :maxdepth: 2
    :caption: Technical documentation
 
+   database
    serve-protocol
