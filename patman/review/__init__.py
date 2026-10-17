@@ -13,6 +13,7 @@ flow is in the core module.
 from patman.review import apply
 from patman.review import common
 from patman.review import core
+from patman.review import drafts
 from patman.review import emails
 from patman.review import lookup
 from patman.review import prompts

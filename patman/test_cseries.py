@@ -219,7 +219,7 @@ class TestCseries(unittest.TestCase, TestCommon):
 
         with mock.patch.object(review.lookup, 'fetch_series',
                                side_effect=lambda pw, link: ({'id': link},)), \
-                mock.patch.object(review.core, '_draft_stored_reviews',
+                mock.patch.object(review.drafts, 'draft_stored_reviews',
                                   side_effect=fake_draft), \
                 terminal.capture():
             n = review.core._draft_undrafted(args, None, cser)
@@ -228,7 +228,7 @@ class TestCseries(unittest.TestCase, TestCommon):
         self.assertEqual(['100'], drafted)
 
         # Dry run counts it but drafts nothing
-        with mock.patch.object(review.core, '_draft_stored_reviews') as md, \
+        with mock.patch.object(review.drafts, 'draft_stored_reviews') as md, \
                 mock.patch.object(review.lookup, 'fetch_series') as mf, \
                 terminal.capture():
             n = review.core._draft_undrafted(args, None, cser, dry_run=True)
@@ -5481,8 +5481,8 @@ Date:   .*
         with mock.patch.object(review.core.gmail, 'create_review_drafts',
                                side_effect=fake_crd), \
                 terminal.capture():
-            review.core.create_drafts(ctx, args, {0: 'cov', 1: 'pat'},
-                                      {0: 10, 1: 11})
+            review.drafts.create_drafts(ctx, args, {0: 'cov', 1: 'pat'},
+                                        {0: 10, 1: 11})
 
         pwork.get_cover.assert_awaited_once_with(mock.ANY, '99')
         # The cover letter's headers land at index 0, carrying To and Cc
@@ -5947,7 +5947,7 @@ Date:   .*
                 mock.patch.object(
                     review.voice, 'refine_voice_sync') as refine, \
                 terminal.capture() as (out, _):
-            review.core._sync_drafts(None, cser)
+            review.drafts.sync_drafts(None, cser)
         self.assertIn('Synced 5 sent, 0 deleted', out.getvalue())
         self.assertIn('1 draft(s) still pending', out.getvalue())
         self.assertEqual(3, refine.call_count)
@@ -6001,8 +6001,8 @@ Date:   .*
                 mock.patch.object(review.lookup, 'fetch_series',
                                   return_value=({'id': 123}, 'x', 1, 2)), \
                 mock.patch.object(
-                    review.core, '_delete_gmail_drafts') as delete, \
-                mock.patch.object(review.core, 'create_drafts') as create, \
+                    review.drafts, 'delete_gmail_drafts') as delete, \
+                mock.patch.object(review.drafts, 'create_drafts') as create, \
                 terminal.capture() as (out, _):
             self.assertEqual(
                 0, review.core._do_revise(args, None, cser, '123'))
@@ -6205,16 +6205,16 @@ Date:   .*
         replied = rev(5, None, database.REVIEW_REPLIED)
         reviews = [new, draft, deleted, sent, replied]
         self.assertEqual([new], [r for r in reviews
-                                 if review.core._needs_draft(r, False)])
+                                 if review.drafts.needs_draft(r, False)])
         self.assertEqual([new, draft, deleted],
-                         [r for r in reviews if review.core._needs_draft(
-                             r, True)])
+                         [r for r in reviews
+                          if review.drafts.needs_draft(r, True)])
 
         args = cmdline.parse_args(['review', '--redraft', '-i', '2-4'],
                                   config_fname=False)
-        with mock.patch.object(review.core, 'create_drafts') as create, \
-                mock.patch.object(review.core, '_delete_gmail_drafts'):
-            review.core._draft_stored_reviews(args, reviews, {}, None, None)
+        with mock.patch.object(review.drafts, 'create_drafts') as create, \
+                mock.patch.object(review.drafts, 'delete_gmail_drafts'):
+            review.drafts.draft_stored_reviews(args, reviews, {}, None, None)
         self.assertEqual({2: 'body 2', 3: 'body 3'}, create.call_args.args[2])
 
     def test_review_redraft(self):
@@ -6259,7 +6259,7 @@ Date:   .*
                 mock.patch('patman.gmail.get_service'), \
                 mock.patch('patman.gmail.delete_draft') as mock_del:
             with terminal.capture() as (out, _):
-                review.core._delete_gmail_drafts(args, reviews)
+                review.drafts.delete_gmail_drafts(args, reviews)
         self.assertEqual(2, mock_del.call_count)
         self.assertIn('Deleted 2 old Gmail draft', out.getvalue())
 
@@ -6703,7 +6703,7 @@ VERDICT: skip"""
 
     def test_review_draft_location(self):
         """The draft summary names the branch and series link"""
-        from patman.review.core import _draft_location
+        from patman.review.drafts import _draft_location
         from patman.review.common import ReviewContext
 
         ctx = ReviewContext(None, None, {'id': 511354})
