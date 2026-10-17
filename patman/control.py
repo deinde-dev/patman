@@ -698,6 +698,20 @@ def do_serve(args, test_db=None):
 
 
 # pylint: disable=R0912
+def _report_error(exc, debug):
+    """Report an exception which stops a command
+
+    Args:
+        exc (Exception): Exception to report
+        debug (bool): True to show the traceback too
+    """
+    terminal.tprint(f'patman: {type(exc).__name__}: {exc}',
+                    colour=terminal.Color.RED)
+    if debug:
+        print()
+        traceback.print_exc()
+
+
 def do_patman(args, test_db=None, pwork=None, cser=None):
     """Process a patman command
 
@@ -743,11 +757,7 @@ def do_patman(args, test_db=None, pwork=None, cser=None):
             try:
                 do_send(args)
             except Exception as exc:  # pylint: disable=W0718
-                terminal.tprint(f'patman: {type(exc).__name__}: {exc}',
-                                colour=terminal.Color.RED)
-                if args.debug:
-                    print()
-                    traceback.print_exc()
+                _report_error(exc, args.debug)
                 return 1
         return 0
 
@@ -775,10 +785,6 @@ def do_patman(args, test_db=None, pwork=None, cser=None):
         elif args.cmd == 'database':
             do_database(args, test_db)
     except Exception as exc:  # pylint: disable=W0718
-        terminal.tprint(f'patman: {type(exc).__name__}: {exc}',
-                        colour=terminal.Color.RED)
-        if args.debug:
-            print()
-            traceback.print_exc()
+        _report_error(exc, args.debug)
         ret_code = 1
     return ret_code
