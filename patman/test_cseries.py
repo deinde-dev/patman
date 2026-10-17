@@ -137,7 +137,7 @@ class TestCseries(unittest.TestCase, TestCommon):
         pkg_parent = os.path.dirname(
             os.path.dirname(os.path.abspath(cseries.__file__)))
         with mock.patch.dict(os.environ, {'PYTHONPATH': '/existing/path'}):
-            env = review.core._child_env()
+            env = review.scan.child_env()
         parts = env['PYTHONPATH'].split(os.pathsep)
         self.assertIn(pkg_parent, parts)
         self.assertIn('/existing/path', parts)
@@ -222,7 +222,7 @@ class TestCseries(unittest.TestCase, TestCommon):
                 mock.patch.object(review.drafts, 'draft_stored_reviews',
                                   side_effect=fake_draft), \
                 terminal.capture():
-            n = review.core._draft_undrafted(args, None, cser)
+            n = review.scan._draft_undrafted(args, None, cser)
         # Only the undrafted series A is drafted
         self.assertEqual(1, n)
         self.assertEqual(['100'], drafted)
@@ -231,7 +231,7 @@ class TestCseries(unittest.TestCase, TestCommon):
         with mock.patch.object(review.drafts, 'draft_stored_reviews') as md, \
                 mock.patch.object(review.lookup, 'fetch_series') as mf, \
                 terminal.capture():
-            n = review.core._draft_undrafted(args, None, cser, dry_run=True)
+            n = review.scan._draft_undrafted(args, None, cser, dry_run=True)
         self.assertEqual(1, n)
         md.assert_not_called()
         mf.assert_not_called()
@@ -257,11 +257,11 @@ class TestCseries(unittest.TestCase, TestCommon):
         cser.commit()
 
         # 3 patches, 1 with comments, 1 approved
-        self.assertEqual((3, 1, 1), review.core._review_stats(cser, '999001'))
+        self.assertEqual((3, 1, 1), review.scan._review_stats(cser, '999001'))
         # Passing an int link works too (find casts to str)
-        self.assertEqual((3, 1, 1), review.core._review_stats(cser, 999001))
+        self.assertEqual((3, 1, 1), review.scan._review_stats(cser, 999001))
         # Unknown link -> None
-        self.assertIsNone(review.core._review_stats(cser, '404'))
+        self.assertIsNone(review.scan._review_stats(cser, '404'))
         cser.close_database()
 
     def test_scan_child_passes_model(self):
@@ -271,13 +271,13 @@ class TestCseries(unittest.TestCase, TestCommon):
             upstream=None, reviewer=None, base_branch=None,
             gmail_account=None, signoff=None, spelling=None, context=None,
             model='sonnet', create_drafts=False)
-        cmd = review.core._build_review_command(args, 12345)
+        cmd = review.scan._build_review_command(args, 12345)
         self.assertIn('--model', cmd)
         self.assertEqual('sonnet', cmd[cmd.index('--model') + 1])
 
         args.model = None
         self.assertNotIn(
-            '--model', review.core._build_review_command(args, 12345))
+            '--model', review.scan._build_review_command(args, 12345))
 
     def test_register_series_atomic_on_error(self):
         """A failed registration leaves no orphan series (no ser_ver row)"""
@@ -6314,10 +6314,10 @@ Date:   .*
 
         def fake_sub(args, desc, version, link):
             launched.append((version, link))
-            return review.core.ScanResult(
+            return review.scan.ScanResult(
                 desc, version, link, 0, 'reviewed v2')
 
-        with mock.patch('patman.review.core._review_one_subprocess',
+        with mock.patch('patman.review.scan._review_one_subprocess',
                         side_effect=fake_sub):
             with terminal.capture() as (out, _):
                 self.run_review('--scan', pwork=pwork)
@@ -6339,7 +6339,7 @@ Date:   .*
         self._review_v1(pwork)
 
         with mock.patch(
-                'patman.review.core._review_one_subprocess') as mock_sub:
+                'patman.review.scan._review_one_subprocess') as mock_sub:
             with terminal.capture() as (out, _):
                 self.run_review('--scan', '-n', pwork=pwork)
         output = out.getvalue()
@@ -6357,7 +6357,7 @@ Date:   .*
         self._review_v1(pwork, self.REVIEW_LINK_V2)
 
         with mock.patch(
-                'patman.review.core._review_one_subprocess') as mock_sub:
+                'patman.review.scan._review_one_subprocess') as mock_sub:
             with terminal.capture() as (out, _):
                 self.run_review('--scan', pwork=pwork)
         self.assertIn('No new versions found', out.getvalue())
@@ -6374,7 +6374,7 @@ Date:   .*
 
         # v2 is only partly on patchwork; scan should wait, not review it
         with mock.patch(
-                'patman.review.core._review_one_subprocess') as mock_sub:
+                'patman.review.scan._review_one_subprocess') as mock_sub:
             with terminal.capture() as (out, _):
                 self.run_review('--scan', pwork=pwork)
         output = out.getvalue()
@@ -6425,7 +6425,7 @@ Date:   .*
         # v2 has appeared but is not in an active state
         self.review_states = {self.REVIEW_LINK_V2: ['superseded']}
         with mock.patch(
-                'patman.review.core._review_one_subprocess') as mock_sub:
+                'patman.review.scan._review_one_subprocess') as mock_sub:
             with terminal.capture() as (out, _):
                 self.run_review('--scan', pwork=pwork)
         output = out.getvalue()
@@ -6441,7 +6441,7 @@ Date:   .*
             verbose=False, debug=False, upstream='us', reviewer=None,
             base_branch=None, gmail_account=None, signoff='',
             spelling='British', context=None, create_drafts=True)
-        cmd = review.core._build_review_command(args, self.REVIEW_LINK_V2)
+        cmd = review.scan._build_review_command(args, self.REVIEW_LINK_V2)
 
         self.assertEqual(['-m', 'patman'], cmd[1:3])
         self.assertIn('review', cmd)

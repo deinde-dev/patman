@@ -18,5 +18,6 @@ from patman.review import emails
 from patman.review import lookup
 from patman.review import prompts
 from patman.review import replies
+from patman.review import scan
 from patman.review import voice
 from patman.review.core import do_review, review_series
