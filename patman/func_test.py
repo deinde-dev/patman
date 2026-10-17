@@ -14,6 +14,7 @@ import re
 import shutil
 import sys
 import unittest
+from unittest import mock
 
 import pygit2
 
@@ -699,6 +700,28 @@ diff --git a/lib/efi_loader/efi_memory.c b/lib/efi_loader/efi_memory.c
             status.check_patch_count(0, len(patches))
         self.assertIn('Warning: Patchwork reports 1 patches, series has 0',
                       err.getvalue())
+
+    def test_status_find_link(self):
+        """Test finding the patchwork link for the version being checked"""
+        def find(branch, links, version=None):
+            series = Series()
+            series.links = links
+            if version:
+                series.version = version
+            with mock.patch.object(status, 'check_and_show_status') as show:
+                status.find_link_and_show_status(
+                    series, branch, 'https://example.com', None, False, False,
+                    False)
+            return show.call_args.args[1]
+
+        # A branch with no version uses the series' version, defaulting to 1
+        self.assertEqual('1234', find('fred', '1234'))
+        self.assertEqual('1234', find('fred', '1:1234'))
+        self.assertEqual('1234', find('fred', '1:1000 2:1234', '2'))
+
+        # The version in the branch name is used if there is one
+        self.assertEqual('1234', find('fred3', '1:1000 3:1234'))
+        self.assertEqual('1000', find('fred1', '1:1000 3:1234', '3'))
 
     def test_status_read_patch(self):
         """Test handling a single patch in Patchwork"""
