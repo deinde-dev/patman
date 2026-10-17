@@ -17,6 +17,8 @@ Added
   than one upstream.
 - ``patman status -C`` shows the comments on the cover letter, as
   ``patman series status -C`` does.
+- ``patman series add`` sets the series' upstream to the remote which its
+  branch tracks, if that remote is an upstream and ``-S`` is not given.
 - ``patman serve`` runs a web server showing series status, patchwork
   comments, draft reviews and todos on a mobile-friendly page, optionally
   syncing with patchwork periodically. Its JSON API is described in

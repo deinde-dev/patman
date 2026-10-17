@@ -1086,11 +1086,12 @@ These are the names referenced by ``--series-to`` above.
 Step 5: Add series with an upstream
 ....................................
 
-When adding a series, specify which upstream it targets::
+When adding a series, patman uses the upstream which its branch tracks, if
+that remote is one of your upstreams. To give the upstream yourself::
 
     patman series add -S us
 
-If you omit ``-S``, you can set it later with::
+If the series has no upstream, you can set it later with::
 
     patman series set-upstream <series> <upstream>
 

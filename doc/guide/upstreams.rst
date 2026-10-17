@@ -100,15 +100,20 @@ project different IDs::
 Adding the series
 -----------------
 
-Give the upstream with ``-S`` when adding a series::
+When a series is added, it takes the upstream which its branch tracks, as
+long as that remote is one of the upstreams::
+
+    $ git checkout typos
+    $ patman series add -M
+    Using upstream 'ci', which branch 'typos' tracks
+    Added series 'typos' v1 (2 commits)
+
+Use ``-S`` to give the upstream instead, e.g. for a branch which tracks
+another local branch::
 
     $ git checkout binj-us
     $ patman series add -M -S us
     Added series 'binj-us' v1 (3 commits)
-
-    $ git checkout typos
-    $ patman series add -M -S ci
-    Added series 'typos' v1 (2 commits)
 
     $ patman series ls
     Name             Description                               Accepted  Us  Versions
@@ -117,9 +122,9 @@ Give the upstream with ``-S`` when adding a series::
     typos            doc: Fix a few typos in the developer doc      -/2  ci  1
     ---------------  ----------------------------------------  --------  --  ---------------
 
-The ``Us`` column shows each series' upstream. ``series add`` does not take
-it from the branch, so without ``-S`` the series has none, even though
-``typos`` tracks ``ci/master``. To set it afterwards::
+The ``Us`` column shows each series' upstream. If a series has none, for
+example because its branch tracks a remote which is not an upstream, set it
+afterwards with::
 
     $ patman series set-upstream ci
     Set upstream for series 'typos' to 'ci'

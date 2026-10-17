@@ -1030,6 +1030,48 @@ Tested-by: Mary Smith <msmith@wibble.com>   # yak
         ser = slist.get('first')
         self.assertEqual('origin', ser.upstream)
 
+    def test_do_series_add_branch_upstream(self):
+        """Test that series add uses the upstream which the branch tracks"""
+        cser = self.get_cser()
+        repo = pygit2.Repository(self.gitdir)
+        base = repo.revparse_single('base').id
+        repo.references.create('refs/remotes/us/master', base)
+        repo.references.create('refs/remotes/ci/master', base)
+        repo.config['branch.first.remote'] = 'us'
+        repo.config['branch.first.merge'] = 'refs/heads/master'
+        repo.config['branch.second.remote'] = 'ci'
+        repo.config['branch.second.merge'] = 'refs/heads/master'
+        cser.db.upstream_add('us', 'https://us.example.com')
+        cser.db.commit()
+        self.db_close()
+
+        def add(name, set_upstream=None):
+            args = Namespace(subcmd='add', desc='my-description', series=name,
+                             mark=False, allow_unmarked=True, upstream=None,
+                             set_upstream=set_upstream,
+                             use_first_commit=False, dry_run=False)
+            with terminal.capture() as (out, _):
+                control.do_series(args, test_db=self.tmpdir, pwork=True)
+            return out.getvalue()
+
+        # 'first' tracks 'us', which is an upstream, so that is used
+        out = add('first')
+        self.assertIn("Using upstream 'us', which branch 'first' tracks", out)
+
+        # 'second' tracks 'ci', which is not an upstream, so none is set
+        out = add('second')
+        self.assertNotIn('Using upstream', out)
+
+        # -S takes precedence over the branch
+        out = add('third4', set_upstream='us')
+        self.assertNotIn('Using upstream', out)
+
+        cser = self.get_database()
+        slist = cser.db.series_get_dict()
+        self.assertEqual('us', slist['first'].upstream)
+        self.assertIsNone(slist['second'].upstream)
+        self.assertEqual('us', slist['third'].upstream)
+
     def test_do_series_add_cmdline(self):
         """Add a new cseries using the cmdline"""
         self.make_git_tree()
