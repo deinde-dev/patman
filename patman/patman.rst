@@ -98,6 +98,9 @@ real U-Boot series: setting up, sending a first series, checking its status and
 collecting review tags, sending the next version, and tracking it all with the
 ``patman series`` database. Start with ``doc/guide/index.rst``.
 
+The command reference in ``doc/reference/`` lists every command and its
+options, as does ``patman <command> -h``.
+
 
 How to configure it
 -------------------
@@ -494,117 +497,13 @@ In extremis you can use 'git reflog' to revert something that Patman did.
 Series subcommands
 ~~~~~~~~~~~~~~~~~~
 
-Note that 'patman series ...' can be abbreviated as 'patman s' or 'patman ser'.
+'patman series' has subcommands to add a series, send it, link it to
+patchwork, gather its tags, start the next version and archive it, along with
+others to list, show and tidy up series. 'patman series -h' lists them, and
+the command reference (``doc/reference/series.rst``) describes each one with
+its options. 'patman series' can be abbreviated to 'patman s'.
 
-Here is a short overview of the available subcommands:
-
-    add
-        Add a new series. Use this on an existing branch to tell Patman about it.
-
-    archive (ar)
-        Archive a series when you have finished upstreaming it. Archived series
-        are not shown by most commands. This creates a dated tag for each
-        version of the series, pointing to the series branch, then deletes the
-        branches. It puts the tag names in the database so that it can
-        'unarchive' to restore things how they were.
-
-    unarchive (unar)
-        Unarchive a series when you decide you need to do something more with
-        it. The branches are restored and tags deleted.
-
-    autolink (au)
-        Search patchwork for the series link for your series, so Patman can
-        track the status
-
-    autolink-all
-        Same but for all series
-
-    inc
-        Increase the series number, effectively creating a new branch with the
-        next highest version number. The new branch is created based on the
-        existing branch. So if you use 'patman series inc' on branch 'video2'
-        it will create branch 'video3' and add v3 into its database
-
-    dec
-        Decrease the series number, thus deleting the current branch and
-        removing that version from the data. If you use this comment on branch
-        'video3' Patman will delete version 3 and branch 'video3'.
-
-    find
-        Search the database for series matching a subject fragment.
-        Matches against the series description, per-version description,
-        and individual patch subjects. Use ``-A`` to include archived
-        series. Example::
-
-            patman series find 'fs loader'
-
-    get-link
-        Shows the Patchwork link for a series/version
-
-    info
-        Show detailed information about a series, including each
-        version's link, description, patches and any stored reviews.
-        The output is colour-coded by patchwork state (e.g. ``new``,
-        ``accepted``). Use ``-r`` to include review text; pass a list
-        of patch numbers (``-r 1 3``) to limit the review text to those
-        patches.
-
-    ls
-        Lists the series in the database. Use ``-r`` to show only
-        review series (series fetched by ``patman review``).
-
-    mark
-        Mark a series with 'Change-Id' tags so that Patman can track patches
-        even when the subject changes. Unmarked patches just use the subject to
-        decided which is which.
-
-    unmark
-        Remove 'Change-Id' tags from a series.
-
-    open (o)
-        Open a series in Patchwork using your web browser
-
-    patches
-        Show the patches in a particular series/version
-
-    progress (p)
-        Show upstream progress for your series, or for all series
-
-    rm
-        Remove a series entirely, including all versions
-
-    rm-version (rmv)
-        Remove a particular version of a series. This is similar to 'dec'
-        except that any version can be removed, not just the latest one.
-
-    scan
-        Scan the local branch and update the database with the set of patches
-        in that branch. This throws away the old patches.
-
-    send
-        Send a series out as patches. This is similar to 'patman send' except
-        that it can send any series, not just the current branch. It also
-        waits a little for patchwork to see the cover letter, so it can find
-        out the patchwork link for the series.
-
-    set-link
-        Sets the Patchwork link for a series-version manually.
-
-    status (st)
-        Run 'patman status' on a series. This is similar to 'patman status'
-        except that it can get status on any series, not just the current
-        branch
-
-    summary
-        Shows a quick summary of series with their status and description.
-
-    sync
-        Sync the status of a series with Pathwork, so that
-        'patman series progress' can show the right information.
-
-    sync-all
-        Sync the status of all series.
-
+The workflow below shows the main ones in the order you use them.
 
 Patman series workflow
 ~~~~~~~~~~~~~~~~~~~~~~

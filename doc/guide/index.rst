@@ -36,9 +36,10 @@ Read them in order the first time. Each one follows on from the one before.
     Send to more than one tree, such as mainline and the concept tree, each
     with its own mailing list, patchwork server and send settings
 
-The manual covers each command and tag in full, and the setup for features
-not shown here, such as reviewing other people's series with
-``patman review`` and following everything on a phone with ``patman serve``.
+The :doc:`/reference/index` lists every command and its options. The manual
+covers each command and tag in full, and the setup for features not shown
+here, such as reviewing other people's series with ``patman review`` and
+following everything on a phone with ``patman serve``.
 
 .. toctree::
    :hidden:

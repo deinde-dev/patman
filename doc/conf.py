@@ -2,6 +2,7 @@
 """Sphinx configuration for the patman documentation."""
 
 import pathlib
+import sys
 import tomllib
 
 _pyproject = pathlib.Path(__file__).resolve().parent.parent / 'pyproject.toml'
@@ -14,7 +15,8 @@ copyright = '2011-2026, Simon Glass and contributors'
 release = _meta['version']
 version = release
 
-extensions = []
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / '_ext'))
+extensions = ['patman_cmdref']
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
