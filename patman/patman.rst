@@ -95,8 +95,9 @@ This tool requires a certain way of working:
 
 For the setup needed to send patches, see ``doc/getting-started.rst``. For a
 worked example using a real U-Boot series, from a branch of commits to the
-email on the mailing list, see ``doc/first-series.rst``, and for checking its
-status and collecting review tags, see ``doc/status-and-tags.rst``.
+email on the mailing list, see ``doc/first-series.rst``. For checking its
+status and collecting review tags, see ``doc/status-and-tags.rst``, and for
+sending the next version, see ``doc/next-version.rst``.
 
 
 How to configure it
@@ -440,7 +441,8 @@ Series-changes: n
     particular version n of that commit. The change list is
     created based on this information. Each commit gets its own
     change list and also the whole thing is repeated in the cover
-    letter (where duplicate change lines are merged).
+    letter (where duplicate change lines are merged if
+    Series-process-log includes uniq).
 
     By adding your change lists into your commits it is easier to
     keep track of what happened. When you amend a commit, remember

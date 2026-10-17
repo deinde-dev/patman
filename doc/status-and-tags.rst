@@ -138,10 +138,11 @@ commits::
     git checkout align-fix2
     git branch --set-upstream-to=us/master
 
-Make any changes the reviewers asked for, then add ``Series-version: 2`` and
-a ``Series-changes: 2`` tag to each changed commit, as at the end of
-:doc:`first-series`, and send it with ``patman send``. The collected tags go
-out with it, so the reviewers can see that their tags were picked up.
+Make any changes the reviewers asked for, then add ``Series-version: 2`` and a
+``Series-changes: 2`` tag to each changed commit, and send it with
+``patman send``; :doc:`next-version` goes through this in detail. The
+collected tags go out with it, so the reviewers can see that their tags were
+picked up.
 
 Once v2 is on patchwork, add its ID to ``Series-links``, keeping the v1 link,
 e.g. ``Series-links: 1:508846 2:<id>``. ``patman status`` looks up the link
