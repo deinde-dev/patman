@@ -1699,7 +1699,9 @@ class CseriesHelper:
                     'handled-elsewhere']:
             if val in states:
                 state = val
-        state_str, pad = self._build_col(state, base_str=name)
+        # Pad the name to the width of the 'Name' column in the header
+        state_str, _ = self._build_col(state, base_str=name)
+        pad = ' ' * max(17 - len(name), 0)
         marker = ''
         ts = self.db.workflow_get(Wtype.TODO, ser.idnum)
         if ts and ts <= self.get_now().strftime('%Y-%m-%d %H:%M:%S'):

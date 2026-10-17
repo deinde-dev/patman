@@ -4024,8 +4024,12 @@ Date:   .*
         self.assertEqual(
             '-----------------  ------  ------------------------------',
             lines[1])
-        self.assertEqual('first          -/2  ', lines[2])
-        self.assertEqual('second         1/3  Series for my board', lines[3])
+        # The status column lines up with the 'Status' heading
+        self.assertEqual('first                 -/2  ', lines[2])
+        self.assertEqual('second                1/3  Series for my board',
+                         lines[3])
+        self.assertEqual(lines[0].index('Status') + len('Status'),
+                         lines[3].index('1/3') + len('1/3'))
 
     def test_series_open(self):
         """Test opening a series in a web browser"""

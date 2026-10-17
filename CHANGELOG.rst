@@ -66,6 +66,7 @@ Changed
 
 Fixed
 ~~~~~
+- The columns of ``patman series summary`` line up with its header.
 - ``patman status`` finds the patchwork link on a branch whose name has no
   version number, using the series' own version (from ``Series-version``,
   or 1), rather than reporting that there is no link for ``vNone``.
