@@ -266,32 +266,20 @@ kernel.org endpoint for kernel.org-hosted projects such as U-Boot.
 Setting it up
 ~~~~~~~~~~~~~
 
-In short (``doc/guide/getting-started.rst`` goes through each step with the
-output to expect):
+The guide goes through the setup step by step, with the output to expect:
+see 'Sending through the kernel.org web relay' in
+``doc/guide/getting-started.rst``. In brief:
 
-1. Give patatt, which signs the messages, a signing key. For an existing PGP
-   key::
-
-       git config --global patatt.signingkey openpgp:<your-key-id>
-
-   or create an ed25519 key with ``patatt genkey`` and add the ``[patatt]``
-   section it prints to your git config. gpg must be able to sign without a
-   prompt getting stuck; ``export GPG_TTY=$(tty)`` usually does it.
-
-2. Set the endpoint for the project in ``~/.patman`` (or pass
-   ``--send-endpoint-web <url>`` for a single run)::
-
-       [u-boot_settings]
-       send_endpoint_web: https://lkml.kernel.org/_b4_submit
-
-3. Register your key and email address with the endpoint, once. It emails
-   you a challenge to pass back::
-
-       patman send --web-auth-new
-       patman send --web-auth-verify <challenge>
-
-4. Check it with ``patman send --reflect``, which has the endpoint mail the
-   series back to you only. Then send for real with ``patman send``.
+- give patatt, which signs the messages, a signing key, e.g.
+  ``git config --global patatt.signingkey openpgp:<your-key-id>``
+- set ``send_endpoint_web: https://lkml.kernel.org/_b4_submit`` in the
+  ``[u-boot_settings]`` section of ``~/.patman``, or pass
+  ``--send-endpoint-web <url>`` for a single run
+- register your key and email address once, with
+  ``patman send --web-auth-new`` and then
+  ``patman send --web-auth-verify <challenge>``
+- check it with ``patman send --reflect``, which has the endpoint mail the
+  series back to you only
 
 Notes
 ~~~~~
