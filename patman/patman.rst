@@ -46,62 +46,71 @@ database (a ``.patman.db`` file at the top of your git tree), which
 lets patman follow a series across versions and remember past reviews.
 Creating and sending patches works without it.
 
-It is intended to automate the whole process and make it less
-error-prone. It works with any git project that sends patches by email;
-the checkpatch and get_maintainer steps follow the U-Boot and Linux
-kernel conventions and can be skipped for projects that do not use them.
+Patman works with any git project which takes patches by email. Its
+checkpatch and get_maintainer steps follow the U-Boot and Linux kernel
+conventions, and can be turned off for projects which do not use them.
 
-It is configured almost entirely by tags it finds in your commits.
-This means that you can work on a number of different branches at
-once, and keep the settings with each branch rather than having to
-git format-patch, git send-email, etc. with the correct parameters
-each time. So for example if you put::
+Where to start
+--------------
 
-    Series-to: fred.blogs@napier.co.nz
+New to patman
+    :doc:`The guide </guide/index>` shows how to use it, step by step, with a
+    real U-Boot series: setting up, sending a first series, checking its
+    status and collecting review tags, sending the next version, and tracking
+    it all with the ``patman series`` database.
 
-in one of your commits, the series will be sent there.
+Looking up a command
+    :doc:`The command reference </reference/index>` lists every command and
+    its options, as does ``patman <command> -h``.
 
-In Linux and U-Boot this will also call get_maintainer.pl on each of your
-patches automatically (unless you use -m to disable this).
+Reviewing other people's patches
+    :doc:`The Assisted patch review chapter </review>` explains how to set it
+    up and use it, and :doc:`the Web server chapter </serve>` how to follow
+    and work on reviews from a phone.
 
+The full manual
+    The chapters which follow cover configuring patman, sending a series,
+    checking its status on patchwork, the tags patman reads, series
+    management, assisted review, the web server and managing the database.
+    ``patman -H`` shows them all in the terminal.
 
 Installation
 ------------
 
-You can install patman using::
+Install patman with pip::
 
-   pip install patch-manager
+    pip install patch-manager
 
-The name is chosen since patman conflicts with an existing package.
+The package is called patch-manager because the name patman is already
+taken. Some features need extra packages, which you can install along with
+it::
 
-The source code is hosted at https://github.com/deinde-dev/patman
+    pip install patch-manager[review]   # patch review using a Claude agent
+    pip install patch-manager[gmail]    # Gmail drafts of reviews and replies
+    pip install patch-manager[all]      # everything
 
-How to use this tool
---------------------
+The source code is at https://github.com/deinde-dev/patman
 
-This tool requires a certain way of working:
+How patman works
+----------------
 
-- Maintain a number of branches, one for each patch series you are
-  working on
-- Add tags into the commits within each branch to indicate where the
-  series should be sent, cover letter, version, etc. Most of these are
-  normally in the top commit so it is easy to change them with 'git
-  commit --amend'
-- Each branch tracks the upstream branch, so that this script can
-  automatically determine the number of commits in it (optional)
-- Check out a branch, and run this script to create and send out your
-  patches. Weeks later, change the patches and repeat, knowing that you
-  will get a consistent result each time.
+Patman expects you to work in a particular way:
 
-:doc:`The guide </guide/index>` shows how to work this way, step by step,
-with a real U-Boot series: setting up, sending a first series, checking its
-status and collecting review tags, sending the next version, and tracking it
-all with the ``patman series`` database.
+- Keep a branch for each series you are working on
+- Put tags in the commits of each branch to say where the series goes, its
+  version, its cover letter and so on. Most go in the top commit, where
+  ``git commit --amend`` reaches them, e.g.::
 
-:doc:`The command reference </reference/index>` lists every command and its
-options, as does ``patman <command> -h``.
+      Series-to: u-boot
+      Series-cc: heinrich
 
-The chapters which follow cover configuring patman, sending a series,
-checking its status on patchwork, the tags patman reads, series management,
-assisted review, the web server and managing the database.
+- Have each branch track its upstream branch, so that patman can count the
+  commits in the series
+- Check out a branch and run patman to create and send the patches. Weeks
+  later, change them and send them again, knowing that you will get a
+  consistent result each time
 
+Since the settings are kept in the commits, you can work on several branches
+at once without having to remember the right options for git format-patch
+and git send-email for each one. In U-Boot and Linux, patman also runs
+get_maintainer.pl on each patch to find who to copy, unless you use -m.

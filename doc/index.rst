@@ -4,6 +4,12 @@
 
 .. toctree::
    :maxdepth: 2
+   :caption: Guide
+
+   guide/index
+
+.. toctree::
+   :maxdepth: 2
    :caption: Manual
 
    configuration
@@ -14,12 +20,6 @@
    review
    serve
    db
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Guide
-
-   guide/index
 
 .. toctree::
    :maxdepth: 1

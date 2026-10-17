@@ -30,6 +30,11 @@ This installs the command as both ``patman`` and ``patch-manager``. The
 Debian package installs only ``patch-manager``, since Debian already has an
 unrelated ``patman`` command; use that name in the commands below if needed.
 
+That is all you need for sending patches. Reviewing other people's patches
+with ``patman review`` needs extra packages, which you can add later with
+``pip install patch-manager[review]``, or ``patch-manager[all]`` to include
+Gmail support as well.
+
 Setting up git
 --------------
 
