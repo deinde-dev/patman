@@ -410,7 +410,8 @@ def add_series_subparser(subparsers):
     add_send_args(ssend)
     ssend.add_argument(
         '--no-autolink', action='store_false', default=True, dest='autolink',
-        help='Monitor patchwork after sending so the series can be autolinked')
+        help="Don't wait for the series to appear in patchwork after sending, "
+        'so it is not autolinked')
     _add_wait(ssend, 120)
 
     setl = series_subparsers.add_parser('set-link')
