@@ -1038,11 +1038,11 @@ def insert_cover_letter(fname, series, count, cwd=None,
             trailers before the signature
     """
     fname = os.path.join(cwd or '', fname)
-    fil = open(fname, 'r')
+    fil = open(fname, 'r', encoding='utf-8')
     lines = fil.readlines()
     fil.close()
 
-    fil = open(fname, 'w')
+    fil = open(fname, 'w', encoding='utf-8')
     text = series.cover
     prefix = series.GetPatchPrefix()
     inserted_base = False

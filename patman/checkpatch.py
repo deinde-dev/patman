@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0+
 # Copyright (c) 2011 The Chromium OS Authors.
 #
+"""Run checkpatch.pl on patches and parse what it reports"""
+
 
 import collections
 import concurrent.futures

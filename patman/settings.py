@@ -2,6 +2,8 @@
 # Copyright (c) 2011 The Chromium OS Authors.
 # Copyright (c) 2022 Maxim Cournoyer <maxim.cournoyer@savoirfairelinux.com>
 #
+"""Read patman's settings and email aliases from its config files"""
+
 
 try:
     import configparser as ConfigParser
@@ -213,7 +215,7 @@ def CreatePatmanConfigFile(config_fname):
         email = input("Enter email: ")
 
     try:
-        f = open(config_fname, 'w')
+        f = open(config_fname, 'w', encoding='utf-8')
     except IOError:
         print("Couldn't create patman config file\n")
         raise
@@ -353,7 +355,7 @@ def _ReadBouncesFile(fname):
         fname: Filename to read.
     """
     if os.path.exists(fname):
-        with open(fname) as fd:
+        with open(fname, encoding='utf-8') as fd:
             for line in fd:
                 if line.startswith('#'):
                     continue

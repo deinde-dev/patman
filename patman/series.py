@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0+
 # Copyright (c) 2011 The Chromium OS Authors.
 #
+"""Hold a patch series: its commits, tags, recipients and change logs"""
+
 
 from __future__ import print_function
 
