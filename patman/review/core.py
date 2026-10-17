@@ -396,6 +396,31 @@ def _run_cover_review_sync(ctx, all_commits):
     return common.run(_run_cover_review(ctx, all_commits))
 
 
+def _store_finding(ctx, seq, subject, verdict, comments, timestamp):
+    """Store and show the findings of a quick review of one part of a series
+
+    Commit-message comments are put before code comments.
+
+    Args:
+        ctx (ReviewContext): Review context (uses cser, svid, patch_count)
+        seq (int): Patch number, or 0 for the cover letter
+        subject (str): Subject of the patch, or 'cover letter'
+        verdict (str): Verdict from the agent, e.g. 'approved'
+        comments (list of tuple): (quote, comment) for each comment
+        timestamp (str): Time of the review
+
+    Returns:
+        int: Number of comments
+    """
+    comments = sorted(comments, key=lambda hc: emails.is_code_comment(hc[0]))
+    body = emails.cleanup_review_text(emails.format_findings(verdict,
+                                                             comments))
+    ctx.cser.db.review_add(ctx.svid, seq, body, verdict == 'approved',
+                           timestamp)
+    emails.print_finding(seq, ctx.patch_count, subject, verdict, comments)
+    return len(comments)
+
+
 def review_series(cser, series_id, svid, version, branch, series,
                   spelling='British', context=None):
     """AI-review a local series' commits and store the reviews
@@ -453,14 +478,8 @@ def review_series(cser, series_id, svid, version, branch, series,
         result = _run_cover_review_sync(ctx, all_commits)
         if result is not None:
             _, verdict, comments = result
-            comments = sorted(
-                comments, key=lambda hc: emails.is_code_comment(hc[0]))
-            body = emails.cleanup_review_text(
-                emails.format_findings(verdict, comments))
-            cser.db.review_add(svid, 0, body, verdict == 'approved',
-                               timestamp)
-            n_comments += len(comments)
-            emails.print_finding(0, total, 'cover letter', verdict, comments)
+            n_comments += _store_finding(ctx, 0, 'cover letter', verdict,
+                                         comments, timestamp)
 
     for i, cmt in enumerate(commits):
         seq = i + 1
@@ -470,13 +489,8 @@ def review_series(cser, series_id, svid, version, branch, series,
             tout.warning(f'  Review failed for patch {seq}')
             continue
         _, verdict, comments, _ = result
-        comments = sorted(
-            comments, key=lambda hc: emails.is_code_comment(hc[0]))
-        body = emails.cleanup_review_text(
-            emails.format_findings(verdict, comments))
-        cser.db.review_add(svid, seq, body, verdict == 'approved', timestamp)
-        n_comments += len(comments)
-        emails.print_finding(seq, total, cmt.subject, verdict, comments)
+        n_comments += _store_finding(ctx, seq, cmt.subject, verdict,
+                                     comments, timestamp)
     cser.commit()
 
     tout.notice('')
