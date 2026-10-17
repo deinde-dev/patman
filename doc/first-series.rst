@@ -246,6 +246,7 @@ e.g.::
 below the ``---`` line of each patch and to the cover letter. All four
 patches were merged in v2026.07.
 
-To keep track of versions like this, with patchwork links and review
-status, see 'Series Management' in the manual, which covers the ``patman
-series`` commands.
+To see the reviews and collect their tags before sending the next version,
+see :doc:`status-and-tags`. To keep track of versions like this, with
+patchwork links and review status, see 'Series Management' in the manual,
+which covers the ``patman series`` commands.

@@ -95,7 +95,8 @@ This tool requires a certain way of working:
 
 For the setup needed to send patches, see ``doc/getting-started.rst``. For a
 worked example using a real U-Boot series, from a branch of commits to the
-email on the mailing list, see ``doc/first-series.rst``.
+email on the mailing list, see ``doc/first-series.rst``, and for checking its
+status and collecting review tags, see ``doc/status-and-tags.rst``.
 
 
 How to configure it
@@ -607,15 +608,12 @@ To automatically pull into these tags into a new branch, use the -d option:
 This will create a new 'mtrr4' branch which is the same as your current branch
 but has the new review tags in it. The tags are added in alphabetic order and
 are placed immediately after any existing ack/review/test/fixes tags, or at the
-end. You can check that this worked with:
+end. The new branch does not track an upstream branch, so set one with
+'git branch --set-upstream-to' before sending from it.
 
-.. code-block:: bash
+There is also a -c option to list the comments received for each patch.
 
-    patman -b mtrr4 status
-
-which should show that there are no new responses compared to this new branch.
-
-There is also a -C option to list the comments received for each patch.
+For a worked example using real series, see ``doc/status-and-tags.rst``.
 
 
 Example Work Flow

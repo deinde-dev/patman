@@ -10,6 +10,7 @@
 
    getting-started
    first-series
+   status-and-tags
 
 .. toctree::
    :maxdepth: 2

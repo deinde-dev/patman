@@ -11,8 +11,10 @@ Unreleased
 Added
 ~~~~~
 - ``doc/getting-started.rst`` describes the setup needed to send patches,
-  and ``doc/first-series.rst`` walks through sending a first series, using
-  a real U-Boot series which was merged in v2026.07.
+  ``doc/first-series.rst`` walks through sending a first series, using a
+  real U-Boot series which was merged in v2026.07, and
+  ``doc/status-and-tags.rst`` shows checking its status and collecting
+  review tags.
 - ``patman serve`` runs a web server showing series status, patchwork
   comments, draft reviews and todos on a mobile-friendly page, optionally
   syncing with patchwork periodically. Its JSON API is described in
