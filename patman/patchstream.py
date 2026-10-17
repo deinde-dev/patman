@@ -286,6 +286,27 @@ class PatchStream:
             self.commit.add_change(self.change_version, change)
         self.change_lines = []
 
+    def _finalise_section(self):
+        """Finish off a section, such as a cover letter, and store it
+
+        Raises:
+            ValueError: The section is not one which patman knows about
+        """
+        if self.in_section == 'cover':
+            self.series.cover = self.section
+        elif self.in_section == 'notes':
+            if self.is_log:
+                self.series.notes += self.section
+        elif self.in_section == 'commit-notes':
+            if self.is_log:
+                self.commit.notes += self.section
+        else:
+            # This should not happen
+            raise ValueError(f"Unknown section '{self.in_section}'")
+        self.in_section = None
+        self.skip_blank = True
+        self.section = []
+
     def _finalise_snippet(self):
         """Finish off a snippet and add it to the list
 
@@ -400,20 +421,7 @@ class PatchStream:
             # for that section, fix it up.
             if self.in_section:
                 self._add_warn("Missing 'END' in section '%s'" % self.in_section)
-                if self.in_section == 'cover':
-                    self.series.cover = self.section
-                elif self.in_section == 'notes':
-                    if self.is_log:
-                        self.series.notes += self.section
-                elif self.in_section == 'commit-notes':
-                    if self.is_log:
-                        self.commit.notes += self.section
-                else:
-                    # This should not happen
-                    raise ValueError("Unknown section '%s'" % self.in_section)
-                self.in_section = None
-                self.skip_blank = True
-                self.section = []
+                self._finalise_section()
             # but we are already in a change list, that means a blank line
             # is missing, fix it up.
             if self.in_change:
@@ -426,20 +434,7 @@ class PatchStream:
         # If we are in a section, keep collecting lines until we see END
         if self.in_section:
             if line == 'END':
-                if self.in_section == 'cover':
-                    self.series.cover = self.section
-                elif self.in_section == 'notes':
-                    if self.is_log:
-                        self.series.notes += self.section
-                elif self.in_section == 'commit-notes':
-                    if self.is_log:
-                        self.commit.notes += self.section
-                else:
-                    # This should not happen
-                    raise ValueError("Unknown section '%s'" % self.in_section)
-                self.in_section = None
-                self.skip_blank = True
-                self.section = []
+                self._finalise_section()
             else:
                 self.section.append(line)
 
