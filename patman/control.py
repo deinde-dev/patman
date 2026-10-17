@@ -38,6 +38,19 @@ from patman import status
 from patman import workflow
 from patman.patchwork import Patchwork
 
+# The parts of the manual, in the order 'patman -H' shows them
+HELP_FILES = ('patman.rst', 'review.rst', 'serve.rst')
+
+
+def full_help_text():
+    """Get the text of the whole manual, as shown by 'patman -H'
+
+    Returns:
+        str: The parts of the manual, one after the other
+    """
+    return '\n'.join(resources.files('patman').joinpath(fname).read_text(
+        encoding='utf-8') for fname in HELP_FILES)
+
 
 def setup():
     """Do required setup before doing anything"""
@@ -697,8 +710,16 @@ def do_patman(args, test_db=None, pwork=None, cser=None):
     if getattr(args, 'patchwork_timeout', None):
         Patchwork.set_timeout(args.patchwork_timeout)
     if args.full_help:
-        with resources.path('patman', 'patman.rst') as readme:
-            tools.print_full_help(str(readme))
+        # The pager takes a single file, so put the parts of the manual
+        # together in one
+        with tempfile.NamedTemporaryFile('w', prefix='patman-help-',
+                                         suffix='.rst', encoding='utf-8',
+                                         delete=False) as outf:
+            outf.write(full_help_text())
+        try:
+            tools.print_full_help(outf.name)
+        finally:
+            os.unlink(outf.name)
         return 0
     if args.cmd == 'send':
         # Called from git with a patch filename as argument

@@ -4,6 +4,13 @@
 
 .. toctree::
    :maxdepth: 2
+   :caption: Manual
+
+   review
+   serve
+
+.. toctree::
+   :maxdepth: 2
    :caption: Guide
 
    guide/index

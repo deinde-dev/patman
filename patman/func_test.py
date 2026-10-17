@@ -655,11 +655,14 @@ diff --git a/lib/efi_loader/efi_memory.c b/lib/efi_loader/efi_memory.c
         """Test getting full help"""
         command.TEST_RESULT = None
         result = self.run_patman('-H')
-        help_file = str(PATMAN_DIR / 'patman.rst')
-        # Remove possible extraneous strings
-        extra = '::::::::::::::\n' + help_file + '\n::::::::::::::\n'
-        gothelp = result.stdout.replace(extra, '')
-        self.assertEqual(len(gothelp), os.path.getsize(help_file))
+        # Remove the file-name banner which 'more' may add
+        gothelp = re.sub(r'^:{14}\n.*\n:{14}\n', '', result.stdout)
+        self.assertEqual(control.full_help_text(), gothelp)
+
+        # Each part of the manual is shown
+        for fname in control.HELP_FILES:
+            with open(PATMAN_DIR / fname, encoding='utf-8') as inf:
+                self.assertIn(inf.read(), gothelp)
         unexpected = [l for l in result.stderr.splitlines()
                       if not l.startswith('WARNING:')]
         self.assertEqual(0, len(unexpected))

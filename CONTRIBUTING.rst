@@ -33,8 +33,10 @@ Building the documentation
     pip install -r doc/requirements.txt
     make -C doc html        # output in doc/_build/html
 
-The manual itself lives in ``patman/patman.rst``; ``doc/`` wraps it for
-Sphinx, so edit the manual there. ``doc/guide/`` holds the step-by-step
+The manual itself lives in ``patman/patman.rst``, with the chapters on
+assisted review and the web server in ``patman/review.rst`` and
+``patman/serve.rst``. ``patman -H`` shows all three, and ``doc/`` wraps them
+for Sphinx, so edit the manual there. ``doc/guide/`` holds the step-by-step
 guide. ``doc/database.rst`` describes the database schema; update it along
 with any schema migration. ``doc/serve-protocol.rst`` describes the JSON API
 provided by ``patman serve``; update it along with any change to the API.
