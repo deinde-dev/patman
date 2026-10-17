@@ -21,6 +21,7 @@ except ImportError:
     # for Python 3.6
     import importlib_resources as resources
 
+from u_boot_pylib import command
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
 from u_boot_pylib import tools
@@ -344,6 +345,57 @@ def upstream(args, test_db=None):
         cser.close_database()
 
 
+def _default_remote():
+    """Work out which remote to use when the user does not give one
+
+    This is the remote which the current branch tracks, or else the only
+    remote, if there is just one.
+
+    Returns:
+        tuple:
+            str or None: Remote to use, or None if it is not clear which
+            list of str: Names of all the remotes
+    """
+    try:
+        remotes = command.output('git', 'remote').split()
+    except command.CommandExc:
+        return None, []
+    try:
+        branch = command.output_one_line('git', 'symbolic-ref', '--short',
+                                         'HEAD')
+        remote = command.output_one_line('git', 'config',
+                                         f'branch.{branch}.remote')
+        if remote in remotes:
+            return remote, remotes
+    except command.CommandExc:
+        pass
+    if len(remotes) == 1:
+        return remotes[0], remotes
+    return None, remotes
+
+
+def _get_remote(args):
+    """Get the remote for a patchwork subcommand
+
+    Args:
+        args (Namespace): Arguments to process, using the 'remote' value if
+            the user gave one
+
+    Returns:
+        str: Remote to use
+
+    Raises:
+        ValueError: if no remote is given and it is not clear which to use
+    """
+    if args.remote:
+        return args.remote
+    remote, remotes = _default_remote()
+    if not remote:
+        raise ValueError('Please specify the remote name (remotes: '
+                         f"{', '.join(remotes) or 'none'})")
+    return remote
+
+
 # pylint: disable=R0912
 def patchwork(args, test_db=None, pwork=None):
     """Process a 'patchwork' subcommand
@@ -357,24 +409,20 @@ def patchwork(args, test_db=None, pwork=None):
     try:
         cser.open_database()
         if args.subcmd == 'set-project':
-            if not args.remote:
-                raise ValueError('Please specify the remote name')
+            ups = _get_remote(args)
             if not pwork:
-                pw_url = cser.db.upstream_get_patchwork_url(args.remote)
+                pw_url = cser.db.upstream_get_patchwork_url(ups)
                 if not pw_url:
                     pw_url = args.patchwork_url
                 if not pw_url:
                     raise ValueError(
-                        f"No patchwork URL for remote '{args.remote}'"
+                        f"No patchwork URL for remote '{ups}'"
                         "; use 'patman upstream add' with -p"
                         ' or pass --patchwork-url')
                 pwork = Patchwork(pw_url)
-            cser.project_set(pwork, args.project_name,
-                             ups=args.remote)
+            cser.project_set(pwork, args.project_name, ups=ups)
         elif args.subcmd == 'get-project':
-            if not args.remote:
-                raise ValueError('Please specify the remote name')
-            ups = args.remote
+            ups = _get_remote(args)
             info = cser.project_get(ups)
             if not info:
                 raise ValueError(

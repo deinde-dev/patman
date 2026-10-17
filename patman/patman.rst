@@ -963,7 +963,10 @@ Firstly, set up your project::
 
 This just tells Patman to look on the Patchwork server for a project of that
 name. Internally Patman stores the ID and URL 'link-name' for the project, so it
-can access it.
+can access it. The project is set for a remote: by default this is the remote
+which the current branch tracks, or the only remote if there is just one.
+Otherwise give it after the project name, e.g.
+'patman patchwork set-project U-Boot us'.
 
 If you need to use a different patchwork server, use the `--patchwork-url`
 option or put the URL in your Patman-settings file.

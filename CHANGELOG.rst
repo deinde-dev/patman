@@ -72,6 +72,9 @@ Fixed
   or 1), rather than reporting that there is no link for ``vNone``.
 - ``patman status -T`` reads patchwork with a single thread, as its help
   says; the option is otherwise ignored.
+- ``patman patchwork set-project`` and ``get-project`` use the remote which
+  the current branch tracks, or the only remote, when none is given, rather
+  than always asking for one. The error lists the remotes to choose from.
 - Reviews which have been sent are not drafted again by ``review -d``,
   ``--scan`` or ``--redraft``, and ``--redraft`` only drafts the patches
   chosen with ``-i``.

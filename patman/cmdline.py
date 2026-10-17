@@ -202,13 +202,15 @@ def add_patchwork_subparser(subparsers):
     gproj = patchwork_subparsers.add_parser('get-project')
     gproj.add_argument(
         'remote', nargs='?',
-        help='Remote to get the project for')
+        help='Remote to get the project for (default: the one the current '
+        'branch tracks, or the only remote)')
     uset = patchwork_subparsers.add_parser('set-project')
     uset.add_argument(
         'project_name', help="Patchwork project name, e.g. 'U-Boot'")
     uset.add_argument(
         'remote', nargs='?',
-        help='Remote to associate with this project')
+        help='Remote to associate with this project (default: the one the '
+        'current branch tracks, or the only remote)')
     pdel = patchwork_subparsers.add_parser('rm')
     pdel.add_argument(
         'remote', nargs='?',

@@ -29,7 +29,8 @@ each clone::
 
 patman looks the project up on the patchwork server (patchwork.ozlabs.org for
 U-Boot, from ``.patman-defaults``) and stores its ID, so that it can search
-for your series there later.
+for your series there later. The remote, ``us`` here, can be left out if the
+current branch tracks it or it is the only remote.
 
 Adding the series
 -----------------

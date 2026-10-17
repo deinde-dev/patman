@@ -2840,6 +2840,49 @@ Tested-by: Mary Smith <msmith@wibble.com>   # yak
             f"link-name 'uboot' remote 'us'",
             out.getvalue().strip())
 
+    def test_patchwork_default_remote(self):
+        """Test choosing the remote when 'set-project' is not given one"""
+        def git(*args):
+            command.run_one('git', *args, cwd=repo, capture=True)
+
+        def default():
+            orig = os.getcwd()
+            try:
+                os.chdir(repo)
+                return control._default_remote()
+            finally:
+                os.chdir(orig)
+
+        repo = os.path.join(self.tmpdir, 'remotes')
+        os.mkdir(repo)
+        git('init', '-q', '-b', 'video')
+        self.assertEqual((None, []), default())
+
+        # With one remote, use it
+        git('remote', 'add', 'us', 'https://us.example.com')
+        self.assertEqual(('us', ['us']), default())
+
+        # With several, use the one the branch tracks, if any
+        git('remote', 'add', 'ci', 'https://ci.example.com')
+        self.assertEqual((None, ['ci', 'us']), default())
+        git('config', 'branch.video.remote', 'ci')
+        self.assertEqual(('ci', ['ci', 'us']), default())
+
+        # The error lists the remotes to choose from
+        git('config', '--unset', 'branch.video.remote')
+        orig = os.getcwd()
+        try:
+            os.chdir(repo)
+            with self.assertRaises(ValueError) as exc:
+                control._get_remote(types.SimpleNamespace(remote=None))
+            self.assertEqual(
+                'Please specify the remote name (remotes: ci, us)',
+                str(exc.exception))
+            self.assertEqual(
+                'us', control._get_remote(types.SimpleNamespace(remote='us')))
+        finally:
+            os.chdir(orig)
+
     def test_patchwork_list(self):
         """Test listing patchwork project configurations"""
         cser = self.get_cser()
