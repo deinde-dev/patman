@@ -260,51 +260,35 @@ endpoint that sends the mail for you, instead of using ``git
 send-email``. This is the same mechanism b4 uses, and works with the
 kernel.org endpoint for kernel.org-hosted projects such as U-Boot.
 
-Quick start
-~~~~~~~~~~~
+Setting it up
+~~~~~~~~~~~~~
 
-1. Install patman (patatt, which signs the messages, comes with it)::
+In short (``doc/guide/getting-started.rst`` goes through each step with the
+output to expect):
 
-       pip install patch-manager
-
-2. Give patatt a signing key. For an existing PGP key, find its id
-   with::
-
-       gpg --list-secret-keys --keyid-format=long
-
-   and use the id shown after the algorithm (the ``<key-id>`` part of
-   ``rsa4096/<key-id>``, or the full fingerprint on the line below)::
+1. Give patatt, which signs the messages, a signing key. For an existing PGP
+   key::
 
        git config --global patatt.signingkey openpgp:<your-key-id>
 
-   Note the setting is ``patatt.signingkey`` (not ``user.signingKey``).
-   Alternatively create an ed25519 key with ``patatt genkey`` and add
-   the printed ``[patatt]`` block to your git config. Make sure gpg can
-   sign without a prompt getting stuck -- putting ``export
-   GPG_TTY=$(tty)`` in your shell startup usually does it.
+   or create an ed25519 key with ``patatt genkey`` and add the ``[patatt]``
+   section it prints to your git config. gpg must be able to sign without a
+   prompt getting stuck; ``export GPG_TTY=$(tty)`` usually does it.
 
-3. Point patman at the endpoint. To scope it to one project, use a
-   ``[<project>_settings]`` section in ``~/.patman``::
+2. Set the endpoint for the project in ``~/.patman`` (or pass
+   ``--send-endpoint-web <url>`` for a single run)::
 
        [u-boot_settings]
        send_endpoint_web: https://lkml.kernel.org/_b4_submit
 
-   (or pass ``--send-endpoint-web <url>`` for a single run).
-
-4. Register your key and identity with the endpoint, once::
+3. Register your key and email address with the endpoint, once. It emails
+   you a challenge to pass back::
 
        patman send --web-auth-new
-
-   It emails you a challenge; finish the registration with::
-
        patman send --web-auth-verify <challenge>
 
-5. Test with a reflect, which has the endpoint mail the series back to
-   you only (and not to the list)::
-
-       patman send --reflect
-
-   When it looks right, drop ``--reflect`` to send it for real.
+4. Check it with ``patman send --reflect``, which has the endpoint mail the
+   series back to you only. Then send for real with ``patman send``.
 
 Notes
 ~~~~~
@@ -814,137 +798,56 @@ Here is a short overview of the available subcommands:
 Patman series workflow
 ~~~~~~~~~~~~~~~~~~~~~~
 
-Here is a run-through of how to incorporate 'patman series' into your workflow.
-For the same with real output from a U-Boot series, see
-``doc/guide/series-workflow.rst``.
+These are the commands for the life of a series, in order.
+``doc/guide/series-workflow.rst`` goes through them with a real U-Boot series
+and the output of each.
 
-Firstly, set up your project::
+1. Tell patman the patchwork project for the upstream remote, once for each
+   clone. The remote defaults to the one the current branch tracks, or the
+   only remote::
 
-    patman patchwork set-project U-Boot
+       patman patchwork set-project U-Boot
 
-This just tells Patman to look on the Patchwork server for a project of that
-name. Internally Patman stores the ID and URL 'link-name' for the project, so it
-can access it. The project is set for a remote: by default this is the remote
-which the current branch tracks, or the only remote if there is just one.
-Otherwise give it after the project name, e.g.
-'patman patchwork set-project U-Boot us'.
+2. On the branch for version 1, e.g. 'video', add the series. Its
+   description comes from the cover letter. Use ``-m`` to add ``Change-Id:``
+   tags to the commits, so patches can be followed even if their subjects
+   change, or ``-M`` to match them by subject::
 
-If you need to use a different patchwork server, use the `--patchwork-url`
-option or put the URL in your Patman-settings file.
+       patman series add -M
 
-Now create a branch. For our example we are going to send out a series related
-to video so the branch will be called 'video'. The upstream remove is called
-'us'::
+3. Send it. patman then waits for the series to appear on patchwork and
+   records its link. If it does not appear in time, run
+   ``patman series autolink`` later::
 
-    git checkout -b video us/master
+       patman series send
 
-We now have a branch and so we can do some commits::
+4. Follow the reviews. ``gather`` records the state of each patch and adds
+   new review tags to the commits; ``status`` just shows them. Use ``-c`` and
+   ``-C`` to see the comments on the patches and the cover letter::
 
-    <edit files>
-    git add ...
-    <edit files>
-    git add -u
-    git commit ...
-    git commit ...
+       patman series gather
+       patman series status -cC
 
-We now have a few commits in our 'video' branch. Let's tell patman about it::
+5. See where all your series stand::
 
-    patman series add
+       patman series progress
 
-Like most commands, if no series is given (`patman series -s video add`) then
-the current branch is assumed. Since the branch is called 'video' patman knows
-that it is version one of the video series.
+6. Start the next version. ``inc`` creates the 'video2' branch, sets
+   ``Series-version: 2`` and adds v2 to the database. After changing the
+   commits, use ``scan`` to update the database from the branch, then send
+   as before::
 
-You'll likely get a warning that there is no cover letter. Let's add some tags
-to the top commit::
+       patman series inc
+       patman series scan -M
+       patman series send
 
-    Series-to: u-boot
-    Series-cc: ...
-    Cover-letter:
-    video: Improve syncing performance with cyclic
+   Alternatively, create 'video2' yourself and run ``patman series add``, or
+   collect the tags into it with ``patman status -d video2``.
 
-Trying again::
+7. Once the series is merged, archive it. This keeps each version's branch
+   as a tag and deletes the branches::
 
-    patman series add
-
-You'll likely get a warning that the commits are unmarked. You can either let
-patman add Change-Id values itself with the `-m` flag, or tell it not to worry
-about it with `-M`. You must choose one or the other. Let's leave the commits
-unmarked::
-
-    patman series add -M
-
-Congratulations, you've now got a patman database!
-
-Now let's send out the series. We will add tags to the top commit.
-
-To send it::
-
-    patman series send
-
-You should send 'git send-email' start up and you can confirm the sending of
-each email.
-
-After that, patman waits a bit to see if it can find your new series appearing
-on Patchwork. With a bit of luck this will only take 20 seconds or so. Then your
-series is linked.
-
-To gather tags (Reviewed-by ...) for your series from patchwork::
-
-    patman series gather
-
-If every patch in the gathered version has reached state ``accepted``,
-patman prints a notice that the series has been applied upstream. The
-same check runs for ``patman series gather-all``.
-
-Now you can check your progress::
-
-    patman series progress
-
-Later on you get some comments, or perhaps you just decide to make a change on
-your own. You have several options.
-
-The first option is that you can just create a new branch::
-
-    git checkout -b video2 video
-
-then you can add this 'v2' series to Patman with::
-
-    patman series add
-
-The second option is to get patman to create the new 'video2' branch in one
-step::
-
-    patman inc
-
-The third option is to collect some tags using the 'patman status' command and
-put them in a new branch::
-
-    patman status -d video2
-
-One day the fourth option will be to ask patman to collect tags as part of the
-'patman inc' command.
-
-Again, you do your edits, perhaps adding/removing patches, rebasing on -master
-and so on. Then, send your v2::
-
-    patman series send
-
-Let's say the patches are accepted. You can use::
-
-    patch series gather
-    patch series progress
-
-to check, or::
-
-    patman series status -cC
-
-to see comments. You can now archive the series::
-
-    patman series archive
-
-At this point you have the basics. Some of the subcommands useful options, so
-be sure to check out the help.
+       patman series archive
 
 Here is a sample 'progress' view:
 
@@ -992,20 +895,17 @@ The key concepts are:
     correct identity, To address and patchwork server are used without any
     extra flags on the command line.
 
-Here is a step-by-step guide for a developer who sends to both U-Boot
-mainline and the U-Boot concept tree.
+Adding upstreams
+................
 
-Step 1: Add your upstreams
-..........................
+Add each upstream with its git remote name, its URL and, optionally, its
+patchwork project, along with its settings::
 
-First, add each upstream with its git remote URL, patchwork URL and send
-settings::
-
-    patman upstream add us https://source.denx.de/u-boot/u-boot.git \
-        -p https://patchwork.ozlabs.org -t u-boot
+    patman upstream add us https://git.u-boot-project.org/u-boot/u-boot \
+        U-Boot -p https://patchwork.ozlabs.org -t u-boot
 
     patman upstream add ci https://concept.u-boot.org/u-boot/u-boot.git \
-        -p https://patchwork.u-boot.org -t concept -I concept -m --no-tags
+        U-Boot -p https://patchwork.deinde.dev -t concept -m --no-tags
 
 The options are:
 
@@ -1025,28 +925,32 @@ The options are:
 ``--no-tags``
     Skip subject-tag alias processing
 
-You can check your upstreams with::
+Giving the project name looks it up on the patchwork server; otherwise set
+it later with ``patman patchwork set-project U-Boot ci``. Each upstream has
+its own project entry, since each patchwork server has its own project IDs.
 
-    patman upstream ls
+Add the To aliases to the ``[alias]`` section of ``~/.patman``::
 
-You can also set a default upstream::
+    [alias]
+    concept: U-Boot Concept <concept@u-boot.org>
 
-    patman upstream default us
+Use ``patman upstream ls`` to list the upstreams, ``patman upstream default
+us`` to choose the default, and ``patman upstream set`` to change one, with
+the same options as ``upstream add`` plus ``--maintainers`` and ``--tags`` to
+turn those back on::
 
-Step 2: Configure git sendemail identities
-..........................................
+    patman upstream set ci -I concept
 
-If your upstreams use different SMTP servers or credentials, set up git
-sendemail identities in your ``.gitconfig``. Each identity is a
-``[sendemail "<name>"]`` section that overrides the base ``[sendemail]``
-settings.
+Sendemail identities
+....................
 
-For example, to use one SMTP server by default and a different one for the
-concept tree (server names and credentials are just examples; substitute your
-own)::
+If the upstreams use different SMTP servers or credentials, add a git
+sendemail identity for each in ``.gitconfig``. The ``[sendemail]`` settings
+are the default, and a ``[sendemail "<name>"]`` section overrides them for
+that identity (the servers here are just examples)::
 
     [sendemail]
-        smtpserver = smtp.denx.de
+        smtpserver = smtp.example.com
         smtpserverport = 587
         smtpencryption = tls
 
@@ -1056,53 +960,26 @@ own)::
         smtpencryption = tls
         smtpuser = user@gmail.com
 
-The base ``[sendemail]`` settings are used when no identity is specified. When
-you add ``-I concept`` to an upstream, patman passes ``--identity=concept`` to
-``git send-email``, which selects the matching section.
+An upstream with ``-I concept`` makes patman pass ``--identity=concept`` to
+``git send-email``.
 
-Step 3: Set up patchwork projects
-.................................
+The upstream of a series
+........................
 
-Each upstream needs a patchwork project so that patman can find your series on
-the server::
-
-    patman patchwork set-project U-Boot us
-    patman patchwork set-project U-Boot ci
-
-This looks up the project on the patchwork server associated with the upstream
-and stores the project ID locally.
-
-Step 4: Set up aliases
-......................
-
-Add To-address aliases to your ``~/.patman`` file::
-
-    [alias]
-    u-boot: U-Boot Mailing List <u-boot@lists.denx.de>
-    concept: U-Boot Concept <concept@u-boot.org>
-
-These are the names referenced by ``--series-to`` above.
-
-Step 5: Add series with an upstream
-....................................
-
-When adding a series, patman uses the upstream which its branch tracks, if
-that remote is one of your upstreams. To give the upstream yourself::
+When a series is added, it uses the upstream which its branch tracks, if
+that remote is one of the upstreams. Otherwise give it with ``-S``, or set it
+later::
 
     patman series add -S us
+    patman series -s video set-upstream us
 
-If the series has no upstream, you can set it later with::
+A series with no upstream is sent with the default settings, so set one for
+every series which is not for the default tree.
 
-    patman series set-upstream <series> <upstream>
+Sending
+.......
 
-Step 6: Send
-............
-
-When you send a series, patman automatically applies the upstream's settings::
-
-    patman series send
-
-This looks up the upstream for the series and:
+``patman series send`` applies the upstream's settings to the series:
 
 - passes ``--identity`` to ``git send-email`` if configured
 - sets the To address from ``--series-to`` if no ``Series-to:`` tag is present
@@ -1110,55 +987,35 @@ This looks up the upstream for the series and:
 - skips tag processing if ``--no-tags`` is set
 
 If the series has a ``Series-to:`` tag that does not match the upstream's
-expected To address, patman raises an error. This prevents accidentally sending
-to the wrong mailing list.
+To address, patman refuses to send it, which catches a series about to go
+to the wrong mailing list. Plain ``patman send`` does not use the upstream
+settings, so use ``patman series send`` for these series.
 
-Updating upstream settings
-..........................
+The upstream's patchwork server is also used for the series' links, status
+and tags.
 
-To change settings on an existing upstream, use ``upstream set``::
 
-    patman upstream set ci -I chromium
-    patman upstream set us -p https://patchwork.ozlabs.org
+Tips
+----
 
-The same flags as ``upstream add`` are available, plus ``--maintainers`` and
-``--tags`` to re-enable options that were previously disabled.
-
-General points
---------------
-
-#. When you change back to the us-cmd branch days or weeks later all your
-   information is still there, safely stored in the commits. You don't need
-   to remember what version you are up to, who you sent the last lot of patches
-   to, or anything about the change logs.
-#. If you put tags in the subject, patman will Cc the maintainers
-   automatically in many cases.
-#. If you want to keep the commits from each series you sent so that you can
-   compare change and see what you did, you can either create a new branch for
-   each version, or just tag the branch before you start changing it:
-
-   .. code-block:: bash
-
-        git tag sent/us-cmd-rfc
-        # ...later...
-        git tag sent/us-cmd-v2
-
-#. If you want to modify the patches a little before sending, you can do
-   this in your editor, but be careful!
-#. If you want to run git send-email yourself, use the -n flag which will
-   print out the command line patman would have used.
-#. It is a good idea to add the change log info as you change the commit,
-   not later when you can't remember which patch you changed. You can always
-   go back and change or remove logs from commits.
-#. Some mailing lists have size limits and when we add binary contents to
-   our patches it's easy to exceed the size limits. Use "--no-binary" to
-   generate patches without any binary contents. You are supposed to include
-   a link to a git repository in your "Commit-notes", "Series-notes" or
-   "Cover-letter" for maintainers to fetch the original commit.
-#. Patches will have no changelog entries for revisions where they did not
-   change. For clarity, if there are no changes for this patch in the most
-   recent revision of the series, a note will be added. For example, a patch
-   with the following tags in the commit::
+#. Everything about a series, such as its version, who it goes to and its
+   change logs, is kept in the commits. When you come back to a branch weeks
+   later, there is nothing to remember.
+#. Add the change log to a commit as you change it, rather than later when
+   you cannot remember what changed. You can always go back and edit it.
+#. To keep each version as sent, so you can compare them later, use a new
+   branch for each version (as ``patman series inc`` does), or tag the
+   branch before changing it, e.g. ``git tag sent/video-v2``.
+#. You can change the patches in your editor before ``git send-email`` sends
+   them, but be careful.
+#. To run ``git send-email`` yourself, use ``-n``, which prints the command
+   patman would have run.
+#. Some mailing lists limit the size of a message, which binary content
+   easily exceeds. Use ``--no-binary`` to leave it out of the patches, and
+   give a link to a git repository in ``Commit-notes``, ``Series-notes`` or
+   the cover letter so the maintainer can fetch the commit.
+#. A patch which did not change in the latest version gets a note saying
+   so. For example, a commit with::
 
         Series-version: 5
         Series-changes: 2
@@ -1167,7 +1024,7 @@ General points
         Series-changes: 4
         - Another change
 
-   would have a changelog of:::
+   has the change log::
 
         (no changes since v4)
 
@@ -1177,37 +1034,7 @@ General points
         Changes in v2:
         - Some change
 
-
-Other thoughts
---------------
-
-This script has been split into sensible files but still needs work.
-Most of these are indicated by a TODO in the code.
-
-It would be nice if this could handle the In-reply-to side of things.
-
-The tests are incomplete, as is customary. Use the 'test' subcommand to run
-them:
-
-.. code-block:: bash
-
-    $ patman test
-
-The `test` command is only shown when the test data files are present;
-they ship with the source checkout and the installed package.
-
-Alternatively, you can run the test suite via Pytest:
-
-.. code-block:: bash
-
-    $ pytest
-
-Error handling doesn't always produce friendly error messages - e.g.
-putting an incorrect tag in a commit may provide a confusing message.
-
-There might be a few other features not mentioned in this README. They
-might be bugs. In particular, tags are case sensitive which is probably
-a bad thing.
+#. Tags are case sensitive: ``series-to:`` is not recognised.
 
 
 The database

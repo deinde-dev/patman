@@ -19,6 +19,8 @@ Running the tests
     patman test                 # the whole suite
     patman test <name>          # a single test, e.g. test_series_send
 
+The suite can also be run with ``pytest``.
+
 The suite is self-contained: a pinned ``checkpatch.pl`` and its helper
 files live in ``scripts/`` and ``u_boot_pylib`` is installed from PyPI as
 ``u-boot-pylib`` (https://github.com/deinde-dev/u-boot-pylib), so no
