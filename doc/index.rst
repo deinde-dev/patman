@@ -40,3 +40,4 @@
    :caption: Project
 
    changelog
+   contributing
