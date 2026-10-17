@@ -741,6 +741,14 @@ diff --git a/lib/efi_loader/efi_memory.c b/lib/efi_loader/efi_memory.c
                                          show_cover_comments=True)
         self.assertTrue(show.call_args.args[6])
 
+    def test_status_args(self):
+        """Test that the status options reach patchwork_status()"""
+        args = cmdline.parse_args(['status', '-T', '-C'])
+        with mock.patch.object(control, 'patchwork_status') as pstat:
+            self.assertEqual(0, control.do_patman(args))
+        self.assertTrue(pstat.call_args.kwargs['single_thread'])
+        self.assertTrue(pstat.call_args.kwargs['show_cover_comments'])
+
     def test_status_read_patch(self):
         """Test handling a single patch in Patchwork"""
         pwork = patchwork.Patchwork.for_testing(self._fake_patchwork)

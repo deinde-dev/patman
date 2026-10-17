@@ -68,6 +68,8 @@ Fixed
 - ``patman status`` finds the patchwork link on a branch whose name has no
   version number, using the series' own version (from ``Series-version``,
   or 1), rather than reporting that there is no link for ``vNone``.
+- ``patman status -T`` reads patchwork with a single thread, as its help
+  says; the option is otherwise ignored.
 - Reviews which have been sent are not drafted again by ``review -d``,
   ``--scan`` or ``--redraft``, and ``--redraft`` only drafts the patches
   chosen with ``-i``.

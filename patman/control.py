@@ -687,6 +687,7 @@ def do_patman(args, test_db=None, pwork=None, cser=None):
             patchwork_status(args.branch, args.count, args.start, args.end,
                              args.dest_branch, args.force, args.show_comments,
                              args.patchwork_url,
+                             single_thread=args.single_thread,
                              show_cover_comments=args.show_cover_comments)
         elif args.cmd == 'series':
             do_series(args, test_db, pwork, cser)
