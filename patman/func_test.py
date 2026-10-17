@@ -908,7 +908,7 @@ diff --git a/lib/efi_loader/efi_memory.c b/lib/efi_loader/efi_memory.c
                          warnings)
 
     def _fake_patchwork2(self, subpath):
-        """Fake Patchwork server for the function below
+        """Fake Patchwork server for the review-status tests
 
         This handles accessing series, patches and comments, providing the data
         in self.patches to the caller
@@ -1041,32 +1041,6 @@ diff --git a/lib/efi_loader/efi_memory.c b/lib/efi_loader/efi_memory.c
             '1 new response available in patchwork (use -d to write them to a new branch)',
             None), next(itr))
 
-    def _fake_patchwork3(self, subpath):
-        """Fake Patchwork server for the function below
-
-        This handles accessing series, patches and comments, providing the data
-        in self.patches to the caller
-
-        Args:
-            subpath (str): URL subpath to use
-        """
-        re_series = re.match(r'series/(\d*)/$', subpath)
-        re_patch = re.match(r'patches/(\d*)/$', subpath)
-        re_comments = re.match(r'patches/(\d*)/comments/$', subpath)
-        if re_series:
-            series_num = re_series.group(1)
-            if series_num == '1234':
-                return {'patches': self.patches}
-        elif re_patch:
-            patch_num = int(re_patch.group(1))
-            patch = self.patches[patch_num - 1]
-            return patch
-        elif re_comments:
-            patch_num = int(re_comments.group(1))
-            patch = self.patches[patch_num - 1]
-            return patch.comments
-        raise ValueError('Fake Patchwork does not understand: %s' % subpath)
-
     def test_create_branch(self):
         """Test operation of create_branch()"""
         repo = self.make_git_tree()
@@ -1100,7 +1074,7 @@ diff --git a/lib/efi_loader/efi_memory.c b/lib/efi_loader/efi_memory.c
         patch2.comments = [comment2a, comment2b]
 
         # This test works by setting up patches for use by the fake Rest API
-        # function _fake_patchwork3(). The fake patch comments above should
+        # function _fake_patchwork2(). The fake patch comments above should
         # result in new review tags that are collected and added to the commits
         # created in the destination branch.
         self.patches = [patch1, patch2]
@@ -1118,7 +1092,7 @@ diff --git a/lib/efi_loader/efi_memory.c b/lib/efi_loader/efi_memory.c
         # <unittest.result.TestResult run=8 errors=0 failures=0>
 
         terminal.set_print_test_mode()
-        pwork = patchwork.Patchwork.for_testing(self._fake_patchwork3)
+        pwork = patchwork.Patchwork.for_testing(self._fake_patchwork2)
         status.check_and_show_status(
             series, '1234', branch, dest_branch, False, False, False, pwork,
             repo)
