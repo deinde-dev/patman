@@ -55,6 +55,35 @@ except ImportError:
 _AGENT_MODEL = None
 
 
+def _run(coro):
+    """Run a coroutine on the event loop and wait for it to finish
+
+    Args:
+        coro (coroutine): Coroutine to run
+
+    Returns:
+        The coroutine's result
+    """
+    return asyncio.get_event_loop().run_until_complete(coro)
+
+
+def _pw_call(method, *args):
+    """Call a Patchwork method which needs a client session, and wait for it
+
+    Args:
+        method (coroutine function): Patchwork method, which takes the client
+            session as its first argument
+        args: Further arguments for the method
+
+    Returns:
+        The method's result
+    """
+    async def _call():
+        async with aiohttp.ClientSession() as client:
+            return await method(client, *args)
+    return _run(_call())
+
+
 def _agent_options(**kwargs):
     """Create ClaudeAgentOptions with the selected review model applied
 
@@ -1150,8 +1179,7 @@ Match this voice when editing the reviews:
 
 def refine_reviews_sync(review_bodies, spelling='British'):
     """Synchronous wrapper for refine_reviews()"""
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(refine_reviews(review_bodies, spelling))
+    return _run(refine_reviews(review_bodies, spelling))
 
 
 def _write_comments_file(series_data, pwork):
@@ -1199,8 +1227,7 @@ def _write_comments_file(series_data, pwork):
 
         return all_comments
 
-    loop = asyncio.get_event_loop()
-    comments = loop.run_until_complete(_fetch_comments())
+    comments = _run(_fetch_comments())
 
     if not comments:
         return None
@@ -1428,21 +1455,17 @@ def review_patches_sync(ctx):
     Returns:
         dict: Map of patch index (1-based) to review body text
     """
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(review_patches(ctx))
+    return _run(review_patches(ctx))
 
 
 def _run_patch_review_sync(ctx, cmt, seq, all_commits):
     """Synchronous wrapper for _run_patch_review()"""
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(
-        _run_patch_review(ctx, cmt, seq, all_commits))
+    return _run(_run_patch_review(ctx, cmt, seq, all_commits))
 
 
 def _run_cover_review_sync(ctx, all_commits):
     """Synchronous wrapper for _run_cover_review()"""
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(_run_cover_review(ctx, all_commits))
+    return _run(_run_cover_review(ctx, all_commits))
 
 
 def _format_findings(verdict, comments):
@@ -1596,8 +1619,7 @@ def apply_series_sync(pwork, link, branch_name, upstream_branch, repo_path):
     Returns:
         tuple: (success, branch_name)
     """
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(apply_series(
+    return _run(apply_series(
         pwork, link, branch_name, upstream_branch, repo_path))
 
 
@@ -1619,13 +1641,7 @@ def search_patch(pwork, title):
     """
     from urllib.parse import quote_plus
 
-    async def _query():
-        query = quote_plus(title, safe=':')
-        async with aiohttp.ClientSession() as client:
-            return await pwork.search_patches(client, query)
-
-    loop = asyncio.get_event_loop()
-    results = loop.run_until_complete(_query())
+    results = _pw_call(pwork.search_patches, quote_plus(title, safe=':'))
 
     if not results:
         raise ValueError(f"No patch found matching '{title}'")
@@ -1655,12 +1671,7 @@ def lookup_patch_series(pwork, patch_id):
     Raises:
         ValueError: if the patch or its series cannot be found
     """
-    async def _query():
-        async with aiohttp.ClientSession() as client:
-            return await pwork.get_patch(client, patch_id)
-
-    loop = asyncio.get_event_loop()
-    data = loop.run_until_complete(_query())
+    data = _pw_call(pwork.get_patch, patch_id)
 
     series_list = data.get('series', [])
     if not series_list:
@@ -1700,15 +1711,10 @@ def search_series(pwork, title, version=None):
     Raises:
         ValueError: if no matching series (or version) is found
     """
-    async def _query():
-        if not pwork.proj_id:
-            raise ValueError('Patchwork project not configured; use '
-                "'patman patchwork set-project' or provide -l <link>")
-        async with aiohttp.ClientSession() as client:
-            return await pwork.query_series(client, title)
-
-    loop = asyncio.get_event_loop()
-    results = loop.run_until_complete(_query())
+    if not pwork.proj_id:
+        raise ValueError('Patchwork project not configured; use '
+            "'patman patchwork set-project' or provide -l <link>")
+    results = _pw_call(pwork.query_series, title)
 
     if not results:
         raise ValueError(f"No series found matching '{title}'")
@@ -1795,8 +1801,7 @@ def create_drafts(ctx, args, review_bodies, review_ids):
                 data = await ctx.pwork.get_patch(client, str(patch['id']))
                 patch_headers[i + 1] = data.get('headers', {})
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(_fetch_patch_headers())
+    _run(_fetch_patch_headers())
 
     sender = None
     if ctx.reviewer_email and args.gmail_account:
@@ -1909,8 +1914,7 @@ def _do_learn_voice(args, pwork):
                     return proj.get('list_email')
             return None
 
-        loop = asyncio.get_event_loop()
-        list_email = loop.run_until_complete(_get_list_email())
+        list_email = _run(_get_list_email())
 
     if args.reviewer:
         match = re.match(r'(.+?)\s*<(.+?)>', args.reviewer)
@@ -2487,12 +2491,7 @@ def _fetch_series(pwork, link):
     Raises:
         ValueError: if the series is incomplete
     """
-    async def _fetch():
-        async with aiohttp.ClientSession() as client:
-            return await pwork.get_series(client, link)
-
-    loop = asyncio.get_event_loop()
-    series_data = loop.run_until_complete(_fetch())
+    series_data = _pw_call(pwork.get_series, link)
 
     series_name = series_data.get('name', f'series-{link}')
     version = series_data.get('version', 1)
@@ -2812,9 +2811,7 @@ async def revise_reviews(ctx, reviews, note, commits):
 
 def revise_reviews_sync(ctx, reviews, note, commits):
     """Synchronous wrapper for revise_reviews()"""
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(
-        revise_reviews(ctx, reviews, note, commits))
+    return _run(revise_reviews(ctx, reviews, note, commits))
 
 
 def _do_revise(args, pwork, cser, link):
@@ -2988,12 +2985,7 @@ def _base_text(ctx):
     if not patches:
         return ''
 
-    async def _fetch():
-        async with aiohttp.ClientSession() as client:
-            return await ctx.pwork.get_patch(client, str(patches[-1]['id']))
-
-    loop = asyncio.get_event_loop()
-    data = loop.run_until_complete(_fetch())
+    data = _pw_call(ctx.pwork.get_patch, str(patches[-1]['id']))
     return f"{data.get('content') or ''}\n{data.get('diff') or ''}"
 
 
@@ -3125,13 +3117,7 @@ def _fetch_cover_content(pwork, series_data):
     if not cover:
         return None
 
-    async def _fetch():
-        async with aiohttp.ClientSession() as client:
-            data = await pwork.get_cover(client, cover['id'])
-            return data.get('content', '')
-
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(_fetch())
+    return _pw_call(pwork.get_cover, cover['id']).get('content', '')
 
 
 def _run_coverity(ctx, args):
@@ -3309,12 +3295,7 @@ def _get_patch_states(pwork, link):
     Returns:
         list of str: State slug for each patch
     """
-    async def _fetch():
-        async with aiohttp.ClientSession() as client:
-            return await pwork.get_series_patch_states(client, link)
-
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(_fetch())
+    return _pw_call(pwork.get_series_patch_states, link)
 
 
 def _acquire_review_lock(repo, branch_name):
@@ -3505,8 +3486,7 @@ def _scan_new_versions(pwork, cser):
                                         latest['id'], received >= total,
                                         active))
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(_scan())
+    _run(_scan())
     return found
 
 
@@ -4069,8 +4049,7 @@ async def learn_voice(vp):
 
 def learn_voice_sync(vp):
     """Synchronous wrapper for learn_voice()"""
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(learn_voice(vp))
+    return _run(learn_voice(vp))
 
 
 def get_voice():
@@ -4159,8 +4138,7 @@ async def refine_voice(draft_body, sent_body):
 
 def refine_voice_sync(draft_body, sent_body):
     """Synchronous wrapper for refine_voice()"""
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(refine_voice(draft_body, sent_body))
+    return _run(refine_voice(draft_body, sent_body))
 
 
 _REPLY_PROMPT = '''You are a U-Boot maintainer. You previously reviewed a
@@ -4281,6 +4259,4 @@ async def handle_reply(ctx, review_body, reply_from, reply_body):
 
 def handle_reply_sync(ctx, review_body, reply_from, reply_body):
     """Synchronous wrapper for handle_reply()"""
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(
-        handle_reply(ctx, review_body, reply_from, reply_body))
+    return _run(handle_reply(ctx, review_body, reply_from, reply_body))
