@@ -22,6 +22,7 @@ HAS_TESTS = os.path.exists(PATMAN_DIR / "func_test.py")
 
 # Aliases for subcommands
 ALIASES = {
+    'database': ['db'],
     'series': ['s', 'ser'],
     'status': ['st'],
     'patchwork': ['pw'],
@@ -377,7 +378,7 @@ def add_series_subparser(subparsers):
     ren.add_argument('-N', '--new-name', help='New name for the series')
 
     rev = series_subparsers.add_parser(
-        'review', help='AI-review the series and store the result')
+        'review', help='Draft a review of the series and store it')
     rev.add_argument('-f', '--force', action='store_true',
                      help='Re-review even if reviews are already stored')
     rev.add_argument('--spelling', type=str, default='British',
@@ -605,7 +606,7 @@ def add_review_subparser(subparsers):
     """
     review = subparsers.add_parser(
         'review', aliases=ALIASES['review'],
-        help='AI-powered review of a patchwork series')
+        help='Draft reviews of a patchwork series using an agent')
     review.add_argument(
         '-s', '--series', type=str, dest='pw_link',
         help='Patchwork series link/ID number')
@@ -644,6 +645,20 @@ def add_review_subparser(subparsers):
         help='Recreate Gmail drafts from the stored reviews even when a '
              'draft already exists, to recover after an error')
     review.add_argument(
+        '--send', action='store_true',
+        help='Send the Gmail drafts of the reviews of the series (with -i, '
+             'only those patches; with -n, just show what would be sent)')
+    review.add_argument(
+        '--revise', type=str, metavar='NOTE',
+        help='Ask the agent to change the stored reviews of the series as '
+             'the note says, e.g. "Drop the comments about style" (with '
+             '-i, only those patches; with -d, update the Gmail drafts)')
+    review.add_argument(
+        '--review-db-dir', type=str, default=None, metavar='DIR',
+        help='Directory holding a separate database for reviews (the '
+             "'review_db_dir' setting); upstreams are still read from the "
+             'main database')
+    review.add_argument(
         '--gmail-account', type=str, default=None,
         help='Gmail account to create drafts in (e.g. user@gmail.com)')
     review.add_argument(
@@ -657,12 +672,14 @@ def add_review_subparser(subparsers):
         help='Upstream name (for patchwork URL lookup)')
     review.add_argument(
         '-b', '--base-branch', type=str, default=None,
-        help="Base branch to apply review patches onto (e.g. 'us/master', "
-             "'us/next'). If unset, picks the upstream's '/next' branch "
-             "when it has commits ahead of '/master', otherwise '/master'.")
+        help="Base branch to apply review patches onto (e.g. 'us/main', "
+             "'us/next'). If unset, uses the series' base-commit, or the "
+             "branch its cover letter says it is based on, else picks the "
+             "upstream's '/next' branch when it has commits ahead of "
+             "'/main' (or '/master'), otherwise '/main'.")
     review.add_argument(
         '--apply-only', action='store_true',
-        help='Only download and apply patches, skip AI review')
+        help='Only download and apply patches, skip the review')
     review.add_argument(
         '--coverity', action='store_true',
         help='Run Coverity on the base and the series, and feed the new '
@@ -687,6 +704,20 @@ def add_review_subparser(subparsers):
         '--voice-count', type=int, default=20,
         help='Number of review emails/comments to collect for '
              '--learn-voice (default: 20)')
+    review.add_argument(
+        '--replies', action='store_true', dest='list_replies',
+        help='List replies to your reviews which still need a response')
+    review.add_argument(
+        '--suggest-reply', type=int, metavar='ID',
+        help='Ask the agent to suggest a response to a reply (see --replies)')
+    review.add_argument(
+        '--draft-reply', type=int, metavar='ID',
+        help='Create a Gmail draft of the response to a reply, threaded as a '
+             'reply to it')
+    review.add_argument(
+        '--send-reply', type=int, metavar='ID',
+        help='Send the response to a reply, creating its Gmail draft first if '
+             'needed')
     review.add_argument(
         '--sync', action='store_true',
         help='Check if review drafts have been sent and record the '
@@ -726,6 +757,90 @@ def add_review_subparser(subparsers):
     return review
 
 
+def add_database_subparser(subparsers):
+    """Add the 'database' subparser
+
+    Args:
+        subparsers (argparse action): Subparser parent
+
+    Return:
+        ArgumentParser: database subparser
+    """
+    dbp = subparsers.add_parser(
+        'database', aliases=ALIASES['database'],
+        help='Copy series between databases, e.g. to keep reviews apart')
+    dbp.add_argument(
+        '-n', '--dry-run', action='store_true', dest='dry_run', default=False,
+        help='Show what would be done, without changing anything')
+    dbp.add_argument(
+        '--review-db-dir', type=str, default=None, metavar='DIR',
+        help='Directory holding a separate database for reviews (the '
+             "'review_db_dir' setting)")
+    dbp.defaults_cmds = [
+        ['merge', 'dummy'],
+    ]
+    db_subparsers = dbp.add_subparsers(dest='subcmd')
+
+    merge = db_subparsers.add_parser(
+        'merge', help='Copy series from another database into this one')
+    merge.add_argument(
+        'source',
+        help='Directory holding the .patman.db to copy from, or the file')
+    kind = merge.add_mutually_exclusive_group()
+    kind.add_argument('--own', action='store_true',
+                      help='Copy only your own series, not reviews')
+    kind.add_argument('--reviews', action='store_true',
+                      help='Copy only reviews, not your own series')
+    merge.add_argument(
+        '-R', '--to-review-db', action='store_true',
+        help='Copy into the review database rather than the main one')
+
+    db_subparsers.add_parser(
+        'split', help='Move reviews from the main database to the review '
+        "database (see 'review_db_dir')")
+    db_subparsers.add_parser(
+        'join', help='Move reviews from the review database back to the main '
+        'database')
+    return dbp
+
+
+def add_serve_subparser(subparsers):
+    """Add the 'serve' subparser
+
+    Args:
+        subparsers (argparse action): Subparser parent
+
+    Return:
+        ArgumentParser: serve subparser
+    """
+    serve = subparsers.add_parser(
+        'serve', help='Serve series status and reviews to a web browser')
+    serve.add_argument(
+        '--host', default='127.0.0.1',
+        help='Address to listen on (default: %(default)s)')
+    serve.add_argument(
+        '--port', type=int, default=8040,
+        help='Port to listen on (default: %(default)s)')
+    serve.add_argument(
+        '-s', '--sync', type=int, nargs='?', const=60, default=0,
+        dest='sync_interval', metavar='MINUTES',
+        help="Run 'series gather-all -G' every MINUTES minutes (default 60 "
+             'if no value is given), to keep the patch status up to date')
+    serve.add_argument(
+        '-r', '--review-sync', action='store_true',
+        help="Also run 'review --sync' each time, to track sent review "
+             'drafts and replies (needs Gmail)')
+    serve.add_argument(
+        '--review-db-dir', type=str, default=None, metavar='DIR',
+        help='Directory holding a separate database for reviews (the '
+             "'review_db_dir' setting)")
+    serve.add_argument(
+        '-t', '--token', default=None,
+        help='Token which clients must provide to use the API; use this '
+             'when listening on a non-loopback address')
+    return serve
+
+
 def setup_parser():
     """Set up command-line parser
 
@@ -750,6 +865,10 @@ def setup_parser():
                         default='https://patchwork.ozlabs.org',
                         help='URL of patchwork server [default: %(default)s]')
     parser.add_argument(
+        '--patchwork-timeout', type=int, default=30, metavar='SECS',
+        help='Seconds to wait for each patchwork request before trying '
+             "again (the 'patchwork_timeout' setting) [default: %(default)s]")
+    parser.add_argument(
         '-T', '--thread', action='store_true', dest='thread',
         default=False, help='Create patches as a single thread')
     parser.add_argument(
@@ -764,9 +883,11 @@ def setup_parser():
 
     subparsers = parser.add_subparsers(dest='cmd')
     add_send_subparser(subparsers)
+    database = add_database_subparser(subparsers)
     patchwork = add_patchwork_subparser(subparsers)
     review = add_review_subparser(subparsers)
     series = add_series_subparser(subparsers)
+    add_serve_subparser(subparsers)
     add_status_subparser(subparsers)
     upstream = add_upstream_subparser(subparsers)
     workflow = add_workflow_subparser(subparsers)
@@ -779,6 +900,7 @@ def setup_parser():
 
     parsers = {
         'main': parser,
+        'database': database,
         'review': review,
         'series': series,
         'patchwork': patchwork,
@@ -832,7 +954,8 @@ def parse_args(argv=None, config_fname=None, parsers=None):
             args.cmd = full
         if 'subcmd' in args and args.subcmd in aliases:
             args.subcmd = full
-    if args.cmd in ['series', 'upstream', 'patchwork', 'workflow'] and not args.subcmd:
+    if args.cmd in ['database', 'series', 'upstream', 'patchwork',
+                    'workflow'] and not args.subcmd:
         parser.parse_args([args.cmd, '--help'])
 
     return args

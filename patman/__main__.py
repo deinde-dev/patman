@@ -40,6 +40,7 @@ def run_patman():
         from patman import func_test
         from patman import test_checkpatch
         from patman import test_cseries
+        from patman import test_server
         from patman import test_settings
         from u_boot_pylib import test_command
 
@@ -49,7 +50,8 @@ def run_patman():
             args.test_preserve_dirs, None, to_run, None,
             [test_checkpatch.TestPatch, func_test.TestFunctional,
              'patman.settings', test_cseries.TestCseries,
-             test_settings.TestSettings, test_command.TestRunInteractive])
+             test_settings.TestSettings, test_server.TestWebServer,
+             test_command.TestRunInteractive])
         sys.exit(0 if result.wasSuccessful() else 1)
 
     # Process commits, produce patches files, check them, email them

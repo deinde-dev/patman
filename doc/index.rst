@@ -3,3 +3,9 @@
 .. include:: ../patman/patman.rst
 
 .. include:: ../CHANGELOG.rst
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Technical documentation
+
+   serve-protocol

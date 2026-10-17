@@ -8,6 +8,63 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+Added
+~~~~~
+- ``patman serve`` runs a web server showing series status, patchwork
+  comments, draft reviews and todos on a mobile-friendly page, optionally
+  syncing with patchwork periodically. Its JSON API is described in
+  ``doc/serve-protocol.rst``.
+- ``patman serve`` can start reviews, scans for new versions and redrafts,
+  which run one at a time as jobs, with their output shown on the page.
+- ``patman serve`` resumes the jobs which had not finished when it stopped.
+- The ``patman serve`` page has an inbox of recent series on patchwork,
+  marking those already reviewed.
+- The ``patman serve`` page shows the commit message, diff and comments of
+  each patch and cover letter, also beside its review, and the code around
+  each chunk of a diff.
+- Reviews which have not been sent can be edited on the ``patman serve`` page,
+  either whole or one comment at a time.
+- The ``patman serve`` page shows replies to reviews, and a response can be
+  edited, drafted and sent there.
+- The ``patman serve`` sync fetches the upstreams which reviews use, so that
+  reviews apply patches to up-to-date branches.
+- Reviews of other people's series can be kept in a separate database, given
+  by the ``review_db_dir`` setting or ``--review-db-dir``.
+- ``patman database`` (alias ``db``) moves reviews between the main and review
+  databases with ``split`` and ``join``, and copies series from another
+  database with ``merge``.
+- ``review --sync`` records replies to sent reviews, suggesting a response to
+  those sent in the last 14 days. ``review --replies`` lists them,
+  ``--suggest-reply`` asks the agent for a response and ``--draft-reply``
+  creates a Gmail draft of it, threaded as a reply.
+- ``review --send-reply`` sends the response to a reply, creating its Gmail
+  draft first if needed.
+- ``review --revise`` has the agent change the unsent reviews of a series
+  following a note, also from the ``patman serve`` page.
+- ``review --send`` sends the Gmail drafts of a series' reviews, also from the
+  ``patman serve`` page.
+
+Changed
+~~~~~~~
+- Patchwork requests are retried when the connection fails, is reset or
+  stalls, or the server returns a 502, 503 or 504 status. The timeout is set
+  with ``--patchwork-timeout`` or the ``patchwork_timeout`` setting.
+- ``series gather-all`` reads each series from the patchwork server of its
+  upstream, and updates the series it can read even if others fail.
+- ``review`` applies a series to the upstream's ``main`` branch, if it has
+  one, rather than ``master``.
+- Without ``-b``, ``review`` applies a series to the base commit or branch
+  which it says it is based on.
+
+Fixed
+~~~~~
+- Reviews which have been sent are not drafted again by ``review -d``,
+  ``--scan`` or ``--redraft``, and ``--redraft`` only drafts the patches
+  chosen with ``-i``.
+- ``review --sync`` finds sent reviews reliably, including those answered in
+  the thread rather than by sending the draft, and is much faster with many
+  drafts.
+
 0.3.3 - 2026-10-12
 ------------------
 

@@ -8,7 +8,11 @@ This module provides various functions called by the main program to implement
 the features of patman.
 """
 
+import os
 import re
+import shutil
+import sqlite3
+import tempfile
 import traceback
 
 try:
@@ -23,9 +27,11 @@ from u_boot_pylib import tools
 from u_boot_pylib import tout
 
 from patman import cseries
+from patman import dbmerge
 from patman import patchstream
 from patman import review as review_mod
 from patman import send
+from patman import server
 from patman import settings
 from patman import status
 from patman import workflow
@@ -437,20 +443,191 @@ def do_review(args, test_db=None, pwork=None, cser=None):
 
     if not cser:
         cser = cseries.Cseries(test_db)
+    review_db_dir = getattr(args, 'review_db_dir', None)
     try:
         cser.open_database()
 
         # Resolve patchwork URL
         if not pwork and not args.learn_voice and not args.sync \
-                and not args.relink:
+                and not args.relink \
+                and not getattr(args, 'list_replies', False) \
+                and not getattr(args, 'suggest_reply', None) \
+                and not getattr(args, 'draft_reply', None) \
+                and not getattr(args, 'send_reply', None):
             ups = args.upstream
             if not ups:
                 ups = cser.db.upstream_get_default()
             pwork = _setup_patchwork(
                 cser, pwork, ups, args.patchwork_url)
 
-        return review_mod.do_review(args, pwork, cser)
+        if not review_db_dir:
+            return review_mod.do_review(args, pwork, cser)
+
+        # Upstreams are only held in the main database, so note the default
+        # one before switching to the review database
+        if not args.upstream:
+            args.upstream = cser.db.upstream_get_default()
+        rcser = cseries.Cseries(cser.topdir, db_dir=review_db_dir)
+        try:
+            rcser.open_database()
+            return review_mod.do_review(args, pwork, rcser)
+        finally:
+            rcser.close_database()
     finally:
+        cser.close_database()
+
+
+def _open_review_db(cser, args):
+    """Open the review database named by the settings or arguments
+
+    Args:
+        cser (Cseries): Open cseries instance for the main database
+        args (Namespace): Arguments, including review_db_dir
+
+    Return:
+        Cseries: Open cseries instance for the review database
+
+    Raises:
+        ValueError: There is no review database, or it is the main one
+    """
+    if not args.review_db_dir:
+        raise ValueError("No review database: set 'review_db_dir' in "
+                         '~/.patman or use --review-db-dir')
+    rdir = os.path.expanduser(args.review_db_dir)
+    if not os.path.isdir(rdir):
+        raise ValueError(f"Review database directory '{rdir}' does not exist")
+    if os.path.realpath(os.path.join(rdir, '.patman.db')) == \
+            os.path.realpath(cser.db.db_path):
+        raise ValueError('The review database is the same as the main one')
+    rcser = cseries.Cseries(cser.topdir, db_dir=rdir)
+    rcser.open_database()
+    return rcser
+
+
+def _copy_source_db(source, tmpdir):
+    """Make a private copy of a database to read from
+
+    The copy is made with SQLite's backup API, reading the source without
+    changing it, so it includes any changes not yet checkpointed. Opening the
+    copy may then upgrade its schema, leaving the source alone.
+
+    Args:
+        source (str): Directory holding .patman.db, or the database file
+        tmpdir (str): Directory to hold the copy
+
+    Return:
+        str: tmpdir, which now holds .patman.db
+    """
+    fname = os.path.expanduser(source)
+    if os.path.isdir(fname):
+        fname = os.path.join(fname, '.patman.db')
+    if not os.path.isfile(fname):
+        raise ValueError(f"No database found at '{fname}'")
+    src = sqlite3.connect(f'file:{fname}?mode=ro', uri=True)
+    dest = sqlite3.connect(os.path.join(tmpdir, '.patman.db'))
+    try:
+        src.backup(dest)
+    finally:
+        dest.close()
+        src.close()
+    return tmpdir
+
+
+# pylint: disable=R0913,R0917
+def _transfer(src, dst, kind, move, dry_run, upstreams=False):
+    """Copy or move series between two open databases
+
+    Args:
+        src (Cseries): Instance to copy from
+        dst (Cseries): Instance to copy to
+        kind (str): dbmerge.ALL, OWN or REVIEWS
+        move (bool): True to remove each series from src once copied
+        dry_run (bool): True to report what would be done, changing nothing
+        upstreams (bool): True to copy upstreams missing from dst
+    """
+    if not dry_run:
+        dbmerge.backup(dst.db)
+        if move:
+            dbmerge.backup(src.db)
+    stats = dbmerge.copy_series(src.db, dst.db, kind, move)
+    if upstreams:
+        dbmerge.copy_upstreams(src.db, dst.db, stats)
+    if dry_run:
+        dst.rollback()
+        src.rollback()
+    else:
+        dst.commit()
+        if move:
+            src.commit()
+    stats.report(move)
+    if stats.left:
+        tout.warning(f'{len(stats.left)} series left in place in '
+                     f"{src.db.db_path}: {', '.join(stats.left)}")
+    if dry_run:
+        tout.notice('Dry run completed')
+
+
+def do_database(args, test_db=None):
+    """Process a 'database' subcommand
+
+    Args:
+        args (Namespace): Arguments to process
+        test_db (str or None): Directory containing the test database, None to
+            use the normal one
+    """
+    cser = cseries.Cseries(test_db)
+    others = []
+    tmpdir = None
+    try:
+        cser.open_database()
+        if args.subcmd == 'merge':
+            tmpdir = tempfile.mkdtemp(prefix='patman-db.')
+            src = cseries.Cseries(cser.topdir,
+                                  db_dir=_copy_source_db(args.source, tmpdir))
+            src.open_database()
+            others.append(src)
+            dst = cser
+            if args.to_review_db:
+                dst = _open_review_db(cser, args)
+                others.append(dst)
+            kind = (dbmerge.OWN if args.own else
+                    dbmerge.REVIEWS if args.reviews else dbmerge.ALL)
+            _transfer(src, dst, kind, False, args.dry_run,
+                      upstreams=not args.to_review_db)
+        elif args.subcmd in ('split', 'join'):
+            rcser = _open_review_db(cser, args)
+            others.append(rcser)
+            src, dst = (cser, rcser) if args.subcmd == 'split' else \
+                (rcser, cser)
+            _transfer(src, dst, dbmerge.REVIEWS, True, args.dry_run)
+    finally:
+        for other in others:
+            other.close_database()
+        cser.close_database()
+        if tmpdir:
+            shutil.rmtree(tmpdir)
+
+
+def do_serve(args, test_db=None):
+    """Process the 'serve' command
+
+    Args:
+        args (Namespace): Arguments to process
+        test_db (str or None): Directory containing the test database, None to
+            use the normal one
+    """
+    cser = cseries.Cseries(test_db)
+    rcser = None
+    try:
+        cser.open_database()
+        if args.review_db_dir:
+            rcser = cseries.Cseries(cser.topdir, db_dir=args.review_db_dir)
+            rcser.open_database()
+        server.serve(cser, args.host, args.port, args.patchwork_url,
+                     args.sync_interval, args.review_sync, args.token, rcser)
+    finally:
+        if rcser:
+            rcser.close_database()
         cser.close_database()
 
 
@@ -466,6 +643,8 @@ def do_patman(args, test_db=None, pwork=None, cser=None):
         cser (Cseries): Cseries object to use when executing the command,
             or None to create one
     """
+    if getattr(args, 'patchwork_timeout', None):
+        Patchwork.set_timeout(args.patchwork_timeout)
     if args.full_help:
         with resources.path('patman', 'patman.rst') as readme:
             tools.print_full_help(str(readme))
@@ -515,6 +694,10 @@ def do_patman(args, test_db=None, pwork=None, cser=None):
             ret_code = do_review(args, test_db, pwork, cser) or 0
         elif args.cmd == 'workflow':
             do_workflow(args, test_db)
+        elif args.cmd == 'serve':
+            do_serve(args, test_db)
+        elif args.cmd == 'database':
+            do_database(args, test_db)
     except Exception as exc:  # pylint: disable=W0718
         terminal.tprint(f'patman: {type(exc).__name__}: {exc}',
                         colour=terminal.Color.RED)

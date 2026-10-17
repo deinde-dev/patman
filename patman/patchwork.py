@@ -7,6 +7,7 @@
 
 import asyncio
 import re
+import socket
 from urllib.parse import quote_plus
 
 import aiohttp
@@ -43,6 +44,13 @@ COVER = namedtuple('cover', 'id,num_comments,name,comments')
 
 # Number of retries
 RETRIES = 3
+
+# HTTP status codes which suggest that a request may work if tried again
+RETRY_STATUS = (502, 503, 504)
+
+# Seconds to wait for a request to complete before trying again, which can be
+# changed with the 'patchwork_timeout' setting
+REQUEST_TIMEOUT = 30
 
 # Max concurrent request
 MAX_CONCURRENT = 50
@@ -209,17 +217,45 @@ class Patchwork:
             # print('full_url', full_url)
             for i in range(RETRIES + 1):
                 try:
-                    async with client.get(full_url) as response:
+                    async with client.get(
+                            full_url, timeout=aiohttp.ClientTimeout(
+                                total=REQUEST_TIMEOUT)) as response:
+                        if response.status in RETRY_STATUS and i < RETRIES:
+                            # The server is overloaded, so try again later
+                            await asyncio.sleep(i + 1)
+                            continue
                         if response.status != 200:
                             raise ValueError(
-                                f"Could not read URL '{full_url}'")
+                                f"Could not read URL '{full_url}' "
+                                f'(status {response.status})')
                         result = await response.json()
                         # print('- done', full_url)
                         return result
                     break
-                except aiohttp.client_exceptions.ServerDisconnectedError:
+                except aiohttp.ClientConnectorError as exc:
+                    # A name which does not resolve will not start working,
+                    # but a busy server may fail to accept a connection
+                    if isinstance(exc.os_error, socket.gaierror) or \
+                            i == RETRIES:
+                        raise
+                    await asyncio.sleep(i + 1)
+                except (aiohttp.ServerDisconnectedError,
+                        aiohttp.ClientOSError, asyncio.TimeoutError):
+                    # The server may drop, reset or stall connections when
+                    # busy
                     if i == RETRIES:
                         raise
+                    await asyncio.sleep(i + 1)
+
+    @staticmethod
+    def set_timeout(secs):
+        """Set the time to wait for each request before trying again
+
+        Args:
+            secs (float): Timeout in seconds
+        """
+        global REQUEST_TIMEOUT  # pylint: disable=W0603
+        REQUEST_TIMEOUT = secs
 
     @staticmethod
     def for_testing(func):
@@ -411,6 +447,22 @@ class Patchwork:
         """
         self.proj_id = project_id
         self.link_name = link_name
+
+    async def get_recent_series(self, client, project, page=1, per_page=50):
+        """Read the most recent series in a project, newest first
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            project (str): Project link name, e.g. 'uboot'
+            page (int): Page number, starting at 1
+            per_page (int): Number of series in each page
+
+        Returns:
+            list of dict: Series information, as for get_series()
+        """
+        return await self._request(
+            client, f'series/?project={project}&order=-date&page={page}'
+            f'&per_page={per_page}')
 
     async def get_series(self, client, link):
         """Read information about a series

@@ -35,7 +35,7 @@ gmail = [
     "google-auth-httplib2",
     "google-auth-oauthlib",
 ]
-# AI-assisted patch review
+# Patch review using a Claude agent
 review = ["claude-agent-sdk"]
 # Running the test suite (parallel test execution)
 test = ["concurrencytest"]
@@ -62,4 +62,4 @@ patch-manager = "patman.__main__:run_patman"
 packages = ["patman"]
 
 [tool.setuptools.package-data]
-patman = ["*.rst", "test/*"]
+patman = ["*.rst", "test/*", "web/*"]

@@ -5,10 +5,13 @@
 """Functional tests for checking that patman behaves correctly"""
 
 import asyncio
+import base64
 import contextlib
-from datetime import datetime
+from datetime import datetime, timedelta
+import email.utils
 import os
 import re
+import subprocess
 import types
 import unittest
 from unittest import mock
@@ -3256,6 +3259,7 @@ Date:   .*
             with terminal.capture() as (out, _):
                 yield cser, pwork
             self.assertEqual(
+                'Reading 2 series from https://my-fake-url\n'
                 "Syncing 'first' v3\n"
                 "Syncing 'second' v2\n"
                 '\n'
@@ -3269,6 +3273,8 @@ Date:   .*
                 yield cser, pwork
             lines = out.getvalue().splitlines()
             itr = iter(lines)
+            self.assertEqual('Reading 2 series from https://my-fake-url',
+                             next(itr))
             self.assertEqual("Syncing 'first' v3", next(itr))
             self.assertEqual('  1 i2c: I2C things', next(itr))
             self.assertEqual(
@@ -3328,6 +3334,8 @@ Date:   .*
                 yield cser, pwork
             lines = out.getvalue().splitlines()
             itr = iter(lines)
+            self.assertEqual('Reading 5 series from https://my-fake-url',
+                             next(itr))
             self.assertEqual("Syncing 'first' v1", next(itr))
             self.assertEqual('  1 i2c: I2C things', next(itr))
             self.assertEqual(
@@ -3505,6 +3513,317 @@ Date:   .*
                       pwork=pwork)
 
         self.assertFalse(next(cor))
+
+    def test_review_db_dir(self):
+        """'review --review-db-dir' keeps reviews in a separate database"""
+        cser = self.get_cser()
+        with terminal.capture():
+            cser.upstream_add('us', 'https://us-repo')
+            cser.upstream_set_default('us')
+        cser.close_database()
+        rdir = os.path.join(self.tmpdir, 'reviews')
+        os.mkdir(rdir)
+        args = cmdline.parse_args(['review', '--sync', '--review-db-dir', rdir],
+                                  config_fname=False)
+        seen = {}
+
+        def fake_review(args, pwork, rcser):
+            seen['path'] = rcser.db.db_path
+            seen['topdir'] = rcser.topdir
+            seen['ups'] = args.upstream
+            return 0
+
+        with mock.patch.object(review, 'do_review', side_effect=fake_review):
+            self.assertEqual(0, control.do_review(args, self.tmpdir))
+        self.assertEqual(os.path.join(rdir, '.patman.db'), seen['path'])
+        self.assertEqual(self.tmpdir, seen['topdir'])
+
+        # The default upstream is only in the main database
+        self.assertEqual('us', seen['ups'])
+
+    def open_db_in(self, dirname):
+        """Open (creating if needed) the database in a directory
+
+        Args:
+            dirname (str): Directory to hold .patman.db
+
+        Return:
+            Cseries: Instance with the database open
+        """
+        os.makedirs(dirname, exist_ok=True)
+        cser = cseries.Cseries(self.tmpdir, terminal.COLOR_NEVER,
+                               db_dir=dirname)
+        with terminal.capture():
+            cser.open_database()
+        return cser
+
+    @staticmethod
+    def add_db_series(db, name, versions, review=False, todo=False):
+        """Add a series with some versions, patches and reviews
+
+        Args:
+            db (Database): Database to update
+            name (str): Series name
+            versions (list of int): Versions to add, each with one patch and,
+                for a review, one review
+            review (bool): True to make it a series being reviewed
+            todo (bool): True to add a todo for the series
+
+        Return:
+            int: Series ID
+        """
+        sid = db.series_add(name, f'{name} desc', None)
+        if review:
+            db.series_set_source(sid, 'review')
+        for version in versions:
+            svid = db.ser_ver_add(sid, version, link=f'{sid}{version}')
+            db.pcommit_add_list(svid, [Pcommit(None, 0, f'{name} patch',
+                                               None, None, None, None, None)])
+            if review:
+                db.review_add(svid, 1, f'{name} v{version} review', True,
+                              '2026-10-01 10:00:00')
+        if todo:
+            db.execute('INSERT INTO workflow (type, series_id, timestamp, '
+                       'archived) VALUES (?, ?, ?, 0)',
+                       ('todo', sid, '2026-11-01 10:00:00'))
+        db.commit()
+        return sid
+
+    @staticmethod
+    def db_summary(db):
+        """Summarise the series in a database
+
+        Return:
+            dict: key (str): series name
+                value (tuple): (source, list of versions, number of reviews,
+                    number of patches, number of todos)
+        """
+        out = {}
+        for sid, name, source in db.execute(
+                'SELECT id, name, source FROM series').fetchall():
+            vers = [row[0] for row in db.execute(
+                'SELECT version FROM ser_ver WHERE series_id = ? '
+                'ORDER BY version', (sid,)).fetchall()]
+            svids = '(SELECT id FROM ser_ver WHERE series_id = ?)'
+            nrev = db.execute(f'SELECT COUNT(*) FROM review WHERE svid IN '
+                              f'{svids}', (sid,)).fetchone()[0]
+            npat = db.execute(f'SELECT COUNT(*) FROM pcommit WHERE svid IN '
+                              f'{svids}', (sid,)).fetchone()[0]
+            ntodo = db.execute('SELECT COUNT(*) FROM workflow WHERE '
+                               'series_id = ?', (sid,)).fetchone()[0]
+            out[name] = (source, vers, nrev, npat, ntodo)
+        return out
+
+    def run_db(self, *argv):
+        """Run a 'database' command, returning its output
+
+        Return:
+            str: stdout and stderr together
+        """
+        args = cmdline.parse_args(['db', *argv], config_fname=False)
+        with terminal.capture() as (out, err):
+            control.do_database(args, self.tmpdir)
+        return out.getvalue() + err.getvalue()
+
+    def test_db_split_join(self):
+        """Reviews can be moved to a separate database and back"""
+        main = self.get_database()
+        self.add_db_series(main.db, 'mine', [1, 2], todo=True)
+        self.add_db_series(main.db, 'rev1', [1, 2], review=True)
+        self.add_db_series(main.db, 'clash', [1], review=True)
+        self.add_db_series(main.db, 'dup', [1, 2], review=True)
+        self.add_db_series(main.db, 'twice', [1, 1], review=True)
+        main.close_database()
+
+        # The review database has one of your own series with the same name
+        # as a review, and a review with one version in common
+        rdir = os.path.join(self.tmpdir, 'reviews')
+        rcser = self.open_db_in(rdir)
+        self.add_db_series(rcser.db, 'clash', [1])
+        self.add_db_series(rcser.db, 'dup', [2], review=True)
+        rcser.close_database()
+
+        # A dry run changes nothing
+        out = self.run_db('-n', '--review-db-dir', rdir, 'split')
+        self.assertIn('Moved 1 series: 2 versions, 2 patches, 2 reviews',
+                      out)
+        self.assertIn('Dry run completed', out)
+        main = self.get_database()
+        self.assertEqual(5, len(self.db_summary(main.db)))
+        main.close_database()
+
+        out = self.run_db('--review-db-dir', rdir, 'split')
+        self.assertIn('Already present, not copied: dup v2', out)
+        self.assertIn('Already present, not copied: twice v1', out)
+        self.assertIn("Kept apart: 'clash'", out)
+        self.assertIn('3 series left in place', out)
+        self.assertTrue(os.path.exists(
+            os.path.join(self.tmpdir, '.patman.db.bak')))
+        self.assertTrue(os.path.exists(os.path.join(rdir, '.patman.db.bak')))
+
+        main = self.get_database()
+        self.assertEqual(
+            {'mine': (None, [1, 2], 0, 2, 1),
+             'clash': ('review', [1], 1, 1, 0),
+             'dup': ('review', [1, 2], 2, 2, 0),
+             'twice': ('review', [1, 1], 2, 2, 0)},
+            self.db_summary(main.db))
+        main.close_database()
+        rcser = self.open_db_in(rdir)
+        self.assertEqual(
+            {'clash': (None, [1], 0, 1, 0),
+             'dup': ('review', [2], 1, 1, 0),
+             'rev1': ('review', [1, 2], 2, 2, 0)},
+            self.db_summary(rcser.db))
+        rcser.close_database()
+
+        # Moving back brings 'rev1' home; 'dup' is in both so stays put
+        out = self.run_db('--review-db-dir', rdir, 'join')
+        self.assertIn('Moved 1 series', out)
+        main = self.get_database()
+        self.assertEqual(('review', [1, 2], 2, 2, 0),
+                         self.db_summary(main.db)['rev1'])
+        main.close_database()
+
+    def test_db_errors(self):
+        """Problems with the review database are reported"""
+        self.get_database().close_database()
+        with self.assertRaises(ValueError) as exc:
+            self.run_db('split')
+        self.assertIn('No review database', str(exc.exception))
+        with self.assertRaises(ValueError) as exc:
+            self.run_db('--review-db-dir', '/no/such/dir', 'split')
+        self.assertIn('does not exist', str(exc.exception))
+        with self.assertRaises(ValueError) as exc:
+            self.run_db('--review-db-dir', self.tmpdir, 'split')
+        self.assertIn('same as the main one', str(exc.exception))
+        with self.assertRaises(ValueError) as exc:
+            self.run_db('merge', os.path.join(self.tmpdir, 'nothing'))
+        self.assertIn('No database found', str(exc.exception))
+
+    def test_db_merge(self):
+        """Series can be copied from another database, by kind"""
+        main = self.get_database()
+        self.add_db_series(main.db, 'mine', [1])
+        main.db.upstream_add('us', 'https://us', 'https://pw.us')
+        main.db.upstream_set_default('us')
+        main.commit()
+        main.close_database()
+
+        other = os.path.join(self.tmpdir, 'other')
+        ocser = self.open_db_in(other)
+        self.add_db_series(ocser.db, 'mine', [1, 2], todo=True)
+        self.add_db_series(ocser.db, 'theirs', [3], todo=True)
+        self.add_db_series(ocser.db, 'rev', [1], review=True)
+        ocser.db.upstream_add('us', 'https://elsewhere')
+        ocser.db.upstream_add('ci', 'https://ci', 'https://pw.ci')
+        ocser.db.upstream_set_default('ci')
+        ocser.db.patchwork_update('U-Boot', 1, 'uboot', 'ci')
+        ocser.commit()
+        ocser.close_database()
+        other_db = os.path.join(other, '.patman.db')
+        before = tools.read_file(other_db)
+
+        out = self.run_db('merge', '--own', other)
+        self.assertIn('Copied 1 series: 2 versions, 2 patches, 0 reviews, '
+                      '1 todos', out)
+        self.assertIn('Added 1 upstreams', out)
+        self.assertIn('Already present, not copied: mine v1', out)
+        self.assertEqual(before, tools.read_file(other_db))
+
+        main = self.get_database()
+        self.assertEqual({'mine': (None, [1, 2], 0, 2, 0),
+                          'theirs': (None, [3], 0, 1, 1)},
+                         self.db_summary(main.db))
+        ups = main.db.upstream_get_dict()
+        self.assertEqual(('https://us', True), ups['us'][:2])
+        self.assertEqual(('https://ci', False, 'https://pw.ci'),
+                         ups['ci'][:3])
+        self.assertEqual('uboot', main.project_get('ci')[2])
+        main.close_database()
+
+        # Reviews can go straight into the review database
+        rdir = os.path.join(self.tmpdir, 'reviews')
+        self.open_db_in(rdir).close_database()
+        out = self.run_db('--review-db-dir', rdir, 'merge', '--reviews', '-R',
+                          other_db)
+        self.assertIn('Copied 1 series: 1 versions, 1 patches, 1 reviews',
+                      out)
+        rcser = self.open_db_in(rdir)
+        self.assertEqual({'rev': ('review', [1], 1, 1, 0)},
+                         self.db_summary(rcser.db))
+        self.assertEqual({}, rcser.db.upstream_get_dict())
+        rcser.close_database()
+
+    def setup_gather_two_servers(self):
+        """Set up 'first' on a second patchwork server which is down
+
+        'first' has upstream 'other', whose patchwork server raises an error
+        for every request. 'second' has no upstream.
+
+        Return: tuple:
+            Cseries: New Cseries object
+            Patchwork: Patchwork object for the normal server
+            Patchwork: Patchwork object for the server which is down
+        """
+        cser, pwork = self.setup_second(False)
+
+        def _down(_subpath):
+            raise ValueError('Server is down')
+
+        bad = Patchwork.for_testing(_down)
+        bad.url = 'https://other-pw'
+        with terminal.capture():
+            cser.link_set('first', 1, f'{self.SERIES_ID_FIRST_V3}', True)
+            cser.link_auto(pwork, 'second', 2, True)
+            cser.upstream_add('other', 'https://other-repo',
+                              patchwork_url='https://other-pw')
+            cser.set_upstream('first', 'other')
+        return cser, pwork, bad
+
+    def test_series_gather_all_servers(self):
+        """Gather series from each upstream's patchwork server"""
+        cser, pwork, bad = self.setup_gather_two_servers()
+        with mock.patch.object(cser, '_make_patchwork',
+                               return_value=bad) as make:
+            with terminal.capture() as (out, err):
+                with self.assertRaises(ValueError) as exc:
+                    cser.gather_all(pwork, False, False, False, False)
+        make.assert_called_once_with('https://other-pw')
+        self.assertEqual('Cannot read 1 series from patchwork',
+                         str(exc.exception))
+        self.assertEqual(
+            "Cannot read 'first' v1 from https://other-pw: ValueError: "
+            'Server is down', err.getvalue().strip())
+
+        # 'second' is still read and updated
+        itr = iter(out.getvalue().splitlines())
+        self.assertEqual('Reading 1 series from https://other-pw', next(itr))
+        self.assertEqual('Reading 1 series from https://my-fake-url',
+                         next(itr))
+        self.assertEqual("Syncing 'second' v2", next(itr))
+        self.assertEqual('', next(itr))
+        self.assertEqual(
+            '3 patches and 1 cover letter updated, 0 missing links '
+            '(9 requests)', next(itr))
+        self.assert_finished(itr)
+
+    def test_series_gather_all_default_ups(self):
+        """Series with no upstream are read from the default upstream"""
+        cser, pwork, bad = self.setup_gather_two_servers()
+        with terminal.capture():
+            cser.upstream_set_default('other')
+        with mock.patch.object(cser, '_make_patchwork', return_value=bad):
+            with terminal.capture() as (out, err):
+                with self.assertRaises(ValueError) as exc:
+                    cser.gather_all(pwork, False, False, False, False)
+        self.assertEqual('Reading 2 series from https://other-pw',
+                         out.getvalue().splitlines()[0])
+        self.assertEqual(
+            'Cannot read any of 2 series from https://other-pw: ValueError: '
+            'Server is down', err.getvalue().strip())
+        self.assertEqual('Cannot read 2 series from patchwork',
+                         str(exc.exception))
 
     def _check_second(self, itr, show_all):
         """Check output from a 'progress' command
@@ -3828,7 +4147,7 @@ Date:   .*
             self.assertEqual(f'Update database to v{version}',
                              out.getvalue().strip())
             self.assertEqual(version, db.get_schema_version())
-        self.assertEqual(10, database.LATEST)
+        self.assertEqual(11, database.LATEST)
 
     def test_migrate_future_version(self):
         """Test that a database newer than patman is rejected"""
@@ -5220,6 +5539,605 @@ Date:   .*
         self.assertEqual('a@b.org, c@d.org',
                          gmail._format_addrs([['a@b.org', 'c@d.org']]))
 
+    @staticmethod
+    def gmail_msg(msg_id, hdrs, body, sent=False):
+        """Make a message as returned by the Gmail API
+
+        Args:
+            msg_id (str): Gmail message ID
+            hdrs (dict): Headers
+            body (str): Text of the message
+            sent (bool): True if we sent it
+
+        Return:
+            dict: Message
+        """
+        return {
+            'id': msg_id,
+            'labelIds': ['SENT'] if sent else ['INBOX'],
+            'payload': {
+                'mimeType': 'text/plain',
+                'headers': [{'name': key, 'value': val}
+                            for key, val in hdrs.items()],
+                'body': {'data': base64.urlsafe_b64encode(
+                    body.encode()).decode()},
+            },
+        }
+
+    def fake_gmail(self):
+        """Set up a fake Gmail service with a thread containing a review
+
+        The thread has the patch, our review, a reply to the review, a reply
+        to someone else and a response which we sent.
+
+        Return:
+            MagicMock: Gmail service
+        """
+        msgs = [
+            self.gmail_msg('m0', {'Message-ID': '<p0@x>'}, 'The patch'),
+            self.gmail_msg('m1', {'Message-ID': '<r1@me>'}, 'My review',
+                           sent=True),
+            self.gmail_msg('m2', {
+                'From': 'Fred Bloggs <fred@x.com>',
+                'To': 'Simon Glass <sjg@chromium.org>',
+                'Cc': 'u-boot@lists.denx.de, Tom Rini <trini@k.com>, '
+                      'fred@x.com',
+                'Subject': 'Re: [PATCH 2/5] video: Add a driver',
+                'Date': email.utils.format_datetime(
+                    datetime.now().astimezone()),
+                'Message-ID': '<a2@x>', 'In-Reply-To': '<r1@me>',
+                'References': '<p0@x> <r1@me>'}, 'Why do you say that?'),
+            self.gmail_msg('m3', {'From': 'Tom <trini@k.com>',
+                                  'References': '<p0@x> <o@y>',
+                                  'Message-ID': '<t3@k>'}, 'Not to you'),
+            self.gmail_msg('m4', {'References': '<p0@x> <r1@me>',
+                                  'Message-ID': '<r4@me>'}, 'More from me',
+                           sent=True),
+            self.gmail_msg('m5', {
+                'From': 'Tom Rini <trini@k.com>', 'Subject': 'Re: x',
+                'Message-ID': '<t5@k>', 'References': '<p0@x> <r1@me>'},
+                'Looks fine to me'),
+            self.gmail_msg('m6', {'References': '<r1@me> <t5@k>',
+                                  'Message-ID': '<r6@me>'}, 'Thanks Tom',
+                           sent=True),
+        ]
+        service = mock.MagicMock()
+        service.users.return_value.threads.return_value.get.return_value \
+            .execute.return_value = {'messages': msgs}
+        return service
+
+    def test_review_replies(self):
+        """Replies to a sent review are recorded and can be responded to"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'Fred series', None)
+        db.series_set_source(sid, 'review')
+        svid = db.ser_ver_add(sid, 1, link='123')
+        rid = db.review_add(svid, 2, 'Please fix this', False,
+                            datetime.now().isoformat())
+        db.review_set_sent(rid, 'Please fix this', 'm1', 't1')
+        old = db.review_add(svid, 3, 'Old review', False,
+                            '2020-01-01T00:00:00')
+        db.review_set_sent(old, 'Old review', 'm1', 't1')
+        db.commit()
+
+        service = self.fake_gmail()
+        replies = gmail.fetch_thread_replies(service, 't1', 'm1')
+        self.assertEqual([('m2', None), ('m5', 'Thanks Tom')],
+                         [(rep['msg_id'], rep['answer']) for rep in replies])
+        self.assertEqual(('<a2@x>', '<p0@x> <r1@me>', 'Why do you say that?'),
+                         (replies[0]['message_id'], replies[0]['references'],
+                          replies[0]['body']))
+
+        ctx = review.ReviewContext(None, cser, {})
+        ctx.reviewer_name = 'Simon Glass'
+        ctx.reviewer_email = 'sjg@chromium.org'
+        with mock.patch.object(review, 'handle_reply_sync',
+                               return_value=('suggested', 'Because')) as ai, \
+                terminal.capture() as (out, _):
+            self.assertEqual(1, review._handle_replies(service, ctx))
+
+            # A second sync records nothing new
+            self.assertEqual(0, review._handle_replies(service, ctx))
+        ai.assert_called_once_with(ctx, 'Please fix this',
+                                   'Fred Bloggs <fred@x.com>',
+                                   'Why do you say that?')
+        self.assertIn('response suggested', out.getvalue())
+        self.assertEqual('replied', db.review_get(rid).status)
+        self.assertEqual('sent', db.review_get(old).status)
+
+        reply, answered = db.reply_get_for_review(rid)
+        self.assertEqual(('suggested', 'Because', 'Fred Bloggs <fred@x.com>'),
+                         (reply.status, reply.response, reply.sender))
+        self.assertEqual(('sent', 'Thanks Tom'),
+                         (answered.status, answered.response))
+        self.assertEqual([reply.idnum],
+                         [rep.idnum for rep in db.reply_get_by_status(
+                             database.REPLY_WAITING)])
+
+        with terminal.capture() as (out, _):
+            review._list_replies(cser)
+        self.assertIn('Fred Bloggs <fred@x.com>: Re: [PATCH 2/5] video: Add a '
+                      'driver (response suggested)', out.getvalue())
+
+        # The response is copied to everyone but ourselves and the sender
+        self.assertEqual('u-boot@lists.denx.de, Tom Rini <trini@k.com>',
+                         review._reply_cc(reply, {'sjg@chromium.org'}))
+
+        draft_svc = mock.MagicMock()
+        with mock.patch.object(gmail, 'create_draft',
+                               return_value={'id': 'd1'}) as create, \
+                terminal.capture():
+            review._draft_response(draft_svc, ctx, reply.idnum)
+        create.assert_called_once_with(
+            draft_svc, 'Fred Bloggs <fred@x.com>',
+            'Re: [PATCH 2/5] video: Add a driver', 'Because',
+            in_reply_to='<a2@x>', references='<p0@x> <r1@me> <a2@x>',
+            cc='u-boot@lists.denx.de, Tom Rini <trini@k.com>',
+            sender='Simon Glass <sjg@chromium.org>')
+        reply = db.reply_get(reply.idnum)
+        self.assertEqual(('draft', 'd1'), (reply.status, reply.draft_id))
+
+        # Drafting again replaces the old draft
+        with mock.patch.object(gmail, 'create_draft',
+                               return_value={'id': 'd2'}), \
+                mock.patch.object(gmail, 'delete_draft') as delete, \
+                terminal.capture():
+            review._draft_response(draft_svc, ctx, reply.idnum)
+        delete.assert_called_once_with(draft_svc, 'd1')
+
+        # Once the draft is sent, the response is recorded as sent
+        with mock.patch.object(gmail, 'sync_drafts',
+                               return_value=({reply.idnum: ('Sent text', 'm9',
+                                                            't1')}, [], {})), \
+                terminal.capture():
+            review._sync_reply_drafts(draft_svc, cser)
+        reply = db.reply_get(reply.idnum)
+        self.assertEqual(('sent', 'Sent text'),
+                         (reply.status, reply.response))
+        with self.assertRaises(ValueError) as exc:
+            review._draft_response(draft_svc, ctx, reply.idnum)
+        self.assertIn('has been sent', str(exc.exception))
+
+        # The agent may decide that no response is needed
+        db.reply_set_response(reply.idnum, None, database.REPLY_NEW)
+        with mock.patch.object(review, 'handle_reply_sync',
+                               return_value=('skip', None)), \
+                terminal.capture() as (out, _):
+            review._suggest_response(ctx, reply.idnum)
+        self.assertIn('no response needed', out.getvalue())
+        self.assertEqual('skip', db.reply_get(reply.idnum).status)
+        with self.assertRaises(ValueError) as exc:
+            review._draft_response(draft_svc, ctx, reply.idnum)
+        self.assertIn('There is no response', str(exc.exception))
+
+        # Sending a response with no draft creates one first, and records
+        # the text which was sent, which may have been changed in Gmail
+        db.reply_set_response(reply.idnum, 'My answer',
+                              database.REPLY_SUGGESTED)
+        with mock.patch.object(gmail, 'create_draft',
+                               return_value={'id': 'd3'}) as create, \
+                mock.patch.object(gmail, 'delete_draft'), \
+                mock.patch.object(gmail, 'send_draft',
+                                  return_value=('Edited', 'm3', 't3')) as send, \
+                terminal.capture() as (out, _):
+            review._send_response(draft_svc, ctx, reply.idnum)
+        self.assertEqual('My answer', create.call_args[0][3])
+        send.assert_called_once_with(draft_svc, 'd3')
+        self.assertIn('sent the response', out.getvalue())
+        reply = db.reply_get(reply.idnum)
+        self.assertEqual(('sent', 'Edited'), (reply.status, reply.response))
+        with self.assertRaises(ValueError) as exc:
+            review._send_response(draft_svc, ctx, reply.idnum)
+        self.assertIn('has been sent', str(exc.exception))
+
+        # An existing draft is sent as it is; if it has been deleted in
+        # Gmail, nothing is sent
+        db.reply_set_response(reply.idnum, 'Again', database.REPLY_SUGGESTED)
+        db.reply_set_status(reply.idnum, database.REPLY_DRAFT, 'd4')
+        with mock.patch.object(gmail, 'create_draft') as create, \
+                mock.patch.object(gmail, 'send_draft',
+                                  return_value=None) as send:
+            with self.assertRaises(ValueError) as exc:
+                review._send_response(draft_svc, ctx, reply.idnum)
+        self.assertIn('has been deleted', str(exc.exception))
+        create.assert_not_called()
+        send.assert_called_once_with(draft_svc, 'd4')
+        self.assertEqual('suggested', db.reply_get(reply.idnum).status)
+
+        # Deleting the review deletes its replies
+        db.review_delete_for_version(svid)
+        self.assertEqual([], db.reply_get_by_status(['skip']))
+
+    def test_gmail_sync_drafts(self):
+        """Our messages in response to drafts are found reliably"""
+        review_text = ('Hi Fred,\n\nOn Mon, Fred wrote:\n> code\n\n'
+                       'Please use a helper for the colour mode checks here.\n'
+                       '\nRegards,\nSimon')
+        self.assertEqual('please use a helper for the colour mode',
+                         gmail.search_phrase(review_text))
+        self.assertIsNone(gmail.search_phrase(
+            'Reviewed-by: Simon Glass <sjg@chromium.org>'))
+        self.assertEqual(('video add it', 2, '2/5'), gmail.subject_key(
+            'Re: [PATCH v2 02/5] video: Add it'))
+        self.assertEqual(('video add it', 1, None),
+                         gmail.subject_key('Re: [PATCH] video: Add it'))
+        self.assertTrue(gmail.same_subject('[RFC,v2,3/5] video: Add it',
+                                           'Re: [PATCH RFC v2 03/5] Video: '
+                                           'add it'))
+        self.assertFalse(gmail.same_subject('[v2,3/5] video: Add it',
+                                            'Re: [PATCH v3 3/5] video: Add it'))
+        self.assertFalse(gmail.same_subject('[v2,3/5] video: Add it',
+                                            'Re: [PATCH v2 4/5] video: Add it'))
+
+        def msg(msg_id, subject, body, when, sent=True, thread='t1'):
+            out = self.gmail_msg(msg_id, {'Subject': subject}, body,
+                                 sent=sent)
+            out['threadId'] = thread
+            out['internalDate'] = str(when * 1000)
+            return out
+
+        thread = [
+            msg('p1', '[PATCH 1/2] video: Add it', 'patch', 100, sent=False),
+            msg('old', 'Re: [PATCH 1/2] video: Add it', 'Earlier', 150),
+            msg('s1', 'Re: [PATCH 2/2] video: Other', 'Something', 300),
+            msg('s2', 'Re: [PATCH 1/2] video: Add it', 'My own words', 400),
+            msg('s3', 'Re: [PATCH 1/2] video: Add it', 'Later', 500),
+            msg('v2', 'Re: [PATCH v2 4/4] video: Fourth', 'Next version', 600),
+            msg('s4', 'Re: [PATCH 3/4] video: Third', 'Much later',
+                200 + 15 * 86400),
+        ]
+        service = mock.MagicMock()
+        users = service.users.return_value
+
+        def get_draft(userId, id, format):  # pylint: disable=W0622,W0613
+            req = mock.MagicMock()
+            if id.startswith('pending'):
+                req.execute.return_value = {'message': {'threadId': 't1'}}
+            else:
+                req.execute.side_effect = ValueError('not found')
+            return req
+
+        users.drafts.return_value.get.side_effect = get_draft
+        users.threads.return_value.get.return_value.execute.return_value = {
+            'messages': thread}
+        found = msg('f1', 'Re: [PATCH] net: Fix it',
+                    'Edited.\n\n' + review_text, 400, thread='t2')
+        users.messages.return_value.list.return_value.execute.return_value = {
+            'messages': [{'id': 'f1'}]}
+        users.messages.return_value.get.return_value.execute.return_value = \
+            found
+
+        def item(idnum, draft_id, thread_id, subject, check_sent=True,
+                 body='Draft text'):
+            return types.SimpleNamespace(
+                idnum=idnum, draft_id=draft_id, body=body,
+                thread_id=thread_id, subject=subject, after='2026/10/01',
+                since=200, check_sent=check_sent)
+
+        sent, deleted, threads = gmail.sync_drafts(service, [
+            # Draft still there, but we wrote our own reply in its thread
+            item(1, 'pending1', None, '[1/2] video: Add it'),
+            # Draft still there, and not checked for a reply
+            item(2, 'pending2', 't1', '[1/2] video: Add it', False),
+            # Draft gone; we sent a rewritten reply
+            item(3, 'gone3', 't1', '[1/2] video: Add it'),
+            # Draft gone and thread unknown, so search the sent mail
+            item(4, 'gone4', None, 'net: Fix it', body=review_text),
+            # Draft gone, with no reply on this patch
+            item(5, 'gone5', 't1', '[3/3] video: Not sent'),
+            # Draft gone; our only reply was to a later version
+            item(6, 'gone6', 't1', '[4/4] video: Fourth'),
+            # Draft gone; our only reply on the patch came much later
+            item(7, 'gone7', 't1', '[3/4] video: Third'),
+        ])
+        self.assertEqual({1: 't1'}, threads)
+        self.assertEqual({1: ('My own words', 's2', 't1'),
+                          3: ('My own words', 's2', 't1'),
+                          4: ('Edited.\n\n' + review_text, 'f1', 't2')},
+                         sent)
+        self.assertEqual([5, 6, 7], deleted)
+        queries = [call.kwargs['q'] for call in
+                   users.messages.return_value.list.call_args_list]
+        self.assertEqual(
+            ['in:sent after:2026/10/01 '
+             '"please use a helper for the colour mode"',
+             'in:sent after:2026/10/01 "net fix it"'], queries)
+
+    def test_review_sync_drafts(self):
+        """Review drafts are synced, with limited voice refinement"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'Fred series', None)
+        db.series_set_source(sid, 'review')
+        svid = db.ser_ver_add(sid, 1, link='123')
+        db.pcommit_add_list(svid, [Pcommit(None, seq, f'[{seq + 1}/6] subj',
+                                           None, None, None, None, None)
+                                   for seq in range(6)])
+        now = datetime.now().isoformat()
+        rids = []
+        for seq in range(1, 7):
+            rid = db.review_add(svid, seq, f'review {seq}', False,
+                                now if seq < 6 else '2020-01-01T00:00:00')
+            db.review_set_draft_id(rid, f'd{seq}')
+            rids.append(rid)
+        db.commit()
+
+        def fake_sync(_service, items):
+            self.assertEqual('[1/6] subj', items[0].subject)
+            sent = {item.idnum: (f'edited {item.idnum}', f'm{item.idnum}',
+                                 't1') for item in items[1:]}
+            return sent, [], {items[0].idnum: 't5'}
+
+        with mock.patch.object(gmail, 'sync_drafts', side_effect=fake_sync), \
+                mock.patch.object(review, 'refine_voice_sync') as refine, \
+                terminal.capture() as (out, _):
+            review._sync_drafts(None, cser)
+        self.assertIn('Synced 5 sent, 0 deleted', out.getvalue())
+        self.assertIn('1 draft(s) still pending', out.getvalue())
+        self.assertEqual(3, refine.call_count)
+        first = db.review_get(rids[0])
+        self.assertEqual(('draft', 't5'), (first.status, first.gmail_thread_id))
+        self.assertEqual(('sent', 'edited %d' % rids[5]),
+                         (db.review_get(rids[5]).status,
+                          db.review_get(rids[5]).body))
+
+    def test_review_revise(self):
+        """The agent changes unsent reviews following a reviewer's note"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'Fred series', None)
+        db.series_set_source(sid, 'review')
+        svid = db.ser_ver_add(sid, 1, link='123')
+        cover = db.review_add(svid, 0, 'Hi Fred,\n\nNice series', False,
+                              '2026-10-01T00:00:00')
+        first = db.review_add(svid, 1, 'Hi Fred,\n\n> code\n\nNit', False,
+                              '2026-10-01T00:00:00')
+        db.review_set_draft_id(first, 'd1')
+        sent = db.review_add(svid, 2, 'Sent already', False,
+                             '2026-10-01T00:00:00')
+        db.review_set_sent(sent, 'Sent already', 'm1', 't1')
+        db.commit()
+
+        new_body = ('Hi Fred,\n\nReviewed-by: Simon Glass '
+                    '<sjg@chromium.org>')
+        seen = {}
+
+        async def mock_agent(prompt, _options):
+            seen['prompt'] = prompt
+            fname = re.search(r'see file: (\S+)\)', prompt).group(1)
+            seen['reviews'] = tools.read_file(fname, binary=False)
+            # The cover-letter review comes back unchanged
+            return True, ('---SEQ 0---\nHi Fred,\n\nNice series\n'
+                          f'---SEQ 1---\n{new_body}\n')
+
+        args = cmdline.parse_args(
+            ['review', '-s', '123', '--revise', 'Drop the nit, approve it',
+             '-d', '--reviewer', 'Simon Glass <sjg@chromium.org>'],
+            config_fname=False)
+        with mock.patch.object(review.claude_mod, 'run_agent_collect',
+                               side_effect=mock_agent), \
+                mock.patch.object(review.claude_mod, 'check_available',
+                                  return_value=True), \
+                mock.patch.object(review, 'ClaudeAgentOptions',
+                                  mock.MagicMock()), \
+                mock.patch.object(review, '_review_commits',
+                                  return_value=['abc1 dm: Fix it']), \
+                mock.patch.object(review, '_fetch_series',
+                                  return_value=({'id': 123}, 'x', 1, 2)), \
+                mock.patch.object(review, '_delete_gmail_drafts') as delete, \
+                mock.patch.object(review, 'create_drafts') as create, \
+                terminal.capture() as (out, _):
+            self.assertEqual(0, review._do_revise(args, None, cser, '123'))
+        self.assertIn('Drop the nit, approve it', seen['prompt'])
+        self.assertIn('Patch 1: abc1 dm: Fix it', seen['prompt'])
+        self.assertIn('Reviewed-by: Simon Glass <sjg@chromium.org>',
+                      seen['prompt'])
+        self.assertIn('---SEQ 1---', seen['reviews'])
+        self.assertNotIn('Sent already', seen['reviews'])
+        self.assertIn('Revised the review of patch 1', out.getvalue())
+        self.assertNotIn('cover letter', out.getvalue())
+
+        rev = db.review_get(first)
+        self.assertEqual((new_body, 1), (rev.body, rev.approved))
+        self.assertEqual('Hi Fred,\n\nNice series', db.review_get(cover).body)
+        self.assertEqual(['d1'], [r.draft_id for r in delete.call_args.args[1]])
+        self.assertEqual(({1: new_body}, {1: first}),
+                         create.call_args.args[2:])
+
+        # Nothing to do if the selected reviews have all been sent
+        args = cmdline.parse_args(
+            ['review', '-s', '123', '-i', '2', '--revise', 'x'],
+            config_fname=False)
+        with self.assertRaises(ValueError) as exc:
+            review._do_revise(args, None, cser, '123')
+        self.assertIn('No unsent reviews', str(exc.exception))
+
+    def test_review_send(self):
+        """The Gmail drafts of a series' reviews can be sent"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'Fred series', None)
+        db.series_set_source(sid, 'review')
+        svid = db.ser_ver_add(sid, 1, link='123')
+        ids = {}
+        for seq in (2, 0, 1, 3):
+            ids[seq] = db.review_add(svid, seq, f'Review {seq}', False,
+                                     '2026-10-01T00:00:00')
+        for seq in (0, 1, 2):
+            db.review_set_draft_id(ids[seq], f'd{seq}')
+        db.commit()
+
+        def send(_service, draft_id):
+            if draft_id == 'd1':
+                return None
+            return f'Edited {draft_id}', f'm-{draft_id}', 't1'
+
+        def run(*argv):
+            args = cmdline.parse_args(['review', '-s', '123', '--send',
+                                       *argv], config_fname=False)
+            with mock.patch.object(review.gmail, 'check_available',
+                                   return_value=True), \
+                    mock.patch.object(review.gmail, 'get_service'), \
+                    mock.patch.object(review.gmail, 'send_draft',
+                                      side_effect=send) as sender, \
+                    terminal.capture() as (out, err):
+                ret = review._do_send(args, cser, '123')
+            return ret, [call.args[1] for call in sender.call_args_list], \
+                out.getvalue() + err.getvalue()
+
+        # A dry run sends nothing
+        ret, sent, out = run('-n', '-i', '0,2')
+        self.assertEqual((0, []), (ret, sent))
+        self.assertIn('would send the review of the cover letter', out)
+        self.assertIn('would send the review of patch 2', out)
+
+        # The cover letter goes first; a draft which has gone is reported
+        ret, sent, out = run()
+        self.assertEqual((1, ['d0', 'd1', 'd2']), (ret, sent))
+        self.assertIn('The draft of the review of patch 1 has gone', out)
+        self.assertIn('Sent 2 of 3 review(s)', out)
+        rev = db.review_get(ids[2])
+        self.assertEqual(('sent', 'Edited d2', 'm-d2', 't1'),
+                         (rev.status, rev.body, rev.gmail_msg_id,
+                          rev.gmail_thread_id))
+        self.assertEqual('draft', db.review_get(ids[1]).status)
+        self.assertEqual('new', db.review_get(ids[3]).status)
+
+        # Only patch 1's draft is left
+        ret, sent, _ = run()
+        self.assertEqual(['d1'], sent)
+        with self.assertRaises(ValueError) as exc:
+            run('-i', '2')
+        self.assertIn('No Gmail drafts to send', str(exc.exception))
+
+    def test_gmail_send_draft(self):
+        """A draft is read, then sent"""
+        service = mock.MagicMock()
+        drafts = service.users.return_value.drafts.return_value
+        body = base64.urlsafe_b64encode(b'Hi Fred').decode()
+        drafts.get.return_value.execute.return_value = {
+            'message': {'payload': {'mimeType': 'text/plain',
+                                    'body': {'data': body}}}}
+        drafts.send.return_value.execute.return_value = {
+            'id': 'm1', 'threadId': 't1'}
+        self.assertEqual(('Hi Fred', 'm1', 't1'),
+                         gmail.send_draft(service, 'd1'))
+        drafts.send.assert_called_once_with(userId='me', body={'id': 'd1'})
+
+    def test_review_find_base(self):
+        """The base commit or branch is found in a cover letter"""
+        find = review.find_series_base
+        self.assertEqual(('0123456789ab', None),
+                         find('Some text\n\nbase-commit: 0123456789ab\n'))
+        self.assertEqual((None, 'main'),
+                         find('This series is based on u-boot/master.'))
+        self.assertEqual((None, 'main'), find('Applies on top of main'))
+        self.assertEqual((None, 'next'), find("It is rebased onto 'next'"))
+        self.assertEqual((None, None), find('This is based on a true story'))
+        self.assertEqual((None, None), find(None))
+
+    def test_review_series_base(self):
+        """A series is applied to the branch holding its base commit"""
+        def git(cwd, *args):
+            return subprocess.run(
+                ['git', '-c', 'user.name=T', '-c', 'user.email=t@x', *args],
+                cwd=cwd, check=True, capture_output=True,
+                text=True).stdout.strip()
+
+        def commit(cwd, msg):
+            git(cwd, 'commit', '-q', '--allow-empty', '-m', msg)
+            return git(cwd, 'rev-parse', 'HEAD')
+
+        work = os.path.join(self.tmpdir, 'work')
+        os.mkdir(work)
+        git(work, 'init', '-q', '-b', 'master')
+        first = commit(work, 'first')
+        bare = os.path.join(self.tmpdir, 'up.git')
+        git(self.tmpdir, 'clone', '-q', '--bare', work, bare)
+
+        # Upstream moves on, with master and next each gaining a commit
+        other = os.path.join(self.tmpdir, 'other')
+        git(self.tmpdir, 'clone', '-q', bare, other)
+        git(other, 'checkout', '-q', '-b', 'next')
+        commit(other, 'on next')
+        git(other, 'checkout', '-q', 'master')
+        on_master = commit(other, 'on master')
+        git(other, 'push', '-q', 'origin', 'master', 'next')
+        git(work, 'remote', 'add', 'us', bare)
+        git(work, 'checkout', '-q', '-b', 'local')
+        local = commit(work, 'local only')
+
+        ctx = review.ReviewContext(None, None, {})
+        ctx.main_repo = work
+
+        def base(text):
+            with mock.patch.object(review, '_base_text', return_value=text):
+                return review._series_base(ctx, 'us', 'us/next')
+
+        # The commit is only upstream, so it is fetched, and it is on master
+        with terminal.capture() as (out, _):
+            self.assertEqual('us/master', base(f'base-commit: {on_master}'))
+        self.assertIn("Fetching 'us'", out.getvalue())
+        self.assertIn('which is in us/master', out.getvalue())
+
+        # A commit in both branches uses the default
+        with terminal.capture():
+            self.assertEqual('us/next', base(f'base-commit: {first}'))
+
+            # A commit in neither is used directly
+            self.assertEqual(local, base(f'base-commit: {local}'))
+
+            # Without the commit, the cover letter's words are used
+            with terminal.capture() as (_, err):
+                self.assertEqual('us/master', base(
+                    'base-commit: 0123456789abcdef\nBased on master'))
+        self.assertIn('Cannot find base-commit 0123456789abcdef',
+                      err.getvalue())
+        self.assertIsNone(base('Nothing to see'))
+
+        # Once the upstream has a main branch, it is used instead of master
+        git(other, 'checkout', '-q', '-b', 'main')
+        on_main = commit(other, 'on main')
+        git(other, 'push', '-q', 'origin', 'main')
+        with terminal.capture():
+            self.assertEqual('us/main', base(f'base-commit: {on_main}'))
+            self.assertEqual('us/main', base('Based on master'))
+
+    def test_review_reply_recent(self):
+        """Only recent replies get a suggested response"""
+        now = datetime.now().astimezone()
+        self.assertTrue(review._is_recent(
+            email.utils.format_datetime(now - timedelta(days=13)), 14))
+        self.assertFalse(review._is_recent(
+            email.utils.format_datetime(now - timedelta(days=15)), 14))
+        self.assertFalse(review._is_recent('garbage', 14))
+        self.assertFalse(review._is_recent(None, 14))
+
+    def test_review_needs_draft(self):
+        """Sent reviews are never drafted again; -i selects the patches"""
+        def rev(seq, draft_id, status):
+            return database.Review(seq, 1, seq, f'body {seq}', False, None,
+                                   draft_id, status, None, None)
+
+        new = rev(1, None, database.REVIEW_NEW)
+        draft = rev(2, 'd2', database.REVIEW_DRAFT)
+        deleted = rev(3, None, database.REVIEW_DELETED)
+        sent = rev(4, None, database.REVIEW_SENT)
+        replied = rev(5, None, database.REVIEW_REPLIED)
+        reviews = [new, draft, deleted, sent, replied]
+        self.assertEqual([new], [r for r in reviews
+                                 if review._needs_draft(r, False)])
+        self.assertEqual([new, draft, deleted],
+                         [r for r in reviews if review._needs_draft(r, True)])
+
+        args = cmdline.parse_args(['review', '--redraft', '-i', '2-4'],
+                                  config_fname=False)
+        with mock.patch.object(review, 'create_drafts') as create, \
+                mock.patch.object(review, '_delete_gmail_drafts'):
+            review._draft_stored_reviews(args, reviews, {}, None, None)
+        self.assertEqual({2: 'body 2', 3: 'body 3'}, create.call_args.args[2])
+
     def test_review_redraft(self):
         """Test --redraft recreates drafts for an already-reviewed series"""
         self.get_cser()
@@ -5515,6 +6433,10 @@ Date:   .*
         self.assertIsNotNone(v1)
         self.assertIsNotNone(v2)
         self.assertEqual(v1[0], v2[0])  # linked under the same series
+
+        # The cover letter is recorded, so that it can be shown later
+        svr = cser.db.ser_ver_get_by_id(v2[3])
+        self.assertEqual((9, '[v2,0/1] foo bar'), (svr.cover_id, svr.name))
 
     def test_review_get_previous_skips_gap(self):
         """Test prior-review lookup skips versions that have no reviews"""
@@ -6781,12 +7703,24 @@ class TestGetUpstreamBranch(unittest.TestCase):
         """When next exists but has no commits ahead, master is chosen."""
         args = Namespace(base_branch=None, upstream='us')
         with mock.patch('patman.review.gitutil.ref_exists',
-                        return_value=True), \
+                        side_effect=lambda ref, _=None: ref != 'us/main'), \
              mock.patch('patman.review.gitutil.count_revs',
                         return_value=0):
             self.assertEqual(
                 'us/master',
                 review._get_upstream_branch(args, self._cser()))
+
+    def test_main_preferred_to_master(self):
+        """When the upstream has a main branch, it is used, not master."""
+        args = Namespace(base_branch=None, upstream='us')
+        with mock.patch('patman.review.gitutil.ref_exists',
+                        return_value=True), \
+             mock.patch('patman.review.gitutil.count_revs',
+                        return_value=0) as count:
+            self.assertEqual(
+                'us/main',
+                review._get_upstream_branch(args, self._cser()))
+        self.assertEqual('us/main..us/next', count.call_args.args[1])
 
     def test_next_missing_falls_back_to_master(self):
         """When next does not exist at all, master is chosen."""

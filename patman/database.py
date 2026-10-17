@@ -21,7 +21,7 @@ from u_boot_pylib import tout
 from patman.series import Series
 
 # Schema version (version 0 means there is no database yet)
-LATEST = 10
+LATEST = 11
 
 # Information about a review record
 # Review status values
@@ -35,6 +35,41 @@ Review = namedtuple(
     'REVIEW',
     'idnum,svid,seq,body,approved,timestamp,draft_id,status,'
     'gmail_msg_id,gmail_thread_id')
+
+# Status values for a reply to one of our reviews
+REPLY_NEW = 'new'              # Reply received, no response suggested yet
+REPLY_SUGGESTED = 'suggested'  # A response is ready, with no draft
+REPLY_SKIP = 'skip'            # No response is needed
+REPLY_DRAFT = 'draft'          # Gmail draft created for the response
+REPLY_SENT = 'sent'            # Response was sent
+
+# Statuses of a reply which still needs attention
+REPLY_WAITING = (REPLY_NEW, REPLY_SUGGESTED)
+
+# Information about a reply to one of our reviews
+#   idnum: ID of the reply record
+#   review_id: ID of the review which was replied to
+#   gmail_msg_id: Gmail message ID of the reply
+#   msgid: Message-ID header of the reply, for threading the response
+#   refs: References header of the reply
+#   sender: Who sent the reply ('Name <email>')
+#   to_addrs: To header of the reply
+#   cc_addrs: Cc header of the reply
+#   subject: Subject of the reply
+#   date: Date header of the reply
+#   body: Text of the reply
+#   response: Text of our response, or None if there is none yet
+#   status: REPLY_... value
+#   draft_id: Gmail draft ID of the response, or None
+#   timestamp: When the reply was recorded
+Reply = namedtuple(
+    'REPLY',
+    'idnum,review_id,gmail_msg_id,msgid,refs,sender,to_addrs,cc_addrs,'
+    'subject,date,body,response,status,draft_id,timestamp')
+
+REPLY_COLS = ('id, review_id, gmail_msg_id, msgid, refs, sender, to_addrs, '
+              'cc_addrs, subject, date, body, response, status, draft_id, '
+              'timestamp')
 
 # Information about a series/version record
 SerVer = namedtuple(
@@ -269,6 +304,15 @@ class Database:  # pylint:disable=R0904
         """Add review notes column to ser_ver table"""
         self.cur.execute('ALTER TABLE ser_ver ADD COLUMN notes')
 
+    def _migrate_to_v11(self):
+        """Add a reply table for replies to our reviews"""
+        self.cur.execute(
+            'CREATE TABLE reply (id INTEGER PRIMARY KEY AUTOINCREMENT,'
+            'review_id INTEGER, gmail_msg_id UNIQUE, msgid, refs, sender, '
+            'to_addrs, cc_addrs, subject, date, body TEXT, response TEXT, '
+            'status, draft_id, timestamp, '
+            'FOREIGN KEY (review_id) REFERENCES review (id))')
+
     # pylint: disable=R0912
     def migrate_to(self, dest_version):
         """Migrate the database to the selected version
@@ -321,6 +365,8 @@ class Database:  # pylint:disable=R0904
                 self._migrate_to_v9()
             elif version == 10:
                 self._migrate_to_v10()
+            elif version == 11:
+                self._migrate_to_v11()
 
             # Save the new version if we have a schema_version table
             if version > 1:
@@ -832,6 +878,27 @@ class Database:  # pylint:disable=R0904
         if version:
             return SerVer(*recs[0])
         return [SerVer(*x) for x in recs]
+
+    def ser_ver_get_by_id(self, svid):
+        """Get a ser_ver record by its ID
+
+        Args:
+            svid (int): ser_ver ID num
+
+        Return:
+            SER_VER: Requested information
+
+        Raises:
+            ValueError: There is no such record
+        """
+        res = self.execute(
+            'SELECT id, series_id, version, link, cover_id, '
+            'cover_num_comments, name, archive_tag, desc, notes '
+            'FROM ser_ver WHERE id = ?', (svid,))
+        rec = res.fetchone()
+        if not rec:
+            raise ValueError(f'No series version with id {svid}')
+        return SerVer(*rec)
 
     def ser_ver_get_svids(self, series_idnum):
         """Get all ser_ver IDs for a series
@@ -1394,6 +1461,28 @@ class Database:  # pylint:disable=R0904
             (body, REVIEW_SENT, gmail_msg_id, gmail_thread_id,
              review_id))
 
+    def review_set_body(self, review_id, body, approved):
+        """Change the text of a review which has not been sent
+
+        Args:
+            review_id (int): Review record ID
+            body (str): New review email body text
+            approved (bool): True if Reviewed-by is given
+        """
+        self.execute(
+            'UPDATE review SET body = ?, approved = ? WHERE id = ?',
+            (body, 1 if approved else 0, review_id))
+
+    def review_set_thread(self, review_id, thread_id):
+        """Note the Gmail thread holding the draft of a review
+
+        Args:
+            review_id (int): Review record ID
+            thread_id (str): Gmail thread ID
+        """
+        self.execute('UPDATE review SET gmail_thread_id = ? WHERE id = ?',
+                     (thread_id, review_id))
+
     def review_set_replied(self, review_id):
         """Mark a review as having received a reply
 
@@ -1420,6 +1509,8 @@ class Database:  # pylint:disable=R0904
         Args:
             svid (int): ser_ver ID num
         """
+        self.execute('DELETE FROM reply WHERE review_id IN '
+                     '(SELECT id FROM review WHERE svid = ?)', (svid,))
         self.execute('DELETE FROM review WHERE svid = ?', (svid,))
 
     def review_get_for_version(self, svid):
@@ -1436,6 +1527,27 @@ class Database:  # pylint:disable=R0904
             'status, gmail_msg_id, gmail_thread_id '
             'FROM review WHERE svid = ? ORDER BY seq', (svid,))
         return [Review(*row) for row in res.fetchall()]
+
+    def review_get(self, review_id):
+        """Get a review record by its ID
+
+        Args:
+            review_id (int): Review record ID
+
+        Return:
+            Review: Review record
+
+        Raises:
+            ValueError: There is no such review
+        """
+        res = self.execute(
+            'SELECT id, svid, seq, body, approved, timestamp, draft_id, '
+            'status, gmail_msg_id, gmail_thread_id '
+            'FROM review WHERE id = ?', (review_id,))
+        rec = res.fetchone()
+        if not rec:
+            raise ValueError(f'No review with id {review_id}')
+        return Review(*rec)
 
     def review_get_by_status(self, status, need_thread=False):
         """Get review records with a given status
@@ -1483,6 +1595,122 @@ class Database:  # pylint:disable=R0904
         if not row:
             return []
         return self.review_get_for_version(row[0])
+
+    # pylint: disable=R0913,R0917
+    def reply_add(self, review_id, gmail_msg_id, msgid, refs, sender,
+                  to_addrs, cc_addrs, subject, date, body, timestamp):
+        """Record a reply to one of our reviews, if not already recorded
+
+        Args:
+            review_id (int): ID of the review which was replied to
+            gmail_msg_id (str): Gmail message ID of the reply
+            msgid (str): Message-ID header of the reply
+            refs (str): References header of the reply
+            sender (str): From header of the reply
+            to_addrs (str): To header of the reply
+            cc_addrs (str): Cc header of the reply
+            subject (str): Subject of the reply
+            date (str): Date header of the reply
+            body (str): Text of the reply
+            timestamp (str): When the reply was recorded
+
+        Return:
+            int or None: ID of the new reply record, or None if the reply was
+                already recorded
+        """
+        if self.execute('SELECT id FROM reply WHERE gmail_msg_id = ?',
+                        (gmail_msg_id,)).fetchone():
+            return None
+        self.execute(
+            'INSERT INTO reply (review_id, gmail_msg_id, msgid, refs, sender, '
+            'to_addrs, cc_addrs, subject, date, body, status, timestamp) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (review_id, gmail_msg_id, msgid, refs, sender, to_addrs,
+             cc_addrs, subject, date, body, REPLY_NEW, timestamp))
+        return self.lastrowid()
+
+    def reply_get(self, reply_id):
+        """Get a reply record by its ID
+
+        Args:
+            reply_id (int): Reply record ID
+
+        Return:
+            Reply: Reply record
+
+        Raises:
+            ValueError: There is no such reply
+        """
+        rec = self.execute(f'SELECT {REPLY_COLS} FROM reply WHERE id = ?',
+                           (reply_id,)).fetchone()
+        if not rec:
+            raise ValueError(f'No reply with id {reply_id}')
+        return Reply(*rec)
+
+    def reply_get_for_review(self, review_id):
+        """Get the replies to a review, oldest first
+
+        Args:
+            review_id (int): Review record ID
+
+        Return:
+            list of Reply: Replies
+        """
+        res = self.execute(f'SELECT {REPLY_COLS} FROM reply '
+                           'WHERE review_id = ? ORDER BY id', (review_id,))
+        return [Reply(*rec) for rec in res.fetchall()]
+
+    def reply_get_by_status(self, statuses):
+        """Get the replies with any of the given statuses, oldest first
+
+        Args:
+            statuses (list of str): Statuses to look for
+
+        Return:
+            list of Reply: Replies
+        """
+        marks = ', '.join(['?'] * len(statuses))
+        res = self.execute(f'SELECT {REPLY_COLS} FROM reply '
+                           f'WHERE status IN ({marks}) ORDER BY id',
+                           tuple(statuses))
+        return [Reply(*rec) for rec in res.fetchall()]
+
+    def reply_count_waiting(self):
+        """Count the replies which still need attention, for each series
+
+        Return:
+            dict: key (int): series ID, value (int): number of replies
+        """
+        marks = ', '.join(['?'] * len(REPLY_WAITING))
+        res = self.execute(
+            'SELECT sv.series_id, COUNT(*) FROM reply rp '
+            'JOIN review r ON r.id = rp.review_id '
+            'JOIN ser_ver sv ON sv.id = r.svid '
+            f'WHERE rp.status IN ({marks}) GROUP BY sv.series_id',
+            REPLY_WAITING)
+        return dict(res.fetchall())
+
+    def reply_set_response(self, reply_id, response, status):
+        """Set our response to a reply
+
+        Args:
+            reply_id (int): Reply record ID
+            response (str or None): Text of the response
+            status (str): New status, e.g. REPLY_SUGGESTED
+        """
+        self.execute('UPDATE reply SET response = ?, status = ? WHERE id = ?',
+                     (response, status, reply_id))
+
+    def reply_set_status(self, reply_id, status, draft_id=None):
+        """Set the status of a reply, and the draft of our response
+
+        Args:
+            reply_id (int): Reply record ID
+            status (str): New status
+            draft_id (str or None): Gmail draft ID of the response, if any
+        """
+        self.execute('UPDATE reply SET status = ?, draft_id = ? WHERE id = ?',
+                     (status, draft_id, reply_id))
 
     def series_find_by_link(self, link):
         """Find a series by its patchwork link

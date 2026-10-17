@@ -16,7 +16,9 @@ Gmail draft replies.
 import asyncio
 from collections import namedtuple
 from concurrent import futures
-from datetime import datetime
+from datetime import datetime, timedelta
+from email.utils import (formataddr, getaddresses, parseaddr,
+                         parsedate_to_datetime)
 import fcntl
 import os
 import re
@@ -24,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 
 import aiohttp
 
@@ -1917,11 +1920,73 @@ def _do_learn_voice(args, pwork):
     return 0 if learn_voice_sync(vp) else 1
 
 
+# Number of drafts to check before saving progress
+SYNC_CHUNK = 50
+
+# Only refine the voice profile from reviews written in this many days, and
+# from at most this many reviews in each sync
+VOICE_DAYS = 14
+MAX_VOICE_REFINE = 3
+
+
+def _gmail_date(timestamp):
+    """Get the day before a timestamp, for use in a Gmail 'after:' search
+
+    Args:
+        timestamp (str or None): ISO timestamp, e.g. '2026-03-30T07:57:15'
+
+    Returns:
+        str or None: Date, e.g. '2026/03/29', or None if there is none
+    """
+    try:
+        when = datetime.fromisoformat(timestamp)
+    except (TypeError, ValueError):
+        return None
+    return (when - timedelta(days=1)).strftime('%Y/%m/%d')
+
+
+def _epoch(timestamp):
+    """Convert a timestamp to seconds since the epoch
+
+    Args:
+        timestamp (str or None): ISO timestamp, in local time
+
+    Returns:
+        float or None: Seconds since the epoch, or None if there is none
+    """
+    try:
+        return datetime.fromisoformat(timestamp).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def _review_subject(db, rev):
+    """Get the subject of the patch or cover letter which a review is about
+
+    Args:
+        db (Database): Database holding the review
+        rev (Review): Review record
+
+    Returns:
+        str or None: Subject, or None if not known
+    """
+    if not rev.seq:
+        svr = db.ser_ver_get_by_id(rev.svid)
+        title = svr.name or db.series_get_info(svr.series_id)[1]
+        return f'[v{svr.version}] {title}' if title else None
+    for pcm in db.pcommit_get_list(rev.svid):
+        if pcm.seq == rev.seq - 1:
+            return pcm.subject
+    return None
+
+
 def _sync_drafts(service, cser):
     """Sync draft status with Gmail
 
-    Detects sent and deleted drafts, updates the database, and refines the voice
-    profile if sent text differs from the draft.
+    Detects sent and deleted drafts, and updates the database. Notes the
+    thread of each draft which is still pending, so that it can be found
+    there once sent. Refines the voice profile if the sent text of a recent
+    review differs from the draft.
 
     Args:
         service: Gmail API service
@@ -1930,81 +1995,348 @@ def _sync_drafts(service, cser):
     Returns:
         bool: True if there were drafts to sync
     """
-    reviews_with_drafts = cser.db.review_get_by_status('draft')
-
-    if not reviews_with_drafts:
+    db = cser.db
+    reviews = db.review_get_by_status('draft')
+    if not reviews:
         tout.notice('No pending drafts to sync')
         return False
 
-    sent, deleted = gmail.sync_drafts(service, reviews_with_drafts)
-    draft_bodies = {r.idnum: r.body for r in reviews_with_drafts}
-    for review_id, (body, msg_id, thread_id) in sent.items():
-        cser.db.review_set_sent(review_id, body, msg_id, thread_id)
-        tout.notice(f'Review {review_id}: sent')
+    recent = (datetime.now() - timedelta(days=VOICE_DAYS)).isoformat()
+    cutoff = (datetime.now() - timedelta(days=REPLY_DAYS)).isoformat()
+    total_sent = total_deleted = refined = 0
+    for start in range(0, len(reviews), SYNC_CHUNK):
+        chunk = reviews[start:start + SYNC_CHUNK]
+        sent, deleted, threads = gmail.sync_drafts(service, [
+            SimpleNamespace(idnum=rev.idnum, draft_id=rev.draft_id,
+                            body=rev.body, thread_id=rev.gmail_thread_id,
+                            subject=_review_subject(db, rev),
+                            after=_gmail_date(rev.timestamp),
+                            since=_epoch(rev.timestamp),
+                            check_sent=(rev.timestamp or '') >= cutoff)
+            for rev in chunk])
+        by_id = {rev.idnum: rev for rev in chunk}
+        for review_id, (body, msg_id, thread_id) in sent.items():
+            db.review_set_sent(review_id, body, msg_id, thread_id)
+            tout.notice(f'Review {review_id}: sent')
+            draft = by_id[review_id]
+            if (body.strip() != draft.body.strip() and
+                    (draft.timestamp or '') >= recent and
+                    refined < MAX_VOICE_REFINE):
+                tout.notice(f'Review {review_id}: edits detected, '
+                            'refining voice...')
+                refine_voice_sync(draft.body, body)
+                refined += 1
+        for review_id in deleted:
+            db.review_set_deleted(review_id)
+            tout.notice(f'Review {review_id}: deleted (not sent)')
+        for review_id, thread_id in threads.items():
+            db.review_set_thread(review_id, thread_id)
+        cser.commit()
+        total_sent += len(sent)
+        total_deleted += len(deleted)
 
-        draft = draft_bodies.get(review_id, '')
-        if draft and body.strip() != draft.strip():
-            tout.notice(f'Review {review_id}: edits detected, '
-                        'refining voice...')
-            refine_voice_sync(draft, body)
-    for review_id in deleted:
-        cser.db.review_set_deleted(review_id)
-        tout.notice(f'Review {review_id}: deleted (not sent)')
-    pending = len(reviews_with_drafts) - len(sent) - len(deleted)
+    pending = len(reviews) - total_sent - total_deleted
     if pending:
         tout.notice(f'{pending} draft(s) still pending')
-    if sent or deleted:
-        tout.notice(f'Synced {len(sent)} sent, {len(deleted)} deleted')
-    cser.commit()
+    if total_sent or total_deleted:
+        tout.notice(f'Synced {total_sent} sent, {total_deleted} deleted')
     return True
 
 
-def _handle_replies(service, account, ctx):
-    """Check for replies to sent reviews and generate responses
+# Only look for replies to reviews sent in this many days
+REPLY_DAYS = 90
+
+# Only ask the agent to suggest a response to replies sent in this many days
+SUGGEST_DAYS = 14
+
+
+def _is_recent(date, days):
+    """Check whether an email's Date header is within a number of days
+
+    Args:
+        date (str): Date header, e.g. 'Thu, 15 Oct 2026 10:00:00 +0000'
+        days (int): Number of days
+
+    Returns:
+        bool: True if it is recent, False if not or if it cannot be read
+    """
+    try:
+        when = parsedate_to_datetime(date)
+    except (TypeError, ValueError):
+        return False
+    if not when.tzinfo:
+        when = when.astimezone()
+    return datetime.now().astimezone() - when <= timedelta(days=days)
+
+
+def _handle_replies(service, ctx):
+    """Record replies to our sent reviews and suggest responses
+
+    Each reply is recorded once. A reply which we have already answered is
+    recorded with our answer. The agent then suggests a response to each
+    other new reply sent within SUGGEST_DAYS, or decides that none is
+    needed. Older replies are left for the user, so that a backlog of
+    replies does not cause a lot of work for the agent.
 
     Args:
         service: Gmail API service
-        account (str or None): Gmail account for creating drafts
         ctx (ReviewContext): Review context
+
+    Return:
+        int: Number of new replies
     """
-    sent_reviews = ctx.cser.db.review_get_by_status('sent',
-                                                     need_thread=True)
+    db = ctx.cser.db
+    cutoff = (datetime.now() - timedelta(days=REPLY_DAYS)).isoformat()
+    reviews = [rev for status in (database.REVIEW_SENT,
+                                  database.REVIEW_REPLIED)
+               for rev in db.review_get_by_status(status, need_thread=True)
+               if (rev.timestamp or '') >= cutoff]
 
-    reply_count = 0
-
-    for rev in sent_reviews:
-        replies = gmail.fetch_thread_replies(
-            service, rev.gmail_thread_id, rev.gmail_msg_id)
-        if not replies:
-            continue
-
-        tout.notice(f'Review {rev.idnum}: {len(replies)} reply(ies)')
-        ctx.cser.db.review_set_replied(rev.idnum)
-
-        for reply in replies:
-            response = handle_reply_sync(ctx, rev.body, reply['from'],
-                                         reply['body'])
-            if response:
-                reply_count += 1
-                tout.notice(f"  Draft response to {reply['from']}")
-                terminal.tprint(f"\n--- Reply to {reply['from']} ---",
-                                colour=terminal.Color.CYAN)
-                print('---email start---')
-                print(response)
-                print('---email end---')
-                print()
-
-                if account:
-                    gmail.create_draft(gmail.get_service(account),
-                        reply['from'], 'Re: ', response)
-                    tout.notice('  Draft created')
-            else:
-                tout.notice(
-                    f"  No response needed to {reply['from']}")
-
-    if reply_count:
-        tout.notice(f'Created {reply_count} response draft(s)')
+    new = []
+    for rev in reviews:
+        for reply in gmail.fetch_thread_replies(
+                service, rev.gmail_thread_id, rev.gmail_msg_id):
+            reply_id = db.reply_add(
+                rev.idnum, reply['msg_id'], reply['message_id'],
+                reply['references'], reply['from'], reply['to'],
+                reply['cc'], reply['subject'], reply['date'], reply['body'],
+                datetime.now().isoformat())
+            if reply_id is None:
+                continue
+            db.review_set_replied(rev.idnum)
+            if reply['answer']:
+                db.reply_set_response(reply_id, reply['answer'],
+                                      database.REPLY_SENT)
+                tout.notice(f"Review {rev.idnum}: reply {reply_id} from "
+                            f"{reply['from']}, already answered")
+                continue
+            if _is_recent(reply['date'], SUGGEST_DAYS):
+                new.append(reply_id)
+            tout.notice(f"Review {rev.idnum}: reply {reply_id} from "
+                        f"{reply['from']}")
     ctx.cser.commit()
+
+    for reply_id in new:
+        _suggest_response(ctx, reply_id)
+    if new:
+        tout.notice(f'{len(new)} new reply(ies)')
+    return len(new)
+
+
+def _suggest_response(ctx, reply_id):
+    """Ask the agent to suggest a response to a reply, and record it
+
+    Args:
+        ctx (ReviewContext): Review context
+        reply_id (int): ID of the reply
+    """
+    db = ctx.cser.db
+    reply = db.reply_get(reply_id)
+    rev = db.review_get(reply.review_id)
+    status, response = handle_reply_sync(ctx, rev.body, reply.sender,
+                                         reply.body)
+    if not status:
+        tout.warning(f'Reply {reply_id}: no response could be suggested')
+        return
+    db.reply_set_response(reply_id, response, status)
+    ctx.cser.commit()
+    if response:
+        tout.notice(f'Reply {reply_id}: response suggested')
+        print(response)
+    else:
+        tout.notice(f'Reply {reply_id}: no response needed')
+
+
+def _reply_cc(reply, own):
+    """Work out who to copy on a response to a reply
+
+    Everyone the reply went to is copied, except ourselves and the person
+    who sent it, who receives the response directly.
+
+    Args:
+        reply (Reply): Reply being responded to
+        own (set of str): Our own email addresses, in lower case
+
+    Return:
+        str: Cc header, or '' if nobody
+    """
+    skip = set(own) | {parseaddr(reply.sender)[1].lower()}
+    out = []
+    for name, addr in getaddresses([reply.to_addrs or '',
+                                    reply.cc_addrs or '']):
+        if addr and addr.lower() not in skip:
+            skip.add(addr.lower())
+            out.append(formataddr((name, addr)))
+    return ', '.join(out)
+
+
+def _draft_response(service, ctx, reply_id, account=None):
+    """Create a Gmail draft of our response to a reply
+
+    The draft is threaded as a reply to it. Any earlier draft of the
+    response is deleted.
+
+    Args:
+        service: Gmail API service
+        ctx (ReviewContext): Review context
+        reply_id (int): ID of the reply
+        account (str or None): Gmail account in use
+
+    Raises:
+        ValueError: There is no response, or it has already been sent
+    """
+    db = ctx.cser.db
+    reply = db.reply_get(reply_id)
+    if reply.status == database.REPLY_SENT:
+        raise ValueError(f'The response to reply {reply_id} has been sent')
+    if not (reply.response or '').strip():
+        raise ValueError(f'There is no response to reply {reply_id}')
+    if reply.draft_id:
+        gmail.delete_draft(service, reply.draft_id)
+
+    subject = reply.subject or ''
+    if not subject.lower().startswith('re:'):
+        subject = f'Re: {subject}'
+    refs = ' '.join(item for item in (reply.refs, reply.msgid) if item)
+    own = {addr.lower() for addr in (ctx.reviewer_email, account) if addr}
+    sender = None
+    if ctx.reviewer_name and ctx.reviewer_email:
+        sender = formataddr((ctx.reviewer_name, ctx.reviewer_email))
+    draft = gmail.create_draft(
+        service, reply.sender, subject, reply.response,
+        in_reply_to=reply.msgid or None, references=refs or None,
+        cc=_reply_cc(reply, own) or None, sender=sender)
+    db.reply_set_status(reply_id, database.REPLY_DRAFT, draft['id'])
+    ctx.cser.commit()
+    tout.notice(f'Reply {reply_id}: created Gmail draft of the response')
+
+
+def _send_response(service, ctx, reply_id, account=None):
+    """Send our response to a reply
+
+    If the response has no Gmail draft, or has been changed since its draft
+    was created, a new draft is created first. The draft is read just before
+    it is sent, since it may have been changed in Gmail, and the text which
+    is sent is recorded.
+
+    Args:
+        service: Gmail API service
+        ctx (ReviewContext): Review context
+        reply_id (int): ID of the reply
+        account (str or None): Gmail account in use
+
+    Raises:
+        ValueError: There is no response, it has already been sent or its
+            draft has been deleted in Gmail
+    """
+    db = ctx.cser.db
+    reply = db.reply_get(reply_id)
+    if reply.status != database.REPLY_DRAFT or not reply.draft_id:
+        _draft_response(service, ctx, reply_id, account)
+        reply = db.reply_get(reply_id)
+    result = gmail.send_draft(service, reply.draft_id)
+    if not result:
+        db.reply_set_status(reply_id, database.REPLY_SUGGESTED)
+        ctx.cser.commit()
+        raise ValueError(f'The draft of the response to reply {reply_id} '
+                         'has been deleted, so it is not sent')
+    body = result[0]
+    db.reply_set_response(reply_id, body or reply.response,
+                          database.REPLY_SENT)
+    ctx.cser.commit()
+    tout.notice(f'Reply {reply_id}: sent the response')
+
+
+def _sync_reply_drafts(service, cser):
+    """Check whether drafts of our responses have been sent or deleted
+
+    Args:
+        service: Gmail API service
+        cser (Cseries): Open cseries instance
+    """
+    drafts = cser.db.reply_get_by_status([database.REPLY_DRAFT])
+    if not drafts:
+        return
+    sent, deleted, _ = gmail.sync_drafts(service, [
+        SimpleNamespace(idnum=rep.idnum, draft_id=rep.draft_id,
+                        body=rep.response, thread_id=None,
+                        subject=rep.subject, after=None, since=None,
+                        check_sent=False)
+        for rep in drafts])
+    for reply_id, (body, _, _) in sent.items():
+        cser.db.reply_set_response(reply_id, body, database.REPLY_SENT)
+        tout.notice(f'Reply {reply_id}: response sent')
+    for reply_id in deleted:
+        cser.db.reply_set_status(reply_id, database.REPLY_SUGGESTED)
+        tout.notice(f'Reply {reply_id}: draft deleted (not sent)')
+    cser.commit()
+
+
+def _make_reply_ctx(args, cser):
+    """Set up a review context for handling replies
+
+    Args:
+        args (Namespace): Command-line arguments
+        cser (Cseries): Open cseries instance
+
+    Return:
+        ReviewContext: Context
+    """
+    ctx = ReviewContext(None, cser, {})
+    ctx.reviewer_name, ctx.reviewer_email = _parse_reviewer(args)
+    ctx.repo_path = gitutil.get_top_level()
+    ctx.signoff = getattr(args, 'signoff', '') or None
+    if ctx.signoff:
+        ctx.signoff = ctx.signoff.replace('\\n', '\n')
+    ctx.spelling = getattr(args, 'spelling', 'British')
+    return ctx
+
+
+def _list_replies(cser):
+    """Show the replies which still need a response
+
+    Args:
+        cser (Cseries): Open cseries instance
+
+    Return:
+        int: 0
+    """
+    replies = cser.db.reply_get_by_status(list(database.REPLY_WAITING))
+    if not replies:
+        tout.notice('No replies need a response')
+        return 0
+    for reply in replies:
+        state = ('response suggested' if reply.status ==
+                 database.REPLY_SUGGESTED else 'no response yet')
+        print(f'{reply.idnum:5}  {reply.sender}: {reply.subject} ({state})')
+    return 0
+
+
+def _do_reply_cmd(args, cser):
+    """Handle --replies, --suggest-reply, --draft-reply and --send-reply
+
+    Args:
+        args (Namespace): Command-line arguments
+        cser (Cseries): Open cseries instance
+
+    Return:
+        int: 0 on success, 1 on failure
+    """
+    if args.list_replies:
+        return _list_replies(cser)
+    ctx = _make_reply_ctx(args, cser)
+    if args.suggest_reply:
+        _suggest_response(ctx, args.suggest_reply)
+    if args.draft_reply or args.send_reply:
+        if not gmail.check_available():
+            return 1
+        account = getattr(args, 'gmail_account', None)
+        service = gmail.get_service(account)
+        if args.draft_reply:
+            _draft_response(service, ctx, args.draft_reply, account)
+        if args.send_reply:
+            _send_response(service, ctx, args.send_reply, account)
+    return 0
 
 
 def _do_sync(args, cser):
@@ -2023,18 +2355,8 @@ def _do_sync(args, cser):
     service = gmail.get_service(account)
 
     _sync_drafts(service, cser)
-
-    reviewer_name, reviewer_email = _parse_reviewer(args)
-    ctx = ReviewContext(None, cser, {})
-    ctx.reviewer_name = reviewer_name
-    ctx.reviewer_email = reviewer_email
-    ctx.repo_path = gitutil.get_top_level()
-    ctx.signoff = getattr(args, 'signoff', '') or None
-    if ctx.signoff:
-        ctx.signoff = ctx.signoff.replace('\\n', '\n')
-    ctx.spelling = getattr(args, 'spelling', 'British')
-
-    _handle_replies(service, account, ctx)
+    _sync_reply_drafts(service, cser)
+    _handle_replies(service, _make_reply_ctx(args, cser))
     return 0
 
 
@@ -2114,6 +2436,11 @@ def _register_series(cser, clean_name, version, link, series_data,
             cser.db.series_set_source(series_id, 'review')
 
         svid = cser.db.ser_ver_add(series_id, version, link=str(link))
+        cover = series_data.get('cover_letter')
+        if cover and cover.get('id'):
+            cser.db.ser_ver_set_info(database.SerVer(
+                svid, None, None, None, cover['id'], 0, cover.get('name'),
+                None, None, None))
 
         patches = series_data.get('patches', [])
         pcommits = []
@@ -2203,12 +2530,35 @@ def _delete_gmail_drafts(args, reviews):
     tout.notice(f'Deleted {len(draft_ids)} old Gmail draft(s)')
 
 
+def _needs_draft(rev, redraft):
+    """Check whether a stored review should get a Gmail draft
+
+    A review which has been sent never gets a new draft. Without redraft,
+    only reviews which have never had a draft get one; with it, existing
+    drafts are recreated and deleted drafts are brought back.
+
+    Args:
+        rev (Review): Review record
+        redraft (bool): True to recreate drafts which exist or were deleted
+
+    Returns:
+        bool: True if a draft should be created
+    """
+    if rev.status in (database.REVIEW_SENT, database.REVIEW_REPLIED):
+        return False
+    if redraft:
+        return True
+    return not rev.draft_id and rev.status != database.REVIEW_DELETED
+
+
 def _draft_stored_reviews(args, reviews, series_data, pwork, cser):
     """Create Gmail drafts from stored review records
 
     Drafts reviews that do not already have a draft_id. With --redraft it
     drafts every stored review, recreating drafts that already exist so a
-    failed or lost draft can be regenerated from the database.
+    failed or lost draft can be regenerated from the database. Reviews which
+    have been sent are never drafted again. With -i, only the selected
+    patches are drafted.
 
     Args:
         args (Namespace): Command-line arguments
@@ -2217,11 +2567,10 @@ def _draft_stored_reviews(args, reviews, series_data, pwork, cser):
         pwork (Patchwork): Patchwork instance
         cser (Cseries): Cseries instance
     """
-    if args.redraft:
-        need_draft = list(reviews)
-    else:
-        need_draft = [rev for rev in reviews
-                      if not rev.draft_id]
+    sel = parse_patch_selection(getattr(args, 'patches', None))
+    need_draft = [rev for rev in reviews
+                  if _needs_draft(rev, args.redraft) and
+                  (not sel or rev.seq in sel)]
     if not need_draft:
         tout.notice('All reviews already have Gmail drafts')
         return
@@ -2245,21 +2594,323 @@ def _draft_stored_reviews(args, reviews, series_data, pwork, cser):
     create_drafts(ctx, args, review_bodies, review_ids)
 
 
+def _do_stored(args, pwork, cser, link):
+    """Handle --send and --revise, which act on stored reviews
+
+    Args:
+        args (Namespace): Command-line arguments
+        pwork (Patchwork): Configured patchwork instance
+        cser (Cseries): Open cseries instance
+        link (str): Patchwork series link/ID
+
+    Returns:
+        int: 0 on success, 1 on failure
+    """
+    if args.send:
+        return _do_send(args, cser, link)
+    return _do_revise(args, pwork, cser, link)
+
+
+def _do_send(args, cser, link):
+    """Send the Gmail drafts of the reviews of a series
+
+    The cover letter's review is sent first, then the patches' in order.
+    With -i, only those patches' drafts are sent. Each review is recorded as
+    sent, with the text which was sent, since the draft may have been
+    changed in Gmail.
+
+    Args:
+        args (Namespace): Command-line arguments
+        cser (Cseries): Open cseries instance
+        link (str): Patchwork series link/ID
+
+    Returns:
+        int: 0 on success, 1 if any draft could not be sent
+    """
+    existing = cser.db.series_find_by_link(link)
+    if not existing:
+        raise ValueError(f'Series {link} has not been reviewed')
+    _, name, version, svid = existing
+    sel = parse_patch_selection(args.patches)
+    reviews = sorted((rev for rev in cser.db.review_get_for_version(svid)
+                      if rev.status == database.REVIEW_DRAFT and
+                      rev.draft_id and (not sel or rev.seq in sel)),
+                     key=lambda rev: rev.seq)
+    if not reviews:
+        raise ValueError(f"No Gmail drafts to send in '{name}' v{version}")
+    if args.dry_run:
+        for rev in reviews:
+            tout.notice(f'Dry run: would send the review of '
+                        f'{_review_label(rev.seq)}')
+        return 0
+    if not gmail.check_available():
+        return 1
+
+    service = gmail.get_service(getattr(args, 'gmail_account', None))
+    failed = 0
+    for rev in reviews:
+        label = _review_label(rev.seq)
+        try:
+            result = gmail.send_draft(service, rev.draft_id)
+        except Exception as exc:  # pylint: disable=W0718
+            tout.error(f'Cannot send the review of {label}: {exc}')
+            failed += 1
+            continue
+        if not result:
+            tout.warning(f'The draft of the review of {label} has gone; '
+                         'not sent')
+            failed += 1
+            continue
+        body, msg_id, thread_id = result
+        cser.db.review_set_sent(rev.idnum, body or rev.body, msg_id,
+                                thread_id)
+        cser.commit()
+        tout.notice(f'Sent the review of {label}')
+    tout.notice(f'Sent {len(reviews) - failed} of {len(reviews)} review(s)')
+    return 1 if failed else 0
+
+
+def _review_label(seq):
+    """Describe which part of a series a review is for
+
+    Args:
+        seq (int): Patch number, 0 for the cover letter
+
+    Returns:
+        str: e.g. 'patch 2' or 'the cover letter'
+    """
+    return f'patch {seq}' if seq else 'the cover letter'
+
+
+_REVISE_PROMPT = '''You are a U-Boot maintainer. You drafted the code
+reviews in the file below, but they have not been sent yet. The reviewer has
+read them and wants them changed, as described in their note.
+
+NOTE FROM THE REVIEWER:
+{note}
+
+REVIEWS:
+(see file: {reviews_path})
+
+Each review in the file starts with a line '---SEQ N---', where N is the
+patch number (0 is the cover letter).
+
+{patches}
+
+TASK:
+- Change the reviews as the note asks. If the note quotes part of a review,
+  it is about that part.
+- If the note applies to more than one review, e.g. 'drop the comments about
+  style', apply it to each of them
+- Change only what the note asks for, keeping the rest of each review as it
+  is, word for word
+- Check the code if you need to, with 'git show' on the commits above. Do not
+  read files in the working tree, since it does not hold the patches.
+- Do NOT run 'git checkout', switch branches or change any files
+- Keep the email format: the greeting, the quoted lines starting with '>',
+  the comments after each quote and the closing lines
+- If the note says a patch is fine and its review has no comments left,
+  approve it by ending the review with: Reviewed-by: {tag}
+- If the note asks for a change to a patch which its review approves, remove
+  the Reviewed-by line
+- Use {spelling} spelling
+
+OUTPUT:
+Output ONLY the reviews you changed, each as the line '---SEQ N---' followed
+by the complete new text of that review. Leave out reviews which need no
+change. Do not add any commentary.
+'''
+
+
+def _review_commits(args, cser, link, ups):
+    """Get the commits holding the patches of a reviewed series
+
+    The review branch is left in place after a review, so the patches can be
+    read from it. It may be based on next or master (see _series_base()), so
+    the base is whichever of these leaves the fewest commits on the branch.
+
+    Args:
+        args (Namespace): Command-line arguments (for base_branch)
+        cser (Cseries): Open cseries instance
+        link (str): Patchwork series link/ID
+        ups (str or None): Upstream name
+
+    Returns:
+        list of str: One line for each commit, 'hash subject', oldest first,
+            or an empty list if the branch is not present
+    """
+    branch = _make_review_name(link, ups)
+    git_dir = gitutil.get_top_level()
+    if not gitutil.ref_exists(branch, git_dir):
+        return []
+    bases = [_get_upstream_branch(args, cser)]
+    if ups:
+        bases += [f'{ups}/next', _main_branch(ups, git_dir)]
+    counts = {}
+    for base in bases:
+        count = gitutil.count_revs(git_dir, f'{base}..{branch}')
+        if count:
+            counts[base] = count
+    if not counts:
+        return []
+    base = min(counts, key=counts.get)
+    out = subprocess.run(
+        ['git', 'log', '--reverse', '--format=%H %s', f'{base}..{branch}'],
+        capture_output=True, text=True, check=False, cwd=git_dir).stdout
+    return out.splitlines()
+
+
+async def revise_reviews(ctx, reviews, note, commits):
+    """Ask the agent to change some reviews, following a note from the reviewer
+
+    Args:
+        ctx (ReviewContext): Review context (uses repo_path, reviewer_tag
+            and spelling)
+        reviews (dict): Map of seq to review body text
+        note (str): What the reviewer wants changed
+        commits (list of str): 'hash subject' for each patch, in order
+
+    Returns:
+        dict or None: Map of seq to new review body text, for each review
+            which changed, or None if the agent is not available or failed
+    """
+    if not claude_mod.check_available():
+        return None
+    parts = []
+    for seq in sorted(reviews):
+        parts += [f'---SEQ {seq}---', reviews[seq]]
+    if commits:
+        lines = '\n'.join(f'Patch {seq}: {line}'
+                          for seq, line in enumerate(commits, 1))
+        patches = f'The patches are these commits:\n{lines}'
+    else:
+        patches = 'The patches are not available in the repository.'
+    with tempfile.NamedTemporaryFile('w', prefix='patman_revise_',
+                                     suffix='.txt', delete=False) as outf:
+        outf.write('\n'.join(parts))
+        reviews_path = outf.name
+    try:
+        prompt = _REVISE_PROMPT.format(
+            note=note, reviews_path=reviews_path, patches=patches,
+            tag=ctx.reviewer_tag, spelling=ctx.spelling)
+        options = _agent_options(
+            allowed_tools=['Bash', 'Read', 'Grep'], cwd=ctx.repo_path,
+            max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
+        tout.notice('Revising reviews...')
+        success, log = await claude_mod.run_agent_collect(prompt, options)
+    finally:
+        os.unlink(reviews_path)
+    if not success:
+        return None
+    return {seq: body for seq, body in _parse_refined_output(log).items()
+            if seq in reviews and body and body != reviews[seq].strip()}
+
+
+def revise_reviews_sync(ctx, reviews, note, commits):
+    """Synchronous wrapper for revise_reviews()"""
+    loop = asyncio.get_event_loop()
+    return loop.run_until_complete(
+        revise_reviews(ctx, reviews, note, commits))
+
+
+def _do_revise(args, pwork, cser, link):
+    """Change stored reviews of a series, following a note from the reviewer
+
+    Only reviews which have not been sent are changed. With -i, only those
+    patches' reviews are given to the agent. With -d, the Gmail drafts of the
+    reviews which change are recreated.
+
+    Args:
+        args (Namespace): Command-line arguments
+        pwork (Patchwork): Configured patchwork instance
+        cser (Cseries): Open cseries instance
+        link (str): Patchwork series link/ID
+
+    Returns:
+        int: 0 on success, 1 on failure
+    """
+    existing = cser.db.series_find_by_link(link)
+    if not existing:
+        raise ValueError(f'Series {link} has not been reviewed')
+    _, name, version, svid = existing
+    sel = parse_patch_selection(args.patches)
+    reviews = [rev for rev in cser.db.review_get_for_version(svid)
+               if rev.status not in (database.REVIEW_SENT,
+                                     database.REVIEW_REPLIED) and
+               (not sel or rev.seq in sel)]
+    if not reviews:
+        raise ValueError(f"No unsent reviews to revise in '{name}' "
+                         f'v{version}')
+
+    ctx = ReviewContext(pwork, cser, {})
+    ctx.reviewer_name, ctx.reviewer_email = _parse_reviewer(args)
+    ctx.repo_path = gitutil.get_top_level()
+    ctx.spelling = args.spelling
+    ups = pwork.upstream if pwork else None
+    commits = _review_commits(args, cser, link, ups)
+    changed = revise_reviews_sync(
+        ctx, {rev.seq: rev.body for rev in reviews}, args.revise, commits)
+    if changed is None:
+        tout.error('Could not revise the reviews')
+        return 1
+    if not changed:
+        tout.notice('No reviews needed changing')
+        return 0
+
+    for rev in reviews:
+        if rev.seq in changed:
+            body = changed[rev.seq]
+            cser.db.review_set_body(rev.idnum, body,
+                                    'Reviewed-by:' in body)
+            tout.notice(f'Revised the review of {_review_label(rev.seq)}')
+            print(body)
+            print()
+    cser.commit()
+
+    if args.create_drafts:
+        redo = [cser.db.review_get(rev.idnum) for rev in reviews
+                if rev.seq in changed]
+        _delete_gmail_drafts(args, redo)
+        ctx.series_data = _fetch_series(pwork, link)[0]
+        create_drafts(ctx, args, {rev.seq: rev.body for rev in redo},
+                      {rev.seq: rev.idnum for rev in redo})
+    return 0
+
+
+def _main_branch(ups, git_dir=None):
+    """Get the main branch of an upstream
+
+    U-Boot's main branch is 'main', having been 'master'. Use whichever the
+    remote has, preferring 'main', since 'master' may be left behind.
+
+    Args:
+        ups (str): Upstream name, which is also the git remote
+        git_dir (str or None): Directory containing the git repo, or None
+            for the current directory
+
+    Returns:
+        str: Branch ref, e.g. 'us/main'
+    """
+    ref = f'{ups}/main'
+    return ref if gitutil.ref_exists(ref, git_dir) else f'{ups}/master'
+
+
 def _get_upstream_branch(args, cser):
     """Determine the base branch for applying patches
 
     Honours --base-branch if the user supplied one. Otherwise prefers
-    '<upstream>/next' when it has commits ahead of '<upstream>/master',
-    falling back to '<upstream>/master' when next is empty (e.g. just
-    after a release, when next has been merged into master and has not
-    yet been reopened for the next cycle).
+    '<upstream>/next' when it has commits ahead of the main branch
+    ('<upstream>/main', or '<upstream>/master' if there is no main),
+    falling back to the main branch when next is empty (e.g. just after a
+    release, when next has been merged into main and has not yet been
+    reopened for the next cycle).
 
     Args:
         args (Namespace): Command-line arguments
         cser (Cseries): Open cseries instance
 
     Returns:
-        str: Base branch ref, e.g. 'us/next' or 'us/master'
+        str: Base branch ref, e.g. 'us/next' or 'us/main'
     """
     if args.base_branch:
         return args.base_branch
@@ -2268,14 +2919,142 @@ def _get_upstream_branch(args, cser):
         ups = cser.db.upstream_get_default()
     if ups:
         next_branch = f'{ups}/next'
-        master_branch = f'{ups}/master'
+        main_branch = _main_branch(ups)
         if gitutil.ref_exists(next_branch):
             ahead = gitutil.count_revs(
-                None, f'{master_branch}..{next_branch}')
+                None, f'{main_branch}..{next_branch}')
             if ahead:
                 return next_branch
-        return master_branch
+        return main_branch
     return 'origin/master'
+
+
+# A 'base-commit:' trailer, added by 'git format-patch --base' and by patman,
+# giving the commit the series was written against
+RE_BASE_COMMIT = re.compile(r'^base-commit:\s*([0-9a-f]{7,40})\s*$',
+                            re.MULTILINE)
+
+# A note in the cover letter saying which branch the series is for, e.g.
+# 'This series is based on master' or 'Applies on top of u-boot/next'
+RE_BASED_ON = re.compile(
+    r'\b(?:based|applies|apply|rebased)\s+'
+    r'(?:onto|on(?:\s+top\s+of)?|to|against)'
+    r'\s+(?:the\s+)?(?:(?:u-boot|upstream|origin|us)[/ ])?[\'"`]?'
+    r'(master|main|next)\b', re.IGNORECASE)
+
+
+def find_series_base(text):
+    """Find which commit or branch a series says it is based on
+
+    Args:
+        text (str): Cover letter, or the last patch if there is none
+
+    Returns:
+        tuple:
+            str or None: Base commit from a 'base-commit:' trailer
+            str or None: 'main' or 'next', if the text says the series
+                is based on one of them ('master' counts as 'main')
+    """
+    match = RE_BASE_COMMIT.search(text or '')
+    commit = match.group(1) if match else None
+    match = RE_BASED_ON.search(text or '')
+    branch = None
+    if match:
+        branch = 'next' if match.group(1).lower() == 'next' else 'main'
+    return commit, branch
+
+
+def _base_text(ctx):
+    """Get the text which may say what a series is based on
+
+    'git format-patch --base' puts the trailer at the end of the cover
+    letter, or of the last patch if there is no cover letter. The cover
+    letter is kept in ctx.cover_content for the review.
+
+    Args:
+        ctx (ReviewContext): Review context (uses pwork and series_data)
+
+    Returns:
+        str: Text to search
+    """
+    ctx.cover_content = _fetch_cover_content(ctx.pwork, ctx.series_data)
+    if ctx.cover_content:
+        return ctx.cover_content
+    patches = ctx.series_data.get('patches') or []
+    if not patches:
+        return ''
+
+    async def _fetch():
+        async with aiohttp.ClientSession() as client:
+            return await ctx.pwork.get_patch(client, str(patches[-1]['id']))
+
+    loop = asyncio.get_event_loop()
+    data = loop.run_until_complete(_fetch())
+    return f"{data.get('content') or ''}\n{data.get('diff') or ''}"
+
+
+def _is_ancestor(commit, ref, git_dir):
+    """Check whether a commit is in the history of a ref"""
+    return subprocess.run(
+        ['git', 'merge-base', '--is-ancestor', commit, ref], cwd=git_dir,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        check=False).returncode == 0
+
+
+def _commit_exists(commit, git_dir):
+    """Check whether a commit is in the repository"""
+    return gitutil.ref_exists(f'{commit}^{{commit}}', git_dir)
+
+
+def _series_base(ctx, ups, default):
+    """Work out the base to apply a series to, from what the series says
+
+    During the merge window, series are often written against main rather
+    than next, and do not apply to next. If the series gives a base commit,
+    use whichever of next and main holds it, preferring the default; if
+    neither does, use the commit itself. The upstream is fetched if the
+    commit is not known yet. Failing that, use the branch which the cover
+    letter says the series is based on, if any.
+
+    Args:
+        ctx (ReviewContext): Review context (uses pwork, series_data and
+            main_repo)
+        ups (str or None): Upstream name, which is also the git remote
+        default (str): Base which would otherwise be used, e.g. 'us/next'
+
+    Returns:
+        str or None: Base to use, or None to use the default
+    """
+    commit, branch = find_series_base(_base_text(ctx))
+    if not ups:
+        return commit if commit and _commit_exists(
+            commit, ctx.main_repo) else None
+    if commit and not _commit_exists(commit, ctx.main_repo):
+        tout.notice(f"Fetching '{ups}' to find base-commit {commit}")
+        subprocess.run(['git', 'fetch', '-q', ups], cwd=ctx.main_repo,
+                       check=False)
+    main = _main_branch(ups, ctx.main_repo)
+    branches = [default] + [ref for ref in (f'{ups}/next', main)
+                            if ref != default]
+    if commit:
+        if _commit_exists(commit, ctx.main_repo):
+            for ref in branches:
+                if gitutil.ref_exists(ref, ctx.main_repo) and \
+                        _is_ancestor(commit, ref, ctx.main_repo):
+                    tout.notice(f'The series is based on {commit[:12]}, '
+                                f'which is in {ref}')
+                    return ref
+            tout.notice(f'The series is based on {commit[:12]}, which is '
+                        f'not in {ups}/next or {main}; using it')
+            return commit
+        tout.warning(f'Cannot find base-commit {commit}; using {default}')
+    if branch:
+        ref = main if branch == 'main' else f'{ups}/{branch}'
+        if gitutil.ref_exists(ref, ctx.main_repo):
+            tout.notice(f'The cover letter says the series is based on '
+                        f'{branch}; using {ref}')
+            return ref
+    return None
 
 
 def _apply_and_check(ctx, link):
@@ -2413,7 +3192,8 @@ def _run_and_store_reviews(ctx, args):
     for rev in prev_db:
         ctx.previous_reviews[rev.seq] = rev.body
 
-    ctx.cover_content = _fetch_cover_content(ctx.pwork, ctx.series_data)
+    if ctx.cover_content is None:
+        ctx.cover_content = _fetch_cover_content(ctx.pwork, ctx.series_data)
 
     review_bodies = review_patches_sync(ctx)
 
@@ -2628,6 +3408,10 @@ def _review_link(args, pwork, cser, link):
 
         ctx.upstream_branch = _get_upstream_branch(args, cser)
         ctx.main_repo = main_repo
+        if not args.base_branch:
+            ctx.upstream_branch = _series_base(
+                ctx, args.upstream or cser.db.upstream_get_default(),
+                ctx.upstream_branch) or ctx.upstream_branch
         ctx.branch_name = branch_name
         wt_path = cser_helper.review_worktree_path(ctx.main_repo,
                                                    ctx.branch_name)
@@ -2750,6 +3534,8 @@ def _build_review_command(args, link):
     cmd += ['review', '-s', str(link), '--any-state']
     if getattr(args, 'upstream', None):
         cmd += ['-U', args.upstream]
+    if getattr(args, 'review_db_dir', None):
+        cmd += ['--review-db-dir', args.review_db_dir]
     if getattr(args, 'reviewer', None):
         cmd += ['--reviewer', args.reviewer]
     if getattr(args, 'base_branch', None):
@@ -2884,7 +3670,7 @@ def _draft_undrafted(args, pwork, cser, dry_run=False):
         if series_id not in review_ids:
             continue
         reviews = cser.db.review_get_for_version(svid)
-        if not reviews or not any(not rev.draft_id for rev in reviews):
+        if not any(_needs_draft(rev, False) for rev in reviews):
             continue
         link = cser.db.ser_ver_get_link(series_id, version)
         if not link:
@@ -3099,6 +3885,12 @@ def do_review(args, pwork, cser):
     if args.sync:
         return _do_sync(args, cser)
 
+    if (getattr(args, 'list_replies', False) or
+            getattr(args, 'suggest_reply', None) or
+            getattr(args, 'draft_reply', None) or
+            getattr(args, 'send_reply', None)):
+        return _do_reply_cmd(args, cser)
+
     if args.relink:
         return _do_relink(args, cser)
 
@@ -3127,6 +3919,8 @@ def do_review(args, pwork, cser):
     elif not link:
         link = search_series(pwork, args.title, getattr(args, 'version', None))
 
+    if getattr(args, 'send', False) or getattr(args, 'revise', None):
+        return _do_stored(args, pwork, cser, link)
     return _review_link(args, pwork, cser, link)
 
 
@@ -3425,11 +4219,15 @@ async def handle_reply(ctx, review_body, reply_from, reply_body):
         reply_body (str): The reply text
 
     Returns:
-        str or None: Response email body, or None if no response needed
+        tuple:
+            str or None: database.REPLY_SUGGESTED if there is a response,
+                database.REPLY_SKIP if no response is needed, or None if the
+                agent is not available or failed
+            str or None: Response email body, if there is one
     """
 
     if not claude_mod.check_available():
-        return None
+        return None, None
 
     # Write our review and the reply to temp files
     review_path = os.path.join(tempfile.gettempdir(),
@@ -3453,11 +4251,11 @@ async def handle_reply(ctx, review_body, reply_from, reply_body):
             os.unlink(path)
 
     if not success or not log.strip():
-        return None
+        return None, None
 
     greeting, verdict, comments = parse_review_output(log)
     if verdict == 'skip':
-        return None
+        return database.REPLY_SKIP, None
 
     if '<' in reply_from:
         reply_name = reply_from.split('<')[0].strip()
@@ -3473,7 +4271,8 @@ async def handle_reply(ctx, review_body, reply_from, reply_body):
     reply_ctx.reviewer_name = ctx.reviewer_name
     reply_ctx.reviewer_email = ctx.reviewer_email
     reply_ctx.signoff = ctx.signoff
-    return format_review_email(reply_ctx, greeting, verdict, comments)
+    return database.REPLY_SUGGESTED, format_review_email(
+        reply_ctx, greeting, verdict, comments)
 
 
 def handle_reply_sync(ctx, review_body, reply_from, reply_body):

@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 256 256"
+   role="img"
+   aria-labelledby="t"
+   version="1.1"
+   id="svg9"
+   sodipodi:docname="patman-icon.svg"
+   inkscape:export-filename="patman-icon.png"
+   inkscape:export-xdpi="24"
+   inkscape:export-ydpi="24"
+   inkscape:version="1.4 (1:1.4+202410161351+e7c3feb100)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs9" />
+  <sodipodi:namedview
+     id="namedview9"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="4.015625"
+     inkscape:cx="128"
+     inkscape:cy="128.12451"
+     inkscape:window-width="1526"
+     inkscape:window-height="964"
+     inkscape:window-x="1735"
+     inkscape:window-y="710"
+     inkscape:window-maximized="0"
+     inkscape:current-layer="svg9" />
+  <title
+     id="t">patman icon</title>
+  <rect
+     x="8"
+     y="8"
+     width="240"
+     height="240"
+     rx="54"
+     fill="#12161C"
+     id="rect1" />
+  <!-- removed line -->
+  <rect
+     x="70"
+     y="84"
+     width="22"
+     height="6"
+     rx="3"
+     fill="#FF6B61"
+     id="rect2" />
+  <rect
+     x="108"
+     y="76"
+     width="86"
+     height="22"
+     rx="11"
+     fill="#FF6B61"
+     opacity="0.6"
+     id="rect3" />
+  <!-- added line -->
+  <rect
+     x="67"
+     y="124"
+     width="28"
+     height="6"
+     rx="3"
+     fill="#3FB950"
+     id="rect4" />
+  <rect
+     x="78"
+     y="113"
+     width="6"
+     height="28"
+     rx="3"
+     fill="#3FB950"
+     id="rect5" />
+  <rect
+     x="108"
+     y="116"
+     width="70"
+     height="22"
+     rx="11"
+     fill="#3FB950"
+     id="rect6" />
+  <!-- added line -->
+  <rect
+     x="67"
+     y="164"
+     width="28"
+     height="6"
+     rx="3"
+     fill="#3FB950"
+     id="rect7" />
+  <rect
+     x="78"
+     y="153"
+     width="6"
+     height="28"
+     rx="3"
+     fill="#3FB950"
+     id="rect8" />
+  <rect
+     x="108"
+     y="156"
+     width="50"
+     height="22"
+     rx="11"
+     fill="#3FB950"
+     id="rect9" />
+</svg>

@@ -42,7 +42,7 @@ Install the latest release from PyPI::
 Optional features are available as extras::
 
     pip install patch-manager[gmail]    # send/fetch review mail via Gmail
-    pip install patch-manager[review]   # AI-assisted patch review
+    pip install patch-manager[review]   # patch review using a Claude agent
     pip install patch-manager[all]      # everything
 
 The ``patman`` command is then on your path. It is also installed as

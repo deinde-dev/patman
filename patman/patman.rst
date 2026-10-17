@@ -5,7 +5,7 @@
 .. v1, v2, 19-Oct-11
 .. revised v3 24-Nov-11
 .. revised v4 Independence Day 2020, with Patchwork integration
-.. revised 2026, with AI review, series tracking and web-relay sending
+.. revised 2026, with assisted review, series tracking and web-relay sending
 
 Patman patch manager
 ====================
@@ -31,11 +31,15 @@ Once a series is out for review it helps you track it on Patchwork:
 - Show review tags from Patchwork and gather them into your commits
 - List the comments a series has received
 
-It can also review patches for you, using an AI agent:
+It can also draft reviews of patches for you, using a Claude agent:
 
 - Review any Patchwork series, or your own series before you send it
 - Optionally build Gmail drafts, run Coverity or learn your writing
   voice from past reviews
+
+``patman serve`` shows the status of your series and your reviews on a
+mobile-friendly web page, where you can also work on reviews (see `Web
+server`_).
 
 The series tracking and stored reviews are kept in an optional local
 database (a ``.patman.db`` file at the top of your git tree), which
@@ -190,6 +194,12 @@ patman.py.  For reference, the useful ones (at the moment) shown below
     verbose: True
     smtp_server: /path/to/sendmail
     patchwork_url: https://patchwork.ozlabs.org
+    patchwork_timeout: 60
+
+``patchwork_timeout`` is the number of seconds to wait for each request to
+patchwork before trying again (default 30). A busy server can stall a
+request, so patman retries a request which times out, has its connection
+reset or refused, or gets a 502, 503 or 504 status, up to three times.
 
 By default patman adds ``base-commit:`` and ``branch:`` trailers to the
 generated patches (or the cover letter). These record the commit that the
@@ -1325,11 +1335,12 @@ might be bugs. In particular, tags are case sensitive which is probably
 a bad thing.
 
 
-AI-assisted patch review
-========================
+Assisted patch review
+=====================
 
 Patman can review other people's patches from Patchwork using a Claude
-AI agent, and create Gmail draft replies with the review comments.
+agent, and create Gmail draft replies with the review comments. Nothing
+is sent until you have checked a draft and chosen to send it.
 
 Prerequisites
 -------------
@@ -1456,19 +1467,54 @@ been reviewed and the drafts already exist::
 Any existing draft is deleted first, so it is not left as a duplicate
 in the thread.
 
+To have the agent change reviews which have not been sent yet, say what you
+want in a note with ``--revise``. It changes only what the note asks for,
+and can check the code using the review branch. Use ``-i`` to pick which
+patches' reviews it looks at (0 is the cover letter), and ``-d`` to update
+the Gmail drafts of the reviews which change::
+
+    patman review -s 497923 -U us -i 4 -d \
+        --revise 'Ask for a timeout rather than an unbounded loop'
+    patman review -s 497923 -U us --revise 'Drop the comments about style'
+
+The review approves the patch (with a ``Reviewed-by`` tag) if the note says
+the patch is fine, and stops approving it if the note asks for a change.
+
+Once you are happy with the drafts, you can send them without opening Gmail.
+``--send`` sends the Gmail drafts of a series' reviews, the cover letter's
+first, and records each review as sent, with the text which was sent, in
+case you changed it in Gmail. Use ``-i`` to send only some of them, and
+``-n`` to see what would be sent::
+
+    patman review -s 497923 -U us --send -n
+    patman review -s 497923 -U us --send -i 0,2
+
 Use ``--apply-only`` to download and apply patches without running the
-AI review -- useful for checking that patches apply cleanly.
+review -- useful for checking that patches apply cleanly.
 
 By default the review branch is created from ``<upstream>/next`` when
-that branch has commits ahead of ``<upstream>/master``, and from
-``<upstream>/master`` otherwise. This tracks U-Boot's release cadence:
-right after a release ``next`` is merged into ``master`` and stays
-empty until the next cycle's RC1, so reviews land on ``master`` during
-that window and switch back to ``next`` automatically once it
-diverges. Use ``-b`` / ``--base-branch`` to override the choice for a
-particular run::
+that branch has commits ahead of the main branch, and from the main
+branch otherwise. The main branch is ``<upstream>/main``, or
+``<upstream>/master`` if the upstream has no ``main``. This tracks
+U-Boot's release cadence: right after a release ``next`` is merged into
+``main`` and stays empty until the next cycle's RC1, so reviews land on
+``main`` during that window and switch back to ``next`` automatically
+once it diverges.
 
-    patman review -s 497923 -U us -b us/master \
+Series often say what they are based on, which matters during the merge
+window, when some are written against ``main`` and do not apply to
+``next``. If the cover letter (or the last patch, if there is no cover
+letter) has a ``base-commit:`` line, as added by ``git format-patch
+--base`` and by patman, the review uses whichever of ``next`` and
+``main`` holds that commit, or the commit itself if neither does. The
+upstream is fetched first if the commit is not known yet. Without a base
+commit, a cover letter which says it is 'based on' or 'applies to'
+``main``, ``master`` or ``next`` picks that branch.
+
+Use ``-b`` / ``--base-branch`` to override the choice for a particular
+run::
+
+    patman review -s 497923 -U us -b us/main \
         --reviewer 'Your Name <your@email>'
 
 Use ``-f`` / ``--force`` to re-review a series that has already been
@@ -1487,8 +1533,8 @@ the email is sent with the correct identity.
 Reviewing your own series before sending
 ----------------------------------------
 
-To get an AI review of your own series before sending it, add the
-series with ``patman series add`` and then run::
+To have your own series reviewed before sending it, add the series with
+``patman series add`` and then run::
 
     patman series review
 
@@ -1522,7 +1568,7 @@ review regardless::
 How the review works
 --------------------
 
-For each patch, the AI agent:
+For each patch, the agent:
 
 1. Studies all patches in the series to understand the overall design
 2. Re-reads the specific patch in detail
@@ -1632,7 +1678,7 @@ the spelling convention used in review comments.
 Voice learning
 --------------
 
-Build a voice profile so AI reviews match your writing style::
+Build a voice profile so draft reviews match your writing style::
 
     # From Gmail (searches your sent reviews to the mailing list)
     patman review --learn-voice gmail -U us \
@@ -1660,10 +1706,52 @@ This:
 - Detects which drafts have been sent and records the final email
   content in the database (for context when reviewing future versions)
 - Detects deleted drafts (review not sent)
-- Refines the voice profile if the sent text differs from the AI draft
-- Detects replies from the patch author or other reviewers
-- Generates response drafts when appropriate (e.g. answering
-  questions, pushing back on objections, or conceding gracefully)
+- Refines the voice profile if the sent text differs from the draft,
+  for up to three reviews written in the last two weeks
+- Records replies to your reviews, from the patch author or other
+  reviewers, in reviews sent in the last 90 days
+- Suggests a response to each new reply from the last 14 days when one
+  is needed (e.g. answering questions, pushing back on objections, or
+  conceding gracefully), or notes that none is needed. Older replies are
+  recorded without a suggestion, so that a backlog does not cause a lot of
+  work for the agent; use ``--suggest-reply`` for any that need one
+- Records replies which you have already answered as answered
+- Detects when a draft response has been sent
+
+A review counts as sent once you have sent a message about the same patch
+(the same subject, version and patch number) after the review was written,
+whether that is the draft itself or a reply you wrote instead. The message is
+looked for in the Gmail thread of the draft, which is noted each time
+``--sync`` runs while the draft is pending, or else by searching your sent
+mail for a distinctive phrase from the review or for the patch's subject. A
+message which only shares the subject must be sent within 14 days of the
+review. Pending drafts are checked like this for reviews from the last 90
+days; older ones are only checked to see whether the draft has gone. A review
+is only marked as deleted if its draft has gone and no such message is found.
+
+Only messages which reply to your review are recorded; other messages in
+the same thread, and your own, are ignored.
+
+Responding to replies
+---------------------
+
+To see the replies which still need a response, and act on them::
+
+    patman review --replies             # list them, with their IDs
+    patman review --suggest-reply 12    # ask the agent (again) for a response
+    patman review --draft-reply 12      # create a Gmail draft of it
+    patman review --send-reply 12       # send it
+
+The draft is threaded as a reply to the reply, with a 'Re:' subject, and is
+copied to everyone the reply went to. ``--send-reply`` sends the draft as it
+is in Gmail, so any changes made there are kept, and records the text which
+was sent. If the response has no draft yet, or has been changed since the
+draft was created, the draft is created first. If the draft has been deleted
+in Gmail, nothing is sent.
+
+The response can also be edited, drafted and sent from the Reviews tab of
+``patman serve``: tap 'Send' under it, or 'Edit response' then 'Save and
+send'. Both need a second tap to confirm.
 
 Scanning for new versions
 -------------------------
@@ -1716,7 +1804,7 @@ Review lifecycle
 
 Each review goes through these states:
 
-- **new**: AI review generated, not yet sent
+- **new**: Review drafted, not yet sent
 - **draft**: Gmail draft created
 - **sent**: Draft was sent; body updated with actual sent content
 - **deleted**: Draft was deleted without sending
@@ -1724,7 +1812,7 @@ Each review goes through these states:
 
 When reviewing a new version of a previously reviewed series, patman
 loads the most recent earlier version that has reviews as context for
-the AI, so it can check whether earlier issues were addressed and avoid
+the agent, so it can check whether earlier issues were addressed and avoid
 raising fresh points the earlier versions did not. Versions are linked
 by their cleaned cover-letter title.
 
@@ -1743,12 +1831,196 @@ The ``review`` command supports aliases ``r`` and ``rev``::
     patman r -l 497923 -U us --reviewer 'Your Name <your@email>'
 
 
+Web server
+==========
+
+``patman serve`` runs a small web server in your git tree, so that you can
+check on your series and work on reviews from a phone or another computer. The
+page has these tabs:
+
+- **Series**: your series with the state of each patch in the latest version.
+  Tap a series to see each version's patches, then tap a patch or the cover
+  letter to read its comments, which are fetched from patchwork
+- **Reviews**: series you have reviewed with ``patman review``, showing the
+  review of each patch and whether it has been drafted, sent or replied to
+- **Inbox**: recent series on patchwork, showing which you have reviewed
+- **Jobs**: reviews and other commands started from the page, and the syncs,
+  with their output
+- **Todo**: series marked with ``patman workflow todo``, due ones first
+
+The page uses the JSON API described in ``doc/serve-protocol.rst``, which other
+tools can use too.
+
+Starting the server
+-------------------
+
+The server only listens on the local machine by default::
+
+    patman serve
+
+then browse to http://localhost:8040/ on the same machine. To use it from a
+phone, either forward the port over ssh (``ssh -L 8040:localhost:8040 <host>``)
+or use a VPN such as Tailscale and listen on that address with a token::
+
+    patman serve --host 100.64.1.2 --token <secret>
+
+Open the URL that patman prints (which includes the token) once on the phone;
+the page remembers the token after that. With Tailscale, ``tailscale serve
+8040`` provides HTTPS, which lets the browser install the page as an app.
+
+The options are:
+
+- ``--host ADDR``: address to listen on (default 127.0.0.1)
+- ``--port PORT``: port to listen on (default 8040)
+- ``-t``, ``--token TOKEN``: token which clients must give; use this when
+  listening on any address other than a loopback one
+- ``-s``, ``--sync [MINUTES]``: sync with patchwork every MINUTES minutes
+  (default 60); see below
+- ``-r``, ``--review-sync``: also run ``patman review --sync`` in each sync
+- ``--review-db-dir DIR``: read reviews from a separate database (the
+  ``review_db_dir`` setting)
+
+Keeping the status up to date
+-----------------------------
+
+Since the status of each patch only changes in the database when patman asks
+patchwork, the server can do this periodically::
+
+    patman serve --sync        # every hour
+    patman serve --sync 20     # every 20 minutes
+    patman serve --sync -r     # also run 'patman review --sync'
+
+Each sync runs ``patman series gather-all -G`` in a separate process. The
+``-G`` flag means that review tags are not gathered into your branches, so
+nothing changes in your git tree while you are working in it. Use ``patman
+series gather`` yourself when you are ready to pick up the tags. The ``-r``
+flag also runs ``patman review --sync`` to track sent review drafts and
+replies; this needs Gmail access (see `Assisted patch review`_).
+
+Each series is read from the patchwork server of its upstream, so a server
+which is down only affects its own series.
+
+Before gathering, the sync runs ``git fetch`` for the default upstream and the
+upstreams of reviewed series, where these are git remotes, so that reviews
+apply patches to up-to-date branches. This only updates the remote branches,
+not your own.
+
+Tap the sync indicator at the top of the page to follow the output of a sync as
+it runs, to start one or to cancel one.
+
+Reading patches
+---------------
+
+Each patch and cover letter can be read on the page: tap 'Read' on a series, a
+patch name in a review, or a patch in the inbox to see the commit message, the
+diff (with a summary of the files changed) and the comments on patchwork.
+
+To see the code around a chunk of a diff, tap '5 more' above or below it, as
+often as needed, or 'All' to fill the gap. Tap a file's name, or 'Whole file',
+to see all of the file, with line numbers, at that point. The code is read from
+the git repo where the server runs, using the blobs named in the diff's 'index'
+line, so it is only available if the repo has them: the file as it is before
+the patch is there if the series is based on a commit the repo has, and the
+file with the patch applied is there once the series has been reviewed.
+
+Reviewing from the page
+-----------------------
+
+On the Reviews tab, 'Review a series' takes a patchwork series ID, the URL of a
+series or patch, or words from a cover-letter title, and runs ``patman review``
+(with ``-d`` to create Gmail drafts, if selected). 'Scan for new versions' runs
+``patman review --scan``. Each reviewed series has buttons to recreate its
+Gmail drafts, either all of them or one patch's, and to review it again.
+
+The Inbox tab lists the most recent series on patchwork for each upstream.
+Series which you have reviewed, or which are your own, are marked, as are new
+versions of series you reviewed earlier, so it is easy to see what needs a
+review. Tap a series to see its patches and start a review.
+
+Each review has 'Show the patch' (or 'Show the cover letter'), which shows the
+commit message and diff just below the review, so the two can be read together.
+
+A review which has not been sent can be edited on the page. Saving it can also
+update its Gmail draft, so that the draft matches. Whether the review approves
+the patch follows from whether the text includes a ``Reviewed-by:`` line.
+
+To change just one comment, tap 'Edit' under it. The comment opens for editing
+in place, between the lines it quotes and the rest of the review. Saving it
+with no text drops the comment along with the lines it quotes.
+
+To have the agent change a review which has not been sent, tap 'Revise' under
+it and say what should change, or tap 'Revise this' under one comment to talk
+about just that part. 'Revise all' at the top applies a note to every unsent
+review of the series, e.g. 'drop the comments about style'. These run ``patman
+review --revise``, updating the Gmail drafts if selected.
+
+'Send' under a review sends its Gmail draft, and 'Send N drafts' at the top
+sends them all; each needs a second tap to confirm.
+
+Replies to reviews
+------------------
+
+When someone replies to one of your reviews (found by ``review --sync``, so use
+``serve -r``), the reply is shown below the review, along with any response the
+agent suggests. The Reviews tab has a 'Needs reply' filter. You can edit the
+response, or write one, then create a Gmail draft which is threaded as a reply,
+or send it. You can also tap 'Suggest a response' to have the agent suggest one
+(again), or note that no reply is needed.
+
+Jobs
+----
+
+Commands started from the page, such as reviews, run as jobs, one at a time in
+the order they are started, along with the syncs. The Jobs tab shows each job
+with its output as it runs, and lets you cancel it.
+
+Jobs which are waiting or running are recorded in ``.patman-serve-jobs.json``
+next to the database. If the server stops before a job finishes, for example
+because the service is restarted, the job is run again from the start when the
+server next starts. A job is resumed at most three times.
+
+Running it as a service
+-----------------------
+
+To keep the server running, for example on a machine which you reach over a
+VPN, run it as a systemd user service. Put the token in a file which only you
+can read, such as ``~/.config/patman-serve.env``::
+
+    PATMAN_TOKEN=<secret>
+
+then create ``~/.config/systemd/user/patman-serve.service``, changing the
+directory, the path to patman and the address to suit::
+
+    [Unit]
+    Description=patman web server
+    After=network-online.target
+
+    [Service]
+    WorkingDirectory=%h/src/u-boot
+    EnvironmentFile=%h/.config/patman-serve.env
+    ExecStart=%h/.local/bin/patman serve --host 100.64.1.2 \
+        -t ${PATMAN_TOKEN} -s -r
+    Restart=on-failure
+    RestartSec=30
+
+    [Install]
+    WantedBy=default.target
+
+and start it with::
+
+    systemctl --user daemon-reload
+    systemctl --user enable --now patman-serve
+
+Use ``journalctl --user -u patman-serve`` to see its output. Run ``loginctl
+enable-linger`` once if the server should keep running while you are not logged
+in.
+
 Database schema
 ===============
 
 Patman stores series tracking, review and workflow state in a SQLite
 database (``.patman.db``) in the top-level git directory. The schema is
-versioned and auto-migrated on startup (currently at v10).
+versioned and auto-migrated on startup (currently at v11).
 
 Set the ``PATMAN_DB_DIR`` environment variable to use a database elsewhere
 (``~`` is expanded). The variable names a *directory* in which patman looks
@@ -1760,6 +2032,38 @@ git operations still run against the current repo. For instance::
     export PATMAN_DB_DIR=~/u-boot
     cd ~/some-other-tree
     patman review -s my-series
+
+Reviews of other people's series can be kept in a separate database, so they
+do not mix with your own series. Set ``review_db_dir`` in the ``[settings]``
+section of ``~/.patman`` (or use ``--review-db-dir``) to the directory which
+holds it::
+
+    [settings]
+    review_db_dir: ~/dev/u-boot-review
+
+``patman review`` then stores its reviews there, while upstreams and their
+patchwork servers are still read from the main database. ``patman serve``
+shows the reviews from the same place.
+
+To move existing reviews into the review database, or back again::
+
+    patman database -n split    # show what would be moved
+    patman database split       # move reviews to the review database
+    patman database join        # move them back to the main database
+
+Series can also be copied from another database, such as one from a
+different machine, with ``patman database merge DIR`` (or the path of the
+database file). Use ``--own`` or ``--reviews`` to copy just one kind of
+series, and ``-R`` to copy into the review database. The other database is
+not changed. Missing upstreams are added to the main database too.
+
+Your own series and series you have reviewed are always kept apart: if a
+series has the same name as one of the other kind, it is left alone and
+reported. When a series is in both databases, its new versions are added,
+but a version which is in both is left alone. When moving, a series which
+cannot be moved completely (for example because it has a version which is
+already in the other database) is left where it is, so nothing is lost. Each database
+which is changed is first backed up to ``.patman.db.bak`` alongside it.
 
 The connection is opened in WAL mode (``journal_mode=WAL``,
 ``synchronous=NORMAL``) with a 30-second busy timeout, which lets multiple
@@ -1778,13 +2082,13 @@ version of a series arrives, carry forward review tags and change logs
 from earlier versions, and show upstream progress without re-querying
 patchwork each time.
 
-For AI-assisted review of other people's patches, the database stores
+For assisted review of other people's patches, the database stores
 the generated review text, Gmail draft IDs and thread state so that
 patman can resume where it left off  - showing stored reviews, creating
 drafts for reviews that were not yet sent, detecting when drafts have
 been sent or deleted, and providing previous review context when a new
 version of the series is posted. Review-handling notes from the
-``handle-reviews`` workflow are also stored per-version so the AI has
+``handle-reviews`` workflow are also stored per-version so the agent has
 context about what was changed and why.
 
 Entity relationships
@@ -1806,7 +2110,7 @@ Entity relationships
 A **series** represents a named patch series across all its versions.
 Each **ser_ver** is one version of that series (e.g. v1, v2), linked to
 patchwork by a series link. Each ser_ver has one **pcommit** per patch
-and zero or more **review** records (one per AI review).
+and zero or more **review** records (one per drafted review).
 
 Tables
 ------
@@ -1827,7 +2131,7 @@ name        TEXT      Series name (unique)
 desc        TEXT      Series description / cover-letter title
 archived    BIT       True if series is archived
 upstream    TEXT      Upstream name (added v5)
-source      TEXT      'review' for AI-reviewed series (added v8)
+source      TEXT      'review' for reviewed series (added v8)
 ==========  ========  ==========================================
 
 ser_ver
@@ -1836,7 +2140,7 @@ ser_ver
 Each time you send a new version of a series, patman creates a ser_ver
 record linking it to patchwork. This lets patman track review tags,
 change logs and upstream progress separately for each version. For
-AI-reviewed series, review-handling notes are stored here so the next
+reviewed series, review-handling notes are stored here so the next
 version has context about what was changed.
 
 ==================  ========  ==========================================
@@ -1902,6 +2206,34 @@ status            TEXT      'new', 'draft', 'sent', 'deleted',
                             'replied' (added v9)
 gmail_msg_id      TEXT      Gmail message ID after sending (added v9)
 gmail_thread_id   TEXT      Gmail thread ID for replies (added v9)
+================  ========  ==========================================
+
+reply
+~~~~~
+
+When someone replies to one of your sent reviews, ``patman review --sync``
+records the reply here (added v11), along with your response to it. The
+response can be suggested by the agent, edited and then turned into a Gmail
+draft which is threaded as a reply.
+
+================  ========  ==========================================
+Column            Type      Description
+================  ========  ==========================================
+id                INTEGER   Primary key (auto-increment)
+review_id         INTEGER   FK -> review.id
+gmail_msg_id      TEXT      Gmail message ID of the reply (unique)
+msgid             TEXT      Message-ID header, for threading a response
+refs              TEXT      References header
+sender            TEXT      From header
+to_addrs          TEXT      To header
+cc_addrs          TEXT      Cc header
+subject           TEXT      Subject header
+date              TEXT      Date header
+body              TEXT      Text of the reply
+response          TEXT      Text of your response, if any
+status            TEXT      'new', 'suggested', 'skip', 'draft', 'sent'
+draft_id          TEXT      Gmail draft ID of the response
+timestamp         TEXT      When the reply was recorded
 ================  ========  ==========================================
 
 upstream
