@@ -4,13 +4,14 @@
 # Written by Simon Glass <simon.glass@canonical.com>
 #
 
-# pylint: disable=C0302,R0914
+# pylint: disable=R0914
 
-"""AI-powered patch review using Claude.
+"""The main flow of 'patman review' and 'patman series review'
 
-Fetches patches from patchwork, applies them to a local branch using
-a Claude agent, and (in later stages) reviews each patch and creates
-Gmail draft replies.
+This finds a series on patchwork, applies it to a local branch, has a Claude
+agent review each patch and the cover letter, and stores the reviews,
+optionally as Gmail drafts. It also reviews a local series, and passes the
+other review commands on to the modules which handle them.
 """
 
 from datetime import datetime
