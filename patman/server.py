@@ -15,47 +15,7 @@ periodically in a child process. The -G flag matters: without it,
 gather-all writes review tags into the local branches, which must never
 happen behind the user's back.
 
-API (all responses are JSON):
-    GET  /api/series                  Own series with latest-version status
-    GET  /api/series/<id>             All versions of a series with patches
-    GET  /api/comments/<kind>/<id>    Comments on a 'patch' or 'cover', read
-                                      from patchwork; ?ups=<upstream>
-    GET  /api/patch/<id>              A patch's commit message and diff, read
-                                      from patchwork; ?ups=<upstream>
-    GET  /api/cover/<id>              A cover letter, read from patchwork;
-                                      ?ups=<upstream>
-    GET  /api/blob?hash=<h>[&hash=]   A file from the git repo: the first
-                                      blob given which the repo holds
-    GET  /api/reviews                 Series reviewed with 'patman review'
-    GET  /api/reviews/<id>            Reviews for each version of one
-    GET  /api/todo                    Todo entries from the workflow table
-    GET  /api/sync                    State of the periodic sync, including
-                                      the output so far
-    POST /api/sync                    Start a sync now
-    POST /api/sync/cancel             Stop the sync which is running
-    GET  /api/upstreams               Upstreams which have a patchwork server
-    GET  /api/inbox                   Recent series on patchwork, marking those
-                                      reviewed; ?ups=<upstream>&page=<n>
-    GET  /api/jobs                    Background jobs, newest first
-    GET  /api/jobs/<id>               One job, including its output so far
-    POST /api/jobs/<id>/cancel        Stop a job
-    POST /api/review                  Start a review; see parse_review_req()
-    POST /api/review/scan             Run 'review --scan'; {"drafts": bool}
-    POST /api/reviews/<id>/redraft    Recreate Gmail drafts for a reviewed
-                                      series; {"version": n, "seqs": [n...]}
-    POST /api/reviews/<id>/send       Send the Gmail drafts of a reviewed
-                                      series; {"version": n, "seqs": [n...]}
-    POST /api/reviews/<id>/revise     Have the agent change unsent reviews;
-                                      {"note": str, "part": str, "version": n,
-                                      "seqs": [n...], "drafts": bool}
-    POST /api/review-items/<id>       Change a review which has not been sent;
-                                      {"body": str, "redraft": bool}
-    POST /api/replies/<id>            Change the response to a reply to a
-                                      review; {"response": str, "skip": bool,
-                                      "draft": bool}
-    POST /api/replies/<id>/suggest    Ask the agent to suggest a response
-    POST /api/replies/<id>/send       Send the response, creating its Gmail
-                                      draft first if needed
+The JSON API is described in doc/serve-protocol.rst
 
 Jobs (syncs and reviews) run one at a time, in the order they are started.
 """
