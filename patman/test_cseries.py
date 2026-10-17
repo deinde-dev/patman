@@ -6690,6 +6690,42 @@ VERDICT: skip"""
         loop.close()
         self.assertIsNone(result)
 
+    def test_review_comments_file(self):
+        """Test writing the existing patchwork comments for the agent"""
+        class FakePatchwork:
+            """Provide comments on the cover letter and each patch"""
+            async def get_cover_comments(self, _client, _cover_id):
+                """Get the comments on the cover letter"""
+                return [{'submitter': {'name': 'Ann', 'email': 'ann@x.org'},
+                         'date': '2026-01-02', 'content': 'Nice series'}]
+
+            async def get_patch_comments(self, _client, patch_id):
+                """Get the comments on a patch"""
+                return [{'submitter': {'name': 'Bob'},
+                         'content': f'Comment on {patch_id}'}]
+
+        data = {'cover_letter': {'id': 9},
+                'patches': [{'id': 1, 'name': 'video: Fix it'}, {'id': 2}]}
+        with terminal.capture():
+            fname = review._write_comments_file(data, FakePatchwork())
+        self.assertEqual(
+            '=== Comment on cover letter ===\n'
+            'From: Ann <ann@x.org>\n'
+            'Date: 2026-01-02\n\n'
+            'Nice series\n\n'
+            '=== Comment on patch 1: video: Fix it ===\n'
+            'From: Bob <>\n'
+            'Date: \n\n'
+            'Comment on 1\n\n'
+            '=== Comment on patch 2:  ===\n'
+            'From: Bob <>\n'
+            'Date: \n\n'
+            'Comment on 2\n', tools.read_file(fname, binary=False))
+
+        # With no comments there is no file
+        data = {'cover_letter': None, 'patches': []}
+        self.assertIsNone(review._write_comments_file(data, FakePatchwork()))
+
     def test_review_is_code_comment(self):
         """Test code comments are told apart from commit-message comments"""
         from patman.review import _is_code_comment
