@@ -14,7 +14,7 @@ from patman import checkpatch
 from patman import patchstream
 from patman import series
 from patman import commit
-from patman.test_common import find_source_dir
+from patman.test_common import needs_checkpatch
 
 
 class Line:
@@ -140,16 +140,6 @@ This is a test commit.
 
 class TestPatch(unittest.TestCase):
     """Test the u_boot_line() function in checkpatch.pl"""
-
-    def setUp(self):
-        # Use the checkpatch.pl and .checkpatch.conf kept with the sources
-        self._old_cwd = os.getcwd()
-        source = find_source_dir()
-        if source:
-            os.chdir(source)
-
-    def tearDown(self):
-        os.chdir(self._old_cwd)
 
     def test_filter(self):
         """Test basic filter operation"""
@@ -371,6 +361,7 @@ index 0000000..2234c87
         infd.close()
         return inname
 
+    @needs_checkpatch
     def test_good(self):
         """Test checkpatch operation"""
         inf = self.setup_data('good')
@@ -383,6 +374,7 @@ index 0000000..2234c87
         self.assertEqual(result.lines, 62)
         os.remove(inf)
 
+    @needs_checkpatch
     def test_no_signoff(self):
         inf = self.setup_data('no-signoff')
         result = checkpatch.check_patch(inf)
@@ -394,6 +386,7 @@ index 0000000..2234c87
         self.assertEqual(result.lines, 62)
         os.remove(inf)
 
+    @needs_checkpatch
     def test_no_license(self):
         inf = self.setup_data('no-license')
         result = checkpatch.check_patch(inf)
@@ -405,6 +398,7 @@ index 0000000..2234c87
         self.assertEqual(result.lines, 62)
         os.remove(inf)
 
+    @needs_checkpatch
     def test_spaces(self):
         inf = self.setup_data('spaces')
         result = checkpatch.check_patch(inf)
@@ -416,6 +410,7 @@ index 0000000..2234c87
         self.assertEqual(result.lines, 62)
         os.remove(inf)
 
+    @needs_checkpatch
     def test_indent(self):
         inf = self.setup_data('indent')
         result = checkpatch.check_patch(inf)
@@ -445,24 +440,28 @@ index 0000000..2234c87
         self.assertEqual(len(result.problems), 1)
         self.assertIn(msg, result.problems[0]['cptype'])
 
+    @needs_checkpatch
     def test_uclass(self):
         """Test for possible new uclass"""
         pm = PatchMaker()
         pm.add_line('include/dm/uclass-id.h', 'UCLASS_WIBBLE,')
         self.check_single_message(pm, 'NEW_UCLASS')
 
+    @needs_checkpatch
     def test_livetree(self):
         """Test for using the livetree API"""
         pm = PatchMaker()
         pm.add_line('common/main.c', 'fdtdec_do_something()')
         self.check_single_message(pm, 'LIVETREE')
 
+    @needs_checkpatch
     def test_new_command(self):
         """Test for adding a new command"""
         pm = PatchMaker()
         pm.add_line('common/main.c', 'do_wibble(struct cmd_tbl *cmd_tbl)')
         self.check_single_message(pm, 'CMD_TEST')
 
+    @needs_checkpatch
     def test_prefer_if(self):
         """Test for using #ifdef"""
         pm = PatchMaker()
@@ -471,24 +470,28 @@ index 0000000..2234c87
         pm.add_line('fred.dtsi', '#ifdef CONFIG_YELLOW')
         self.check_single_message(pm, "PREFER_IF")
 
+    @needs_checkpatch
     def test_command_use_defconfig(self):
         """Test for enabling/disabling commands using preprocesor"""
         pm = PatchMaker()
         pm.add_line('common/main.c', '#undef CONFIG_CMD_WHICH')
         self.check_single_message(pm, 'DEFINE_CONFIG_SYM', 'error')
 
+    @needs_checkpatch
     def test_barred_include_in_hdr(self):
         """Test for using a barred include in a header file"""
         pm = PatchMaker()
         pm.add_line('include/myfile.h', '#include <dm.h>')
         self.check_single_message(pm, 'BARRED_INCLUDE_IN_HDR', 'error')
 
+    @needs_checkpatch
     def test_barred_include_common_h(self):
         """Test for adding common.h to a file"""
         pm = PatchMaker()
         pm.add_line('include/myfile.h', '#include <common.h>')
         self.check_single_message(pm, 'BARRED_INCLUDE_COMMON_H', 'error')
 
+    @needs_checkpatch
     def test_config_is_enabled_config(self):
         """Test for accidental CONFIG_IS_ENABLED(CONFIG_*) calls"""
         pm = PatchMaker()
@@ -516,6 +519,7 @@ index 0000000..2234c87
             any(warning in p.get('cptype', '') for p in result.problems),
             f"Expected warning {warning} not found in {result.problems}")
 
+    @needs_checkpatch
     def test_dm_driver_auto(self):
         """Check for the correct suffix on 'struct driver' auto members"""
         self.check_struct('priv_auto', '_priv', 'PRIV_AUTO')
@@ -523,6 +527,7 @@ index 0000000..2234c87
         self.check_struct('per_child_auto', '_priv', 'CHILD_PRIV_AUTO')
         self.check_struct('per_child_plat_auto', '_plat', 'CHILD_PLAT_AUTO')
 
+    @needs_checkpatch
     def test_dm_uclass_auto(self):
         """Check for the correct suffix on 'struct uclass' auto members"""
         # Some of these are omitted since they match those from struct driver
@@ -541,11 +546,13 @@ index 0000000..2234c87
             any('STRL' in p.get('cptype', '') for p in result.problems),
             f"Expected STRL warning not found in {result.problems}")
 
+    @needs_checkpatch
     def test_strl(self):
         """Check for uses of strn(cat|cpy)"""
         self.check_strl("cat");
         self.check_strl("cpy");
 
+    @needs_checkpatch
     def test_ai_co_developed_by(self):
         """Check that AI Co-developed-by doesn't require matching Signed-off-by"""
         pm = PatchMaker()

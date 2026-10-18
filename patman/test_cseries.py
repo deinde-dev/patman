@@ -25,7 +25,7 @@ from patman import cseries
 from patman.database import Pcommit
 from patman import patchstream
 from patman.patchwork import Patchwork
-from patman.test_common import CseriesTester, Namespace
+from patman.test_common import CseriesTester, Namespace, needs_checkpatch
 
 HASH_RE = r'[0-9a-f]+'
 #pylint: disable=protected-access
@@ -2154,6 +2154,7 @@ class TestCseries(CseriesTester):
         self.assertEqual('bootm: Make it boot', chk[1].subject)
         self.assertEqual('Just checking', chk[2].subject)
 
+    @needs_checkpatch
     def test_series_send(self):
         """Test sending a series"""
         cser, pwork = self.setup_second()

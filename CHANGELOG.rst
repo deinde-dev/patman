@@ -8,6 +8,14 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+Fixed
+~~~~~
+- ``patman test`` gives the same results whichever directory it is run
+  from. The tests which run ``checkpatch.pl`` failed when run outside
+  patman's sources, since they found another ``checkpatch.pl`` or missed
+  the options in ``.checkpatch.conf``; they are now skipped when the
+  sources are not present.
+
 0.4.0 - 2026-10-18
 ------------------
 
