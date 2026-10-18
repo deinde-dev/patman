@@ -340,8 +340,10 @@ class TestReview(CseriesTester):
     def _mock_review(self):
         """Mock applying the series, the upstream, git and the AI review"""
         fake_review = {1: f'Reviewed-by: {self.REVIEWER}'}
-        with mock.patch('patman.review.apply.apply_and_check',
-                        return_value=True), \
+        with mock.patch.object(review.core.claude_mod, 'check_available',
+                               return_value=True), \
+                mock.patch('patman.review.apply.apply_and_check',
+                           return_value=True), \
                 mock.patch('patman.review.apply.get_upstream_branch',
                            return_value='origin/master'), \
                 mock.patch('patman.review.core.review_patches_sync',
@@ -394,6 +396,24 @@ class TestReview(CseriesTester):
         pclist = cser.db.pcommit_get_list(svid)
         self.assertEqual(1, len(pclist))
         self.assertEqual(900, pclist[0].patch_id)
+
+    def test_review_no_agent(self):
+        """Test a review fails clearly, leaving no record, with no agent"""
+        cser = self.get_cser()
+        pwork = self._review_pwork()
+
+        with self._mock_review(), \
+                mock.patch.object(review.core.claude_mod, 'check_available',
+                                  return_value=False), \
+                mock.patch('patman.review.core.gitutil.ensure_worktree') as wtree:
+            with terminal.capture() as (_, err):
+                self.run_review('-s', str(self.REVIEW_LINK), pwork=pwork,
+                                expect_ret=1)
+        self.assertIn("The review agent is not available; install the "
+                      "'review' extra", err.getvalue())
+        wtree.assert_not_called()
+        self.db_open()
+        self.assertIsNone(cser.db.series_find_by_link(str(self.REVIEW_LINK)))
 
     def test_review_already_reviewed(self):
         """Test that reviewing the same link again is detected"""
@@ -1035,6 +1055,10 @@ class TestReview(CseriesTester):
                       seen['prompt'])
         self.assertIn('---SEQ 1---', seen['reviews'])
         self.assertNotIn('Sent already', seen['reviews'])
+
+        # The review which was sent is given as context, not to be changed
+        self.assertIn('OTHER REVIEWS OF THE SERIES', seen['prompt'])
+        self.assertIn('---SEQ 2---\nSent already', seen['prompt'])
         self.assertIn('Revised the review of patch 1', out.getvalue())
         self.assertNotIn('cover letter', out.getvalue())
 
@@ -1052,6 +1076,144 @@ class TestReview(CseriesTester):
         with self.assertRaises(ValueError) as exc:
             review.stored._do_revise(args, None, cser, '123')
         self.assertIn('No unsent reviews', str(exc.exception))
+
+    def test_review_revise_context(self):
+        """A revision is given the rest of the series as context"""
+        self.assertEqual('', review.prompts.revise_context(None, {}, None))
+        text = review.prompts.revise_context(
+            'Cover text', {2: 'Second review'}, '/tmp/comments.txt')
+        self.assertIn('COVER LETTER:\nCover text', text)
+        self.assertIn('---SEQ 2---\nSecond review', text)
+        self.assertIn('(see file: /tmp/comments.txt)', text)
+
+        # The cover letter and comments come from patchwork
+        ctx = review.common.ReviewContext(None, None, {})
+        series = {'id': 123, 'cover_letter': {'id': 9}}
+        with mock.patch.object(review.lookup, 'fetch_series',
+                               return_value=(series, 'x', 1, 2)), \
+                mock.patch.object(review.lookup, 'fetch_cover_content',
+                                  return_value='Cover text'), \
+                mock.patch.object(review.lookup, 'write_comments_file',
+                                  return_value='/tmp/c.txt'):
+            review.stored._read_series_context(ctx, mock.Mock(), '123')
+        self.assertEqual((series, 'Cover text', '/tmp/c.txt'),
+                         (ctx.series_data, ctx.cover_content,
+                          ctx.comments_path))
+
+        # A problem reading patchwork does not stop the revision
+        ctx = review.common.ReviewContext(None, None, {})
+        with mock.patch.object(review.lookup, 'fetch_series',
+                               side_effect=ValueError('no server')), \
+                terminal.capture() as (_, err):
+            review.stored._read_series_context(ctx, mock.Mock(), '123')
+        self.assertIsNone(ctx.cover_content)
+        self.assertIn('Could not read the series from patchwork: no server',
+                      err.getvalue())
+
+        # The writing voice is used too
+        with mock.patch.object(review.voice, 'get_voice',
+                               return_value='Be terse'):
+            self.assertIn('Be terse', review.prompts.voice_section())
+
+    def test_review_session(self):
+        """Each review records its agent session, which revise resumes"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'Fred series', None)
+        db.series_set_source(sid, 'review')
+        svid = db.ser_ver_add(sid, 1, link='123')
+        rid = db.review_add(svid, 1, 'Hi Fred,\n\n> code\n\nNit', False,
+                            '2026-10-01T00:00:00')
+        other = db.review_add(svid, 2, 'Hi Fred,\n\nLooks fine', False,
+                              '2026-10-01T00:00:00')
+        self.assertIsNone(db.review_get_session(rid))
+        db.review_set_session(rid, 'sess-1')
+        db.commit()
+        self.assertEqual('sess-1', db.review_get_session(rid))
+
+        # A new session is recorded for each patch which is reviewed
+        ctx = review.common.ReviewContext(None, cser, {})
+        with mock.patch.object(review.common, 'ClaudeAgentOptions') as opts:
+            review.common.session_options(ctx, 3, cwd='/tmp')
+        self.assertEqual(36, len(ctx.session_ids[3]))
+        self.assertEqual(ctx.session_ids[3],
+                         opts.call_args.kwargs['session_id'])
+
+        new_body = 'Hi Fred,\n\nReviewed-by: Simon Glass <sjg@chromium.org>'
+        results = []
+
+        async def mock_agent(_prompt, _options):
+            return results.pop(0)
+
+        def run(*argv):
+            args = cmdline.parse_args(
+                ['review', '-s', '123', '--revise', 'Approve it',
+                 '--reviewer', 'Simon Glass <sjg@chromium.org>', *argv],
+                config_fname=False)
+            with mock.patch.object(review.core.claude_mod,
+                                   'run_agent_collect',
+                                   side_effect=mock_agent), \
+                    mock.patch.object(review.core.claude_mod,
+                                      'check_available', return_value=True), \
+                    mock.patch.object(review.common,
+                                      'ClaudeAgentOptions') as opts, \
+                    mock.patch.object(review.stored, '_review_commits',
+                                      return_value=['abc1 dm: Fix it']), \
+                    terminal.capture() as (out, _):
+                self.assertEqual(
+                    0, review.stored._do_revise(args, None, cser, '123'))
+            return [call.kwargs for call in opts.call_args_list], out.getvalue()
+
+        # Revising one review carries on from a copy of its session
+        results[:] = [(True, f'---SEQ 1---\n{new_body}\n')]
+        calls, out = run('-i', '1')
+        self.assertEqual(1, len(calls))
+        self.assertEqual(('sess-1', True),
+                         (calls[0]['resume'], calls[0]['fork_session']))
+        self.assertIn('carrying on from the review', out)
+        self.assertEqual(new_body, db.review_get(rid).body)
+
+        # If the session has gone, a new one is used
+        db.review_set_body(rid, 'Hi Fred,\n\nNit', False)
+        results[:] = [(False, ''), (True, f'---SEQ 1---\n{new_body}\n')]
+        calls, out = run('-i', '1')
+        self.assertEqual(['sess-1', None],
+                         [call.get('resume') for call in calls])
+        self.assertIn('Could not resume the review session', out)
+        self.assertEqual(new_body, db.review_get(rid).body)
+
+        # A review which changes while it is revised is left alone
+        db.review_set_body(rid, 'Hi Fred,\n\nNit', False)
+        db.commit()
+
+        async def edit_meanwhile(_prompt, _options):
+            db.review_set_body(rid, 'Edited by hand', False)
+            db.commit()
+            return True, f'---SEQ 1---\n{new_body}\n'
+
+        with mock.patch.object(review.core.claude_mod, 'run_agent_collect',
+                               side_effect=edit_meanwhile), \
+                mock.patch.object(review.core.claude_mod, 'check_available',
+                                  return_value=True), \
+                mock.patch.object(review.common, 'ClaudeAgentOptions'), \
+                mock.patch.object(review.stored, '_review_commits',
+                                  return_value=['abc1 dm: Fix it']), \
+                terminal.capture() as (out, err):
+            args = cmdline.parse_args(
+                ['review', '-s', '123', '--revise', 'Approve it', '-i', '1'],
+                config_fname=False)
+            self.assertEqual(
+                0, review.stored._do_revise(args, None, cser, '123'))
+        self.assertEqual('Edited by hand', db.review_get(rid).body)
+        self.assertIn('changed while it was being revised', err.getvalue())
+        self.assertIn(new_body, out.getvalue())
+
+        # Revising more than one review starts a new session
+        db.review_set_body(rid, 'Hi Fred,\n\nNit', False)
+        results[:] = [(True, f'---SEQ 1---\n{new_body}\n')]
+        calls, _ = run()
+        self.assertEqual([None], [call.get('resume') for call in calls])
+        self.assertEqual('Hi Fred,\n\nLooks fine', db.review_get(other).body)
 
     def test_review_send(self):
         """The Gmail drafts of a series' reviews can be sent"""
@@ -1614,7 +1776,7 @@ VERDICT: approved"""
         self.assertIn('On 2026-03-21, Marek Vasut', email)
         self.assertIn('> pci: Fix the return type', email)
         self.assertIn('> The return is wrong.', email)
-        self.assertIn('> drivers/pci.c', email)
+        self.assertIn('>  drivers/pci.c', email)
         self.assertIn('Reviewed-by: Test <test@test.com>', email)
 
     def test_review_parse_skip(self):
@@ -1658,6 +1820,84 @@ VERDICT: skip"""
                     ctx, cmt, 1, [(1, 'abc1234', 'spl: pad')]))
         loop.close()
         self.assertIsNone(result)
+
+    def test_review_diffstat_quoted(self):
+        """The diffstat in a review with comments keeps its leading spaces"""
+        ctx = self._make_review_ctx(author_name='Fred',
+            author_email='fred@example.com', date='2026-06-19')
+        ctx.repo_path = self.tmpdir
+        ctx.previous_reviews = {}
+        cmt = types.SimpleNamespace(hash='abc1234', subject='dm: Fix it',
+                                    msg='dm: Fix it\n\nbody text', rtags={})
+
+        async def mock_agent(_prompt, _options):
+            return True, ('GREETING: Fred\nCOMMENT:\n'
+                          '> diff --git a/drivers/core/uclass.c '
+                          'b/drivers/core/uclass.c\n'
+                          '> @@ -1,6 +1,0 @@\n> -int x;\n\n'
+                          'Why drop this?\n\nVERDICT: changes_needed\n')
+
+        stat = (' drivers/core/uclass.c | 6 ------\n'
+                ' include/dm.h          | 2 +-\n'
+                ' 2 files changed, 1 insertion(+), 7 deletions(-)\n')
+        loop = asyncio.new_event_loop()
+        with mock.patch.object(review.core.claude_mod, 'run_agent_collect',
+                               side_effect=mock_agent), \
+                mock.patch.object(review.common, 'ClaudeAgentOptions'), \
+                mock.patch.object(review.prompts, 'build_review_prompt',
+                                  return_value='prompt'), \
+                mock.patch.object(review.core.gitutil, 'diff_stat',
+                                  return_value=stat), \
+                terminal.capture():
+            body = loop.run_until_complete(review.core._review_single_patch(
+                ctx, cmt, 1, [(1, 'abc1234', 'dm: Fix it')]))
+        loop.close()
+        self.assertIn('>  drivers/core/uclass.c | 6 ------\n'
+                      '>  include/dm.h          | 2 +-\n', body)
+
+    def test_review_records_upstream(self):
+        """A review knows its upstream, which names its branch"""
+        cser = self.get_database()
+        cser.db.upstream_add('ci', 'https://ci.git',
+                             patchwork_url='https://pw.ci')
+        cser.db.patchwork_update('U-Boot', 1, 'uboot', 'ci')
+        cser.commit()
+        pwork = control._setup_patchwork(cser, None, 'ci', None)
+        self.assertEqual(('ci', 'https://pw.ci'), (pwork.upstream, pwork.url))
+        self.assertEqual('ci-155-review',
+                         review.lookup.make_review_name('155', pwork.upstream))
+
+        # The commits come from the review branch, which is named with the
+        # upstream, or with 'pw' for a review made before this was recorded
+        def commits(branches):
+            with mock.patch.object(review.stored.gitutil, 'get_top_level',
+                                   return_value=self.tmpdir), \
+                    mock.patch.object(review.stored.gitutil, 'ref_exists',
+                                      side_effect=lambda ref, _: ref in
+                                      branches), \
+                    mock.patch.object(review.stored.gitutil, 'count_revs',
+                                      return_value=1), \
+                    mock.patch.object(review.apply, 'get_upstream_branch',
+                                      return_value='ci/master'), \
+                    mock.patch.object(review.stored.subprocess,
+                                      'run') as run:
+                run.return_value.stdout = 'abc1 dm: Fix it\n'
+                out = review.stored._review_commits(
+                    Namespace(base_branch=None), cser, '155', 'ci')
+            return out, run.call_args.args[0][-1] if run.called else None
+
+        self.assertEqual((['abc1 dm: Fix it'], 'ci/master..ci-155-review'),
+                         commits({'ci-155-review'}))
+        self.assertEqual((['abc1 dm: Fix it'], 'ci/master..pw-155-review'),
+                         commits({'pw-155-review'}))
+        self.assertEqual(([], None), commits(set()))
+
+    def test_review_prompt_quoting(self):
+        """Every prompt which writes review text has the same quoting rules"""
+        for prompt in (review.prompts.REFINE_REVIEWS_PROMPT,
+                       review.prompts.REPLY_PROMPT):
+            self.assertIn(review.prompts.QUOTING_RULES, prompt)
+            self.assertNotIn('do not quote them', prompt)
 
     def test_review_comments_file(self):
         """Test writing the existing patchwork comments for the agent"""

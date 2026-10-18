@@ -10,11 +10,33 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman status`` and ``patman series gather`` add a review tag given in
+  a reply to the cover letter, e.g. a Reviewed-by for the whole series, to
+  every patch which does not already have it.
+- Revising, redrafting or sending reviews on the ``patman serve`` page keeps
+  the page where it is, showing the job on each review it acts on, then the
+  new text, with the text from before available.
+- While a job is acting on a review, ``patman serve`` refuses to change the
+  review or start another job on it, and the page disables its buttons, even
+  after a reload. ``patman review --revise`` leaves a review alone if it
+  changed while being revised, and shows the revised text instead.
+- Each tab of the ``patman serve`` page remembers the screen last shown in
+  it, each screen keeps its scroll position, and the Jobs tab shows how many
+  jobs are waiting or running.
+- ``patman review --revise``, and revising on the ``patman serve`` page,
+  give the agent the cover letter, the other reviews of the series, the
+  comments from patchwork and the reviewer's writing voice, so that the
+  revised text fits with the rest.
+- Each review records the agent session which wrote it, and revising a
+  single review carries on from a copy of that session, falling back to a
+  new session if it has gone. This needs a database migration to v12.
 - A guide in ``doc/guide/`` shows how to use patman step by step with a
   real U-Boot series which was merged in v2026.07: setting up, sending a
   first series, checking its status and collecting review tags, sending the
   next version, tracking it all with ``patman series``, sending to more
-  than one upstream, and dealing with common problems.
+  than one upstream, reviewing a series with ``patman review``, following
+  it all from a phone with ``patman serve``, and dealing with common
+  problems.
 - The docs have a command reference generated from patman's options, a page
   on how patch review works, and the contributing notes. The manual's
   chapters link to each other and to the guide, and 'patman -H' shows the
@@ -59,6 +81,12 @@ Added
 
 Changed
 ~~~~~~~
+- The agents which refine reviews and suggest responses to replies follow
+  the same rules for quoting as the review agents: single quotes for
+  identifiers and other quoted text, and the author's text left as it is
+  in quoted lines. They used to be told not to quote identifiers.
+- The ``patman serve`` API gives status 400 for a request which is not
+  valid, e.g. with a bad value or a missing field, rather than 404.
 - Patchwork requests are retried when the connection fails, is reset or
   stalls, or the server returns a 502, 503 or 504 status. The timeout is set
   with ``--patchwork-timeout`` or the ``patchwork_timeout`` setting.
@@ -71,6 +99,20 @@ Changed
 
 Fixed
 ~~~~~
+- ``patman review`` says that the review agent is not installed, and how to
+  install it, before making a worktree, rather than failing to apply the
+  patches.
+- ``patman review`` records the upstream of each series it reviews, and
+  names its branch after it, e.g. ``us-498633-review``. It did not, so the
+  ``patman serve`` page read the series from the default upstream's
+  patchwork server. Revising a review made before this still finds its
+  ``pw-`` branch.
+- In a review email, the first line of the quoted diffstat keeps its
+  leading space, so that it lines up with the other lines.
+- The tests no longer need /usr/bin/env, and give the same results
+  whichever directory they are run from, which helps when packaging
+  patman, e.g. for Guix. A command which fails in a test now shows its
+  output.
 - The columns of ``patman series summary`` line up with its header.
 - ``patman status`` finds the patchwork link on a branch whose name has no
   version number, using the series' own version (from ``Series-version``,

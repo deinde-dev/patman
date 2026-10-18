@@ -196,11 +196,37 @@ const titleEl = document.getElementById('title');
 const backBtn = document.getElementById('back');
 backBtn.addEventListener('click', () => history.back());
 
+// The last screen shown in each tab, and the scroll position of each screen,
+// so that going back to a tab or a screen finds it as it was left. These
+// are kept for the browser tab, if the browser allows
+function loadPlaces(key) {
+  try {
+    return new Map(JSON.parse(sessionStorage.getItem(key) || '[]'));
+  } catch (err) {
+    return new Map();
+  }
+}
+function savePlaces(key, map) {
+  try {
+    sessionStorage.setItem(key, JSON.stringify([...map].slice(-100)));
+  } catch (err) {
+    // Not available, e.g. in a private window
+  }
+}
+const tabScreens = loadPlaces('patman-tabs');
+const scrollPlaces = loadPlaces('patman-scroll');
+let currentTab = null;
+
 function setView(title, tab, back, ...content) {
   titleEl.textContent = title;
   backBtn.hidden = !back;
   for (const a of document.querySelectorAll('nav a')) {
     a.classList.toggle('active', a.dataset.tab === tab);
+  }
+  if (tab) {
+    currentTab = tab;
+    tabScreens.set(tab, location.hash);
+    savePlaces('patman-tabs', tabScreens);
   }
   main.replaceChildren(...content.flat().filter((c) => c !== null && c !== undefined && c !== false));
 }
@@ -497,7 +523,7 @@ function diffGap(file, lo, count, after, before) {
       after && btn(`↓ ${CONTEXT_LINES} more`, CONTEXT_LINES, 0),
       before && btn(`↑ ${CONTEXT_LINES} more`, 0, CONTEXT_LINES),
       n !== null && n > CONTEXT_LINES && btn(`All ${n}`, n, 0),
-      h('a', { href: fileHref(file, near()) }, 'Whole file'),
+      h('a', { href: fileHref(file, near()) }, 'View whole file'),
       n !== null && h('span', {}, `${plural(n, 'line')} from ${first + ntop}`),
     ].filter(Boolean));
   };
@@ -546,7 +572,8 @@ function renderDiff(diff) {
         file = files.get(idx);
         prev = null;
         out.push(h('span', { class: 'file' }, file.old || file.new
-          ? h('a', { href: fileHref(file, file.at) }, line) : line));
+          ? [h('a', { class: 'view', href: fileHref(file, file.at) }, 'View file'),
+             ' '] : null, line));
         return;
       }
       const r = file && line.startsWith('@@') && chunkRange(line);
@@ -678,6 +705,7 @@ const REVIEW_STATUS = {
 async function startJob(path, data, msg) {
   try {
     const job = await api(path, { json: data || {} });
+    refreshJobCount();
     location.hash = `#/jobs/${job.id}`;
   } catch (err) {
     if (msg) msg.textContent = err.message;
@@ -728,6 +756,69 @@ async function viewReviewList() {
     [['all', 'All'], ['replies', 'Needs reply']]));
 }
 
+// Show a job which acts on some reviews, in a strip on each of their cards,
+// rather than moving to the job's page. Each entry of 'targets' has a 'strip'
+// element and a 'show' function; refresh() is called when the job finishes,
+// to read the reviews again, and gives the new text of each, by review ID
+async function trackJob(job, verb, targets, refresh) {
+  const before = new Map(targets.map((t) => [t.r.id, t.r.body]));
+  const output = () => h('a', { href: `#/jobs/${job.id}` }, 'View output');
+  const say = (t, cls, ...kids) => {
+    t.strip.className = `jobstrip ${cls}`;
+    t.strip.replaceChildren(...kids.filter((kid) => kid !== null && kid !== false));
+  };
+  const progress = (st) => targets.forEach((t) => say(t, 'busy',
+    h('span', {}, `${verb}… ${st.queued ? 'waiting' : 'running'}`), ' ', output()));
+  // The reviews cannot be changed until the job finishes
+  const lock = (busy) => targets.forEach((t) => {
+    t.busy = busy;
+    t.show();
+  });
+  lock(true);
+  refreshJobCount();
+  progress(job);
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    if (!targets.some((t) => t.strip.isConnected)) return;
+    let st;
+    try {
+      st = await api(`jobs/${job.id}`);
+    } catch (err) {
+      continue;
+    }
+    if (!st.finished) {
+      progress(st);
+      continue;
+    }
+    const [status] = jobStatus(st);
+    if (status !== 'ok') {
+      lock(false);
+      targets.forEach((t) => say(t, 'failed', h('span', {}, `${verb} ${status}`),
+                                 ' ', output()));
+      return;
+    }
+    const fresh = await refresh();
+    targets.forEach((t) => {
+      const old = before.get(t.r.id);
+      const now = fresh.get(t.r.id);
+      if (now) Object.assign(t.r, now);
+      t.busy = false;
+      t.show();
+      const changed = now && now.body !== old;
+      const was = h('div', { class: 'notes', hidden: true },
+                    h('div', { class: 'hint' }, 'Before:'), renderMail(old));
+      say(t, 'done', h('span', {}, changed ? `${verb} done` : `${verb} done, no change`),
+        changed ? ' ' : null, changed ? h('button', { class: 'link', onclick: () => {
+          was.hidden = !was.hidden;
+        } }, 'Show changes') : null,
+        ' ', output(), ' ',
+        h('button', { class: 'link', onclick: () => t.strip.replaceChildren() },
+          'Dismiss'), was);
+    });
+    return;
+  }
+}
+
 async function viewReview(id, wantVer) {
   const ser = await api(`reviews/${id}`);
   const versions = ser.versions;
@@ -737,19 +828,44 @@ async function viewReview(id, wantVer) {
                   onclick: () => { location.replace(`#/reviews/${id}/${v.version}`); } },
       `v${v.version}`))) : null;
   const unsent = (r) => r.status !== 'sent' && r.status !== 'replied';
-  const redraft = (seqs) => startJob(`reviews/${id}/redraft`,
-                                     { version: sv.version, seqs });
-  const revise = (seqs, part, note, drafts, msg) => startJob(`reviews/${id}/revise`,
-    { version: sv.version, seqs, part, note, drafts }, msg);
-  const send = (seqs) => startJob(`reviews/${id}/send`, { version: sv.version, seqs });
+  // Each review's card, so that a job can be shown on the cards it acts on
+  const entries = new Map();
+  const refresh = async () => {
+    const again = await api(`reviews/${id}`);
+    const ver = again.versions.find((v) => v.version === sv.version);
+    return new Map((ver ? ver.reviews : []).map((r) => [r.id, r]));
+  };
+  // Start a job on some reviews (seqs, or those which 'want' for all) and show
+  // it on their cards, staying on this page
+  const runHere = async (path, data, seqs, verb, want, msg) => {
+    let job;
+    try {
+      job = await api(path, { json: { version: sv.version, seqs, ...data } });
+    } catch (err) {
+      if (msg) msg.textContent = err.message;
+      else alert(err.message);
+      return;
+    }
+    const targets = sv.reviews.filter((r) => (seqs.length ? seqs.includes(r.seq)
+                                                          : want(r)))
+      .map((r) => entries.get(r.id));
+    trackJob(job, verb, targets, refresh);
+  };
+  const redraft = (seqs) => runHere(`reviews/${id}/redraft`, {}, seqs, 'Redraft',
+                                    unsent);
+  const revise = (seqs, part, note, drafts, msg) => runHere(`reviews/${id}/revise`,
+    { part, note, drafts }, seqs, 'Revise', unsent, msg);
+  const send = (seqs) => runHere(`reviews/${id}/send`, {}, seqs, 'Send',
+                                 (r) => r.status === 'draft');
   const reviewCard = (r) => {
     const card = h('div', { class: 'card review' });
+    const strip = h('div', { class: 'jobstrip' });
     const pat = r.seq ? (sv.patches || []).find((p) => p.seq === r.seq) : null;
     const itemId = r.seq ? pat && pat.patch_id : sv.cover_id;
     const label = r.seq ? `Patch ${r.seq}` : 'Cover letter';
     const [mailBtn, mailBox] = itemId
       ? mailToggle(r.seq ? 'patch' : 'cover', itemId, ser.upstream) : [null, null];
-    const header = h('div', { class: 'row' },
+    const title = h('div', { class: 'row' },
       h('div', { class: 'grow name' }, itemId
         ? h('a', { href: mailHref(r.seq ? 'patch' : 'cover', itemId, ser.upstream) },
             label, pat ? h('span', { class: 'desc' }, ` ${pat.subject}`) : null)
@@ -757,30 +873,46 @@ async function viewReview(id, wantVer) {
       h('span', { class: `chip ${r.approved ? 'st-accepted' : 'st-changes-requested'}` },
         r.approved ? 'Reviewed-by' : 'comments'),
       h('span', { class: 'ver' }, REVIEW_STATUS[r.status] || r.status || ''));
+    const header = h('div', {}, title, strip);
     const ask = (part) => card.replaceChildren(header, reviseForm(
       part, r.status === 'draft', show,
       (note, drafts, msg) => revise([r.seq], part, note, drafts, msg)));
     const editChunk = (comment, splice, cancel) => chunkForm(
       comment, r.status === 'draft', cancel,
-      (text, redraft) => saveReview(r, splice(text), redraft));
+      (text, redraft) => saveReview(r, splice(text), redraft, entries.get(r.id),
+                                    refresh));
+    // A review can be changed if it has not been sent and no job is acting on it
+    const free = () => unsent(r) && !(entries.get(r.id) || {}).busy;
     const show = () => card.replaceChildren(header,
-      renderMail(r.body, unsent(r) ? ask : null, unsent(r) ? editChunk : null),
-      (mailBtn || unsent(r)) && h('div', { class: 'actions' },
+      renderMail(r.body, free() ? ask : null, free() ? editChunk : null),
+      (mailBtn || free()) && h('div', { class: 'actions' },
         mailBtn,
-        unsent(r) && [
+        free() && [
           h('button', { class: 'btn light small',
-                        onclick: () => editReview(card, r, header, show) }, 'Edit'),
+                        onclick: () => editReview(card, r, header, show,
+                                                  entries.get(r.id), refresh) },
+            'Edit'),
           h('button', { class: 'btn light small', onclick: () => ask(null) },
             'Revise'),
           confirmButton('Redraft', 'btn light small', () => redraft([r.seq])),
           r.status === 'draft' && confirmButton('Send', 'btn small',
                                                 () => send([r.seq]))]),
-      mailBox,
+      ...(mailBox ? [mailBox] : []),
       ...(r.replies || []).map(replyBox));
+    entries.set(r.id, { r, strip, show, busy: false });
     show();
     return card;
   };
   const reviews = sv.reviews.map(reviewCard);
+  // Show the jobs which were already acting on reviews, e.g. after a reload
+  const byJob = new Map();
+  sv.reviews.filter((r) => r.job).forEach((r) => {
+    byJob.set(r.job, [...(byJob.get(r.job) || []), entries.get(r.id)]);
+  });
+  byJob.forEach(async (targets, jid) => {
+    const st = await api(`jobs/${jid}`).catch(() => null);
+    if (st) trackJob(st, st.title.split(' ')[0], targets, refresh);
+  });
   const anyUnsent = sv.reviews.some(unsent);
   const drafts = sv.reviews.filter((r) => r.status === 'draft').length;
   const reviseAll = h('div', {});
@@ -936,15 +1068,18 @@ function reviseForm(part, drafted, cancel, submit) {
   return form;
 }
 
-// Save the text of a review which has not been sent, then show the job which
-// updates its Gmail draft, if requested, or the review again
-async function saveReview(r, body, redraft) {
+// Save the text of a review which has not been sent. If its Gmail draft is
+// to be updated, show that job on the review's card ('target'), using
+// refresh() to read the review when it finishes
+async function saveReview(r, body, redraft, target, refresh) {
   const res = await api(`review-items/${r.id}`, { json: { body, redraft } });
   if (res.kind) {
-    location.hash = `#/jobs/${res.id}`;
+    r.body = body;
+    target.show();
+    trackJob(res, 'Update draft', [target], refresh);
   } else {
     Object.assign(r, res);
-    route();
+    target.show();
   }
 }
 
@@ -977,7 +1112,7 @@ function chunkForm(comment, drafted, cancel, submit) {
 }
 
 // Change the text of a review which has not been sent
-function editReview(card, r, header, show) {
+function editReview(card, r, header, show, target, refresh) {
   const text = h('textarea', { spellcheck: 'true' });
   text.value = r.body;
   const box = h('input', { type: 'checkbox', checked: r.status === 'draft' });
@@ -986,7 +1121,7 @@ function editReview(card, r, header, show) {
     save.disabled = true;
     msg.textContent = '';
     try {
-      await saveReview(r, text.value, box.checked);
+      await saveReview(r, text.value, box.checked, target, refresh);
     } catch (err) {
       msg.textContent = err.message;
       save.disabled = false;
@@ -1154,8 +1289,31 @@ function syncOk(state) {
   return !state.cancelled && state.results.every((r) => r.returncode === 0);
 }
 
+// Show the number of jobs which are waiting or running on the Jobs tab,
+// checking again every few seconds while there are any
+let jobCountTimer = null;
+async function refreshJobCount() {
+  clearTimeout(jobCountTimer);
+  let jobs;
+  try {
+    jobs = await api('jobs');
+  } catch (err) {
+    return;
+  }
+  const count = jobs.filter((job) => !job.finished).length;
+  const tab = document.querySelector('nav a[data-tab="jobs"]');
+  let badge = tab.querySelector('.badge');
+  if (!badge) {
+    badge = h('span', { class: 'badge' });
+    tab.append(badge);
+  }
+  badge.textContent = count || '';
+  if (count) jobCountTimer = setTimeout(refreshJobCount, 3000);
+}
+
 async function refreshSync() {
   const wasRunning = syncState && syncState.running;
+  refreshJobCount();
   try {
     syncState = await api('sync');
   } catch (err) {
@@ -1330,7 +1488,37 @@ async function route() {
   }
 }
 
-window.addEventListener('hashchange', () => { window.scrollTo(0, 0); route(); });
+// Tapping a tab goes back to the screen last shown in it; tapping the tab
+// being shown goes to its top level
+for (const a of document.querySelectorAll('nav a')) {
+  a.addEventListener('click', (event) => {
+    const tab = a.dataset.tab;
+    const last = tabScreens.get(tab);
+    if (tab !== currentTab && last && last !== location.hash) {
+      event.preventDefault();
+      location.hash = last;
+    }
+  });
+}
+
+// Remember where each screen is scrolled to, and go back there on returning
+let scrollSave = null;
+window.addEventListener('scroll', () => {
+  clearTimeout(scrollSave);
+  scrollSave = setTimeout(() => {
+    scrollPlaces.delete(location.hash);
+    scrollPlaces.set(location.hash, window.scrollY);
+    savePlaces('patman-scroll', scrollPlaces);
+  }, 200);
+});
+
+window.addEventListener('hashchange', async () => {
+  clearTimeout(scrollSave);
+  window.scrollTo(0, 0);
+  await route();
+  const y = scrollPlaces.get(location.hash);
+  if (y) window.scrollTo(0, y);
+});
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) { refreshSync(); }
 });

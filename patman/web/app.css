@@ -141,7 +141,10 @@ a.card:active { background: var(--code-bg); }
 .diff .del { background: rgba(248, 81, 73, 0.16); }
 .diff .hunk { color: var(--link); }
 .diff .file { font-weight: 700; margin-top: 8px; }
-.diff .file a { color: var(--link); text-decoration: none; }
+.diff .file a.view { padding: 0 6px;
+                   border: 1px solid var(--border); border-radius: 4px;
+                   color: var(--link); text-decoration: none;
+                   font-weight: 500; }
 .diff .ctx { background: var(--surface); }
 .diff .expand { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline;
                 position: sticky; left: 0; padding: 3px 10px; color: var(--muted);
@@ -236,3 +239,21 @@ input[type=password] {
   margin: 8px 0;
 }
 .extlink { font-size: 13px; }
+/* A job acting on a review, shown on its card */
+.jobstrip:empty { display: none; }
+.jobstrip { margin: 8px 0 4px; padding: 6px 10px; border-radius: 6px;
+            font-size: 14px; border: 1px solid var(--border);
+            background: var(--code-bg); }
+.jobstrip.busy { border-color: var(--st-review); }
+.jobstrip.done { border-color: var(--st-accepted); }
+.jobstrip.failed { border-color: var(--st-rejected); color: var(--st-rejected); }
+.jobstrip .notes { margin-top: 6px; }
+button.link { background: none; border: 0; padding: 0; color: var(--link);
+              font: inherit; cursor: pointer; }
+/* Number of jobs waiting or running, on the Jobs tab */
+nav a { position: relative; }
+nav a .badge:empty { display: none; }
+nav a .badge { position: absolute; top: 2px; left: 50%; margin-left: 6px;
+               min-width: 16px; padding: 0 4px; border-radius: 8px;
+               background: var(--st-review); color: #fff; font-size: 11px;
+               line-height: 16px; text-align: center; }

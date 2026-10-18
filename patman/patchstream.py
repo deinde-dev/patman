@@ -178,7 +178,7 @@ class PatchStream:
             ValueError: Warning is generated with no commit associated
         """
         if not self.commit:
-            print('Warning outside commit: %s' % warn)
+            print(f'Warning outside commit: {warn}')
         elif warn not in self.commit.warn:
             self.commit.warn.append(warn)
 
@@ -269,8 +269,8 @@ class PatchStream:
         try:
             return int(value)
         except ValueError:
-            raise ValueError("%s: Cannot decode version info '%s'" %
-                             (self.commit.hash, line))
+            raise ValueError(f"{self.commit.hash}: Cannot decode version info "
+                             f"'{line}'")
 
     def _finalise_change(self):
         """_finalise a (multi-line) change and add it to the series or commit"""
@@ -338,15 +338,251 @@ class PatchStream:
         if valid:
             lines = []
             if self.recent_diff:
-                lines.append('> File: %s' % self.recent_diff)
+                lines.append(f'> File: {self.recent_diff}')
             if self.recent_line:
                 out = '> Line: %s / %s' % self.recent_line[:2]
                 if self.recent_line[2]:
-                    out += ': %s' % self.recent_line[2]
+                    out += f': {self.recent_line[2]}'
                 lines.append(out)
             lines += quoted_lines + unquoted_lines
             if lines:
                 self.snippets.append(lines)
+
+    def _fix_open_parts(self):
+        """Close a section or change list whose end is missing
+
+        This is called when a tag is seen, or a new commit starts, while a
+        section or change list is still open
+        """
+        # A section without an 'END'
+        if self.in_section:
+            self._add_warn(f"Missing 'END' in section '{self.in_section}'")
+            self._finalise_section()
+        # A change list without a blank line after it
+        if self.in_change:
+            self._add_warn("Missing 'blank line' in section "
+                           f"'{self.in_change}-changes'")
+            self._finalise_change()
+            self.in_change = None
+            self.change_version = 0
+
+    def _process_cover_tag(self, cover_match, line):
+        """Handle a Cover-xxx tag
+
+        Args:
+            cover_match (re.Match): Match of the tag
+            line (str): Line holding the tag
+        """
+        name = cover_match.group(1)
+        value = cover_match.group(2)
+        if name == 'letter':
+            self.in_section = 'cover'
+            self.skip_blank = False
+        elif name == 'letter-cc':
+            self._add_to_series(line, 'cover-cc', value)
+        elif name == 'changes':
+            self.in_change = 'Cover'
+            self.change_version = self._parse_version(value, line)
+
+    def _process_change_line(self, line, is_blank, leading_whitespace_match):
+        """Handle a line of a change list
+
+        Args:
+            line (str): Line to process
+            is_blank (bool): True if the line is blank
+            leading_whitespace_match (re.Match or None): Match if the line
+                starts with whitespace, i.e. continues the change above
+
+        Returns:
+            list of str: Lines to output
+        """
+        out = []
+        if is_blank:
+            # Blank line ends this change list
+            self._finalise_change()
+            self.in_change = None
+            self.change_version = 0
+        elif line == '---':
+            self._finalise_change()
+            self.in_change = None
+            self.change_version = 0
+            out = self.process_line(line)
+        elif self.is_log:
+            if not leading_whitespace_match:
+                self._finalise_change()
+            self.change_lines.append(line)
+        self.skip_blank = False
+        return out
+
+    def _process_series_tag(self, series_tag_match, line):
+        """Handle a Series-xxx tag
+
+        Args:
+            series_tag_match (re.Match): Match of the tag
+            line (str): Line holding the tag
+        """
+        name = series_tag_match.group(1)
+        value = series_tag_match.group(2)
+        if name == 'changes':
+            # value is the version number: e.g. 1, or 2
+            self.in_change = 'Series'
+            self.change_version = self._parse_version(value, line)
+        else:
+            self._add_to_series(line, name, value)
+            self.skip_blank = True
+
+    def _process_change_id(self, change_id_match, line):
+        """Handle a Change-Id tag
+
+        Args:
+            change_id_match (re.Match): Match of the tag
+            line (str): Line holding the tag
+
+        Returns:
+            list of str: Lines to output
+
+        Raises:
+            ValueError: The commit has two Change-Id tags
+        """
+        out = []
+        if self.keep_change_id:
+            out = [line]
+        value = change_id_match.group(1)
+        if self.is_log:
+            if self.commit.change_id:
+                raise ValueError(
+                    f"{self.commit.hash}: Two Change-Ids: "
+                    f"'{self.commit.change_id}' vs. '{value}'")
+            self.commit.change_id = value
+        self.skip_blank = True
+        return out
+
+    def _process_commit_tag(self, commit_tag_match, line):
+        """Handle a Commit-xxx tag
+
+        Args:
+            commit_tag_match (re.Match): Match of the tag
+            line (str): Line holding the tag
+        """
+        name = commit_tag_match.group(1)
+        value = commit_tag_match.group(2)
+        if name == 'notes':
+            self._add_to_commit(name)
+            self.skip_blank = True
+        elif name == 'changes':
+            self.in_change = 'Commit'
+            self.change_version = self._parse_version(value, line)
+        elif name == 'cc':
+            self.commit.add_cc(value.split(','))
+        elif name == 'added-in':
+            version = self._parse_version(value, line)
+            self.commit.add_change(version, '- New')
+            self.series.AddChange(version, None, f'- {self.commit.subject}')
+        else:
+            self._add_warn(f'Line {self.linenum}: Ignoring Commit-{name}')
+
+    def _process_rtag(self, tag_match, line):
+        """Handle a tag such as Reviewed-by in the commit message
+
+        Args:
+            tag_match (re.Match): Match of the tag
+            line (str): Line holding the tag
+
+        Returns:
+            list of str: Lines to output
+        """
+        out = []
+        rtag_type, who = tag_match.groups()
+        self._add_commit_rtag(rtag_type, who)
+        # Remove Tested-by self, since few will take much notice
+        if (rtag_type == 'Tested-by' and
+                who.find(os.getenv('USER') + '@') != -1):
+            self._add_warn(f"Ignoring '{line}'")
+        elif rtag_type == 'Patch-cc':
+            self.commit.add_cc(who.split(','))
+        else:
+            out = [line]
+        return out
+
+    def _process_signoff(self, signoff_match, line):
+        """Handle a Signed-off-by line, dropping duplicates
+
+        Args:
+            signoff_match (re.Match): Match of the line
+            line (str): The line
+
+        Returns:
+            list of str: Lines to output
+        """
+        out = []
+        if (self.is_log or not self.commit or
+                self.commit.check_duplicate_signoff(signoff_match.group(1))):
+            out = [line]
+        return out
+
+    def _process_text(self, line, diff_match, line_match):
+        """Handle an ordinary line, which is not a tag
+
+        Args:
+            line (str): Line to process
+            diff_match (re.Match or None): Match if the line starts a diff
+            line_match (re.Match or None): Match if the line starts a chunk
+                of a diff, giving its line numbers
+
+        Returns:
+            list of str: Lines to output
+        """
+        out = []
+        # Look for space before tab
+        mat = RE_SPACE_BEFORE_TAB.match(line)
+        if mat:
+            self._add_warn(f'Line {self.linenum}/{mat.start()} has space '
+                           'before tab')
+
+        # OK, we have a valid non-blank line
+        out = [line]
+        self.linenum += 1
+        self.skip_blank = False
+
+        if diff_match:
+            self.cur_diff = diff_match.group(1)
+
+        # If this is quoted, keep recent lines
+        if not diff_match and self.linenum > 1 and line:
+            if line.startswith('>'):
+                if not self.was_quoted:
+                    self._finalise_snippet()
+                    self.recent_line = None
+                if not line_match:
+                    self.recent_quoted.append(line)
+                self.was_quoted = True
+                self.recent_diff = self.cur_diff
+            else:
+                self.recent_unquoted.put(line)
+                self.was_quoted = False
+
+        if line_match:
+            self.recent_line = line_match.groups()
+
+        if self.state == STATE_DIFFS:
+            pass
+
+        # If this is the start of the diffs section, emit our tags and
+        # change log
+        elif line == '---':
+            self.state = STATE_DIFFS
+
+            # Output the tags (signoff first), then change list
+            out = []
+            log = self.series.MakeChangeLog(self.commit)
+            out += [line]
+            if self.commit:
+                out += self.commit.notes
+            out += [''] + log
+        elif self.found_test:
+            if not RE_ALLOWED_AFTER_TEST.match(line):
+                self.lines_after_test += 1
+        return out
 
     def process_line(self, line):
         """Process a single line of a patch file or commit log
@@ -417,19 +653,7 @@ class PatchStream:
         # If a tag is detected, or a new commit starts
         if series_tag_match or commit_tag_match or change_id_match or \
            cover_match or signoff_match or self.state == STATE_MSG_HEADER:
-            # but we are already in a section, this means 'END' is missing
-            # for that section, fix it up.
-            if self.in_section:
-                self._add_warn("Missing 'END' in section '%s'" % self.in_section)
-                self._finalise_section()
-            # but we are already in a change list, that means a blank line
-            # is missing, fix it up.
-            if self.in_change:
-                self._add_warn("Missing 'blank line' in section '%s-changes'" %
-                               self.in_change)
-                self._finalise_change()
-                self.in_change = None
-                self.change_version = 0
+            self._fix_open_parts()
 
         # If we are in a section, keep collecting lines until we see END
         if self.in_section:
@@ -458,87 +682,26 @@ class PatchStream:
         elif self.skip_blank and is_blank:
             self.skip_blank = False
 
-        # Detect Cover-xxx tags
         elif cover_match:
-            name = cover_match.group(1)
-            value = cover_match.group(2)
-            if name == 'letter':
-                self.in_section = 'cover'
-                self.skip_blank = False
-            elif name == 'letter-cc':
-                self._add_to_series(line, 'cover-cc', value)
-            elif name == 'changes':
-                self.in_change = 'Cover'
-                self.change_version = self._parse_version(value, line)
+            self._process_cover_tag(cover_match, line)
 
         # If we are in a change list, key collected lines until a blank one
         elif self.in_change:
-            if is_blank:
-                # Blank line ends this change list
-                self._finalise_change()
-                self.in_change = None
-                self.change_version = 0
-            elif line == '---':
-                self._finalise_change()
-                self.in_change = None
-                self.change_version = 0
-                out = self.process_line(line)
-            elif self.is_log:
-                if not leading_whitespace_match:
-                    self._finalise_change()
-                self.change_lines.append(line)
-            self.skip_blank = False
+            out = self._process_change_line(line, is_blank,
+                                            leading_whitespace_match)
 
-        # Detect Series-xxx tags
         elif series_tag_match:
-            name = series_tag_match.group(1)
-            value = series_tag_match.group(2)
-            if name == 'changes':
-                # value is the version number: e.g. 1, or 2
-                self.in_change = 'Series'
-                self.change_version = self._parse_version(value, line)
-            else:
-                self._add_to_series(line, name, value)
-                self.skip_blank = True
+            self._process_series_tag(series_tag_match, line)
 
-        # Detect Change-Id tags
         elif change_id_match:
-            if self.keep_change_id:
-                out = [line]
-            value = change_id_match.group(1)
-            if self.is_log:
-                if self.commit.change_id:
-                    raise ValueError(
-                        "%s: Two Change-Ids: '%s' vs. '%s'" %
-                        (self.commit.hash, self.commit.change_id, value))
-                self.commit.change_id = value
-            self.skip_blank = True
+            out = self._process_change_id(change_id_match, line)
 
-        # Detect Commit-xxx tags
         elif commit_tag_match:
-            name = commit_tag_match.group(1)
-            value = commit_tag_match.group(2)
-            if name == 'notes':
-                self._add_to_commit(name)
-                self.skip_blank = True
-            elif name == 'changes':
-                self.in_change = 'Commit'
-                self.change_version = self._parse_version(value, line)
-            elif name == 'cc':
-                self.commit.add_cc(value.split(','))
-            elif name == 'added-in':
-                version = self._parse_version(value, line)
-                self.commit.add_change(version, '- New')
-                self.series.AddChange(version, None, '- %s' %
-                                      self.commit.subject)
-            else:
-                self._add_warn('Line %d: Ignoring Commit-%s' %
-                               (self.linenum, name))
+            self._process_commit_tag(commit_tag_match, line)
 
         # Detect invalid tags
         elif invalid_match:
-            raise ValueError("Line %d: Invalid tag = '%s'" %
-                (self.linenum, line))
+            raise ValueError(f"Line {self.linenum}: Invalid tag = '{line}'")
 
         # Detect the start of a new commit
         elif commit_match:
@@ -547,74 +710,14 @@ class PatchStream:
 
         # Detect tags in the commit message
         elif tag_match:
-            rtag_type, who = tag_match.groups()
-            self._add_commit_rtag(rtag_type, who)
-            # Remove Tested-by self, since few will take much notice
-            if (rtag_type == 'Tested-by' and
-                    who.find(os.getenv('USER') + '@') != -1):
-                self._add_warn("Ignoring '%s'" % line)
-            elif rtag_type == 'Patch-cc':
-                self.commit.add_cc(who.split(','))
-            else:
-                out = [line]
+            out = self._process_rtag(tag_match, line)
 
-        # Suppress duplicate signoffs
         elif signoff_match:
-            if (self.is_log or not self.commit or
-                    self.commit.check_duplicate_signoff(signoff_match.group(1))):
-                out = [line]
+            out = self._process_signoff(signoff_match, line)
 
         # Well that means this is an ordinary line
         else:
-            # Look for space before tab
-            mat = RE_SPACE_BEFORE_TAB.match(line)
-            if mat:
-                self._add_warn('Line %d/%d has space before tab' %
-                               (self.linenum, mat.start()))
-
-            # OK, we have a valid non-blank line
-            out = [line]
-            self.linenum += 1
-            self.skip_blank = False
-
-            if diff_match:
-                self.cur_diff = diff_match.group(1)
-
-            # If this is quoted, keep recent lines
-            if not diff_match and self.linenum > 1 and line:
-                if line.startswith('>'):
-                    if not self.was_quoted:
-                        self._finalise_snippet()
-                        self.recent_line = None
-                    if not line_match:
-                        self.recent_quoted.append(line)
-                    self.was_quoted = True
-                    self.recent_diff = self.cur_diff
-                else:
-                    self.recent_unquoted.put(line)
-                    self.was_quoted = False
-
-            if line_match:
-                self.recent_line = line_match.groups()
-
-            if self.state == STATE_DIFFS:
-                pass
-
-            # If this is the start of the diffs section, emit our tags and
-            # change log
-            elif line == '---':
-                self.state = STATE_DIFFS
-
-                # Output the tags (signoff first), then change list
-                out = []
-                log = self.series.MakeChangeLog(self.commit)
-                out += [line]
-                if self.commit:
-                    out += self.commit.notes
-                out += [''] + log
-            elif self.found_test:
-                if not RE_ALLOWED_AFTER_TEST.match(line):
-                    self.lines_after_test += 1
+            out = self._process_text(line, diff_match, line_match)
 
         return out
 
@@ -624,7 +727,7 @@ class PatchStream:
         self._finalise_change()
         self._close_commit(False)
         if self.lines_after_test:
-            self._add_warn('Found %d lines after TEST=' % self.lines_after_test)
+            self._add_warn(f'Found {self.lines_after_test} lines after TEST=')
 
     def _write_message_id(self, outfd):
         """Write the Message-Id into the output.
@@ -716,8 +819,8 @@ class PatchStream:
                     self.blank_count += 1
                 else:
                     if self.blank_count and (line == '-- ' or match):
-                        self._add_warn("Found possible blank line(s) at end of file '%s'" %
-                                       last_fname)
+                        self._add_warn('Found possible blank line(s) at end '
+                                       f"of file '{last_fname}'")
                     # Write base-commit/branch before git's '-- ' signature
                     # so patchwork parses them as the series base.
                     if (self.insert_base_commit and not inserted_base
@@ -917,7 +1020,7 @@ def fix_patches(series, fnames, keep_change_id=False, insert_base_commit=False,
             print('%d warning%s for %s:' %
                   (len(result), 's' if len(result) > 1 else '', fname))
             for warn in result:
-                print('\t%s' % warn)
+                print(f'\t{warn}')
             print()
         count += 1
     print('Cleaned %d patch%s' % (count, 'es' if count > 1 else ''))
@@ -935,11 +1038,11 @@ def insert_cover_letter(fname, series, count, cwd=None,
             trailers before the signature
     """
     fname = os.path.join(cwd or '', fname)
-    fil = open(fname, 'r')
+    fil = open(fname, 'r', encoding='utf-8')
     lines = fil.readlines()
     fil.close()
 
-    fil = open(fname, 'w')
+    fil = open(fname, 'w', encoding='utf-8')
     text = series.cover
     prefix = series.GetPatchPrefix()
     inserted_base = False
@@ -964,7 +1067,7 @@ def insert_cover_letter(fname, series, count, cwd=None,
             # if more than 10 or 100 patches, it should say 00/xx, 000/xxx, etc
             zero_repeat = int(math.log10(count)) + 1
             zero = '0' * zero_repeat
-            line = 'Subject: [%s %s/%d] %s\n' % (prefix, zero, count, text[0])
+            line = f'Subject: [{prefix} {zero}/{count}] {text[0]}\n'
 
         # Insert our cover letter
         elif line.startswith('*** BLURB HERE ***'):

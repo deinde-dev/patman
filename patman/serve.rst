@@ -128,6 +128,11 @@ review --revise``, updating the Gmail drafts if selected.
 'Send' under a review sends its Gmail draft, and 'Send N drafts' at the top
 sends them all; each needs a second tap to confirm.
 
+These run as jobs (see `Jobs`_), but the page stays where it is, so you can
+carry on reading the series. Each review a job acts on shows how the job is
+getting on, with a link to its output. When the job finishes, the review
+shows its new text, and 'Show changes' shows the text from before.
+
 Replies to reviews
 ------------------
 
@@ -143,7 +148,13 @@ Jobs
 
 Commands started from the page, such as reviews, run as jobs, one at a time in
 the order they are started, along with the syncs. The Jobs tab shows each job
-with its output as it runs, and lets you cancel it.
+with its output as it runs, and lets you cancel it. While jobs are waiting or
+running, the tab shows how many there are.
+
+Each tab remembers the screen you last looked at in it, so tapping Reviews
+goes back to the series you were reviewing; tapping it again goes to the list
+of reviews. Each screen also keeps its scroll position, so going back to it
+finds it where you left it.
 
 Jobs which are waiting or running are recorded in ``.patman-serve-jobs.json``
 next to the database. If the server stops before a job finishes, for example

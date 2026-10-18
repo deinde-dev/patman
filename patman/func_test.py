@@ -485,10 +485,12 @@ Changes in v2:
                              'get_maintainer_script: dummy-script.sh\n'
                              'check_patch: False\n'
                              'add_maintainers: True\n', binary=False)
+            # Use this Python, since a build container may have no
+            # /usr/bin/env to find one
             tools.write_file('dummy-script.sh',
-                             '#!/usr/bin/env python3\n'
+                             f'#!{sys.executable}\n'
                              'print("hello@there.com")\n', binary=False)
-            os.chmod('dummy-script.sh', 0x555)
+            os.chmod('dummy-script.sh', 0o755)
             tools.run('git', 'add', '.')
             tools.run('git', 'commit', '-m', 'new commit')
 
@@ -757,6 +759,32 @@ diff --git a/lib/efi_loader/efi_memory.c b/lib/efi_loader/efi_memory.c
             self.assertEqual(0, control.do_patman(args))
         self.assertTrue(pstat.call_args.kwargs['single_thread'])
         self.assertTrue(pstat.call_args.kwargs['show_cover_comments'])
+
+    def test_status_cover_rtags(self):
+        """Test that tags given on the cover letter apply to each patch"""
+        commit1 = Commit('abcd')
+        commit1.rtags = {'Reviewed-by': {self.joe}}
+        commit2 = Commit('ef12')
+        comment = {'content': f'For the series:\n\nReviewed-by: {self.joe}\n'
+                              f'Tested-by: {self.mary}\n',
+                   'submitter': {'name': 'Joe', 'email': 'joe@x.org'}}
+        cover = patchwork.COVER(9, 1, 'The series', [comment])
+
+        # The first commit has Joe's review already, so gets just Mary's tag
+        new_rtags = [{'Acked-by': {self.leb}}, None]
+        status.add_cover_rtags([commit1, commit2], cover, new_rtags)
+        self.assertEqual([{'Acked-by': {self.leb}, 'Tested-by': {self.mary}},
+                          {'Reviewed-by': {self.joe},
+                           'Tested-by': {self.mary}}],
+                         [dict(tags) if tags else tags for tags in new_rtags])
+
+        # Nothing changes with no cover letter, or no comments on it
+        new_rtags = [None, None]
+        status.add_cover_rtags([commit1, commit2], None, new_rtags)
+        status.add_cover_rtags([commit1, commit2],
+                               patchwork.COVER(9, 0, 'The series', []),
+                               new_rtags)
+        self.assertEqual([None, None], new_rtags)
 
     def test_status_read_patch(self):
         """Test handling a single patch in Patchwork"""
