@@ -45,6 +45,7 @@ def run_patman():
         from patman import test_send
         from patman import test_server
         from patman import test_settings
+        from patman import test_upstream
         from u_boot_pylib import test_command
 
         to_run = args.testname if args.testname not in [None, 'test'] else None
@@ -53,8 +54,8 @@ def run_patman():
             args.test_preserve_dirs, None, to_run, None,
             [test_checkpatch.TestPatch, func_test.TestFunctional,
              'patman.settings', test_cseries.TestCseries,
-             test_cseries.TestGetUpstreamBranch, test_review.TestReview,
-             test_send.TestSend,
+             test_cseries.TestGetUpstreamBranch, test_upstream.TestUpstream,
+             test_review.TestReview, test_send.TestSend,
              test_settings.TestSettings, test_server.TestWebServer,
              test_command.TestRunInteractive])
         sys.exit(0 if result.wasSuccessful() else 1)
