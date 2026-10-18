@@ -169,6 +169,17 @@ A job runs one or more commands in the git tree, such as a sync or a review:
   ``version`` (int) and the patches ``seqs`` (list of int, empty for all the
   unsent reviews); null for other jobs
 
+The server
+----------
+
+``GET /api/version``
+~~~~~~~~~~~~~~~~~~~~
+
+The version of patman which the server runs, as an object with ``version``,
+e.g. ``{"version": "0.4.0"}``, or null if it is not known. When the server
+runs from a git checkout which is not at a release, the output of ``git
+describe`` follows, e.g. ``"0.4.0 (v0.4.0-3-g1234abc)"``.
+
 Your series
 -----------
 

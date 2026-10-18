@@ -10,10 +10,59 @@ Each function returns plain dicts and lists, ready to be sent as JSON.
 import asyncio
 from collections import Counter
 from datetime import datetime
+from importlib import metadata
+import os
 import re
+import subprocess
 
 from patman.server.params import BadRequest
 from patman.workflow import Wtype
+
+
+# Directory above the patman package, which is the top of the checkout when
+# patman runs from its git repository
+TOP_DIR = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))
+
+
+def get_version(top=TOP_DIR):
+    """Get the version of patman which is running
+
+    When patman runs from a checkout, this is the version in its
+    pyproject.toml, followed by what 'git describe' says if that is not the
+    release itself, e.g. '0.4.0 (v0.4.0-3-g1234abc)', so that it is clear
+    which commit is running. Otherwise it is the installed package's version.
+
+    Args:
+        top (str): Directory which may hold patman's pyproject.toml
+
+    Return:
+        str or None: Version, or None if it is not known
+    """
+    try:
+        with open(os.path.join(top, 'pyproject.toml'), encoding='utf-8') as inf:
+            text = inf.read()
+    except OSError:
+        text = ''
+    found = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
+    if found and re.search(r'^name\s*=\s*"patch-manager"', text, re.MULTILINE):
+        version = found.group(1)
+        if not os.path.exists(os.path.join(top, '.git')):
+            return version
+        try:
+            result = subprocess.run(['git', 'describe', '--tags', '--dirty'],
+                                    cwd=top, capture_output=True, text=True,
+                                    timeout=10, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            return version
+        desc = result.stdout.strip()
+        if result.returncode or not desc or desc == f'v{version}':
+            return version
+        return f'{version} ({desc})'
+    try:
+        return metadata.version('patch-manager')
+    except metadata.PackageNotFoundError:
+        return None
 
 
 def _state_counts(pcommits):

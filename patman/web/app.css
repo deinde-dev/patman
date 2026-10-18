@@ -77,6 +77,8 @@ header h1 {
 @keyframes pulse { to { opacity: 0.3; } }
 
 main { max-width: 760px; margin: 0 auto; padding: 12px 16px; }
+main .version { margin: 20px 0 4px; text-align: center; color: var(--muted);
+                font-size: 12px; }
 
 nav {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 2;

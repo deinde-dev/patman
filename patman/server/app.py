@@ -76,6 +76,9 @@ class Server(jobs.JobRunner):
         self._sleep = asyncio.sleep
         self._sync_task = None
 
+        # patman's version, found when first asked for, or '' if not known
+        self._version_str = None
+
         # Reviewed versions which patchwork says have no cover letter
         self._no_cover = set()
 
@@ -367,6 +370,11 @@ class Server(jobs.JobRunner):
 
     async def _todo_list(self, _request):
         return web.json_response(info.get_todo_list(self.cser))
+
+    async def _version(self, _request):
+        if self._version_str is None:
+            self._version_str = info.get_version() or ''
+        return web.json_response({'version': self._version_str or None})
 
     async def _comments(self, request):
         kind = request.match_info['kind']
@@ -673,6 +681,7 @@ class Server(jobs.JobRunner):
         app.router.add_get('/api/reviews', self._review_list)
         app.router.add_get(r'/api/reviews/{idnum:\d+}', self._review_detail)
         app.router.add_get('/api/todo', self._todo_list)
+        app.router.add_get('/api/version', self._version)
         app.router.add_get(r'/api/comments/{kind:patch|cover}/{item_id:\d+}',
                            self._comments)
         app.router.add_get(r'/api/{kind:patch|cover}/{item_id:\d+}',

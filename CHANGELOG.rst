@@ -13,6 +13,9 @@ Added
 - The buttons, links and tabs on the ``patman serve`` page have tooltips
   saying what they do, shown when hovering over them or, on a phone, with a
   long press. A button which needs a second tap says so.
+- The ``patman serve`` page shows the version of patman below each screen,
+  with the commit when the server runs from a git checkout which is not at a
+  release. ``GET /api/version`` gives it.
 
 Fixed
 ~~~~~

@@ -196,6 +196,17 @@ function renderMail(text, onChunk, onEdit) {
 
 const main = document.getElementById('main');
 const titleEl = document.getElementById('title');
+
+// patman's version, shown below each screen once the server has given it
+const versionEl = h('div', { class: 'version' });
+let versionAsked = false;
+function showVersion() {
+  if (versionAsked) return;
+  versionAsked = true;
+  api('version').then((v) => {
+    versionEl.textContent = v.version ? `patman ${v.version}` : '';
+  }).catch(() => { versionAsked = false; });
+}
 const backBtn = document.getElementById('back');
 backBtn.addEventListener('click', () => history.back());
 
@@ -231,7 +242,9 @@ function setView(title, tab, back, ...content) {
     tabScreens.set(tab, location.hash);
     savePlaces('patman-tabs', tabScreens);
   }
-  main.replaceChildren(...content.flat().filter((c) => c !== null && c !== undefined && c !== false));
+  main.replaceChildren(...content.flat().filter((c) => c !== null && c !== undefined && c !== false),
+                       versionEl);
+  showVersion();
 }
 
 function showError(err, tab) {
