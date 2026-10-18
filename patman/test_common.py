@@ -49,7 +49,8 @@ def find_source_dir():
 
     This is the directory above the patman package, or the current directory,
     e.g. when a packager runs the tests from the sources after installing
-    patman.
+    patman. A U-Boot tree has both files too, but not the patman package, so
+    is not used.
 
     Returns:
         str or None: Directory holding scripts/checkpatch.pl and
@@ -57,8 +58,9 @@ def find_source_dir():
     """
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     for path in (here, os.getcwd()):
-        if (os.path.isfile(os.path.join(path, 'scripts', 'checkpatch.pl')) and
-                os.path.isfile(os.path.join(path, '.checkpatch.conf'))):
+        if all(os.path.isfile(os.path.join(path, fname))
+               for fname in ('scripts/checkpatch.pl', '.checkpatch.conf',
+                             'patman/checkpatch.py')):
             return path
     return None
 
