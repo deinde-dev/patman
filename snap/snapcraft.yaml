@@ -1,0 +1,74 @@
+name: patman
+title: Patman
+summary: Create, check, send and track patch series sent by email
+description: |
+  Patman helps you create, send, track and review patch series for projects
+  which take patches by email, such as U-Boot and the Linux kernel.
+
+  It creates patches from your git branch, cleans them up by removing
+  unwanted tags, adds a cover letter with change logs, runs them through
+  checkpatch.pl and its own checks, and sends them to the right people with
+  git send-email or through a web relay. Once a series is out for review, it
+  tracks it on Patchwork, gathers review tags into your commits and keeps
+  track of each version.
+
+  It can also draft reviews of other people's patches using a Claude agent,
+  and 'patman serve' shows your series and reviews on a mobile-friendly web
+  page.
+
+  patman works on your own git repositories and runs your git, git
+  send-email and editor, so it needs classic confinement. It uses git and
+  perl (for checkpatch.pl) from the host, and 'patman review' needs Claude
+  Code (the claude command) to be installed.
+license: GPL-2.0-or-later
+website: https://deinde.dev/patman/
+source-code: https://github.com/deinde-dev/patman
+issues: https://github.com/deinde-dev/patman/issues
+contact: https://github.com/deinde-dev/patman/issues
+icon: logo/patman-icon.svg
+adopt-info: patman
+base: core24
+grade: stable
+confinement: classic
+
+apps:
+  patman:
+    command: bin/patman
+
+parts:
+  patman:
+    plugin: python
+    source: .
+    # Install patman with all its optional features: Gmail, review and the
+    # parallel test runner
+    python-packages:
+      - .[all]
+    # A classic snap runs on the host's libraries, so ship the Python which
+    # patman runs on and point its binaries at the snap's own copies
+    stage-packages:
+      - python3.12-minimal
+      - libpython3.12-minimal
+      - libpython3.12-stdlib
+    build-attributes:
+      - enable-patchelf
+    override-pull: |
+      craftctl default
+      craftctl set version="$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")"
+    override-build: |
+      craftctl default
+      # 'patman send' runs this script again from git send-email, outside
+      # the snap's environment, so make it start with the snap's own Python
+      # rather than whichever python3 is first in the PATH
+      sed -i '1s|^#!.*|#!/snap/patman/current/bin/python3|' \
+        "$CRAFT_PART_INSTALL/bin/patman"
+      site="$CRAFT_PART_INSTALL/lib/python3.12/site-packages"
+      # Of the descriptions of 600 Google APIs which come with the client,
+      # patman only uses Gmail's
+      find "$site/googleapiclient/discovery_cache/documents" -type f \
+        ! -name gmail.v1.json -delete
+      # 'patman review' runs the claude command from the host, as it does
+      # when installed with pip, so that updating Claude Code is enough to
+      # use the newest models. Drop the copy which the SDK bundles
+      rm -rf "$site/claude_agent_sdk/_bundled"
+      # pip is only needed to build the snap
+      rm -rf "$site"/pip "$site"/pip-*.dist-info
