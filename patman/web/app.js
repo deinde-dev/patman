@@ -136,7 +136,8 @@ function renderMail(text, onChunk, onEdit) {
         // for the reply that follows
         const hidden = run.slice(0, -3);
         out.append(h('details', {},
-          h('summary', {}, `▸ ${hidden.length} quoted lines`), quote(hidden)));
+          h('summary', { title: 'Show the rest of the quote' },
+            `▸ ${hidden.length} quoted lines`), quote(hidden)));
         out.append(quote(run.slice(-3)));
       } else {
         out.append(quote(run));
@@ -157,9 +158,11 @@ function renderMail(text, onChunk, onEdit) {
         // Send the end of the quote, which is what the comment is about
         const part = [...lastQuote.slice(-8), '', comment.trim()].join('\n');
         const btns = h('div', { class: 'chunk-btns' },
-          onChunk && h('button', { class: 'chunk-btn', onclick: () => onChunk(part) },
+          onChunk && h('button', { class: 'chunk-btn', onclick: () => onChunk(part),
+                                   title: 'Ask the agent to change this comment' },
                        '✎ Revise this'),
-          onEdit && h('button', { class: 'chunk-btn', onclick: () => edit() }, 'Edit'));
+          onEdit && h('button', { class: 'chunk-btn', onclick: () => edit(),
+                                  title: 'Change this comment yourself' }, 'Edit'));
         out.append(btns);
         const [start, end, qstart] = [i, k, quoteStart];
         const splice = (newText) => {
@@ -193,6 +196,17 @@ function renderMail(text, onChunk, onEdit) {
 
 const main = document.getElementById('main');
 const titleEl = document.getElementById('title');
+
+// patman's version, shown below each screen once the server has given it
+const versionEl = h('div', { class: 'version' });
+let versionAsked = false;
+function showVersion() {
+  if (versionAsked) return;
+  versionAsked = true;
+  api('version').then((v) => {
+    versionEl.textContent = v.version ? `patman ${v.version}` : '';
+  }).catch(() => { versionAsked = false; });
+}
 const backBtn = document.getElementById('back');
 backBtn.addEventListener('click', () => history.back());
 
@@ -228,7 +242,9 @@ function setView(title, tab, back, ...content) {
     tabScreens.set(tab, location.hash);
     savePlaces('patman-tabs', tabScreens);
   }
-  main.replaceChildren(...content.flat().filter((c) => c !== null && c !== undefined && c !== false));
+  main.replaceChildren(...content.flat().filter((c) => c !== null && c !== undefined && c !== false),
+                       versionEl);
+  showVersion();
 }
 
 function showError(err, tab) {
@@ -241,7 +257,8 @@ function showError(err, tab) {
       h('div', { class: 'name' }, 'This server needs a token'),
       h('div', { class: 'desc' },
         "Enter the token given to 'patman serve --token'"),
-      input, h('button', { class: 'btn', onclick: save }, 'Save')));
+      input, h('button', { class: 'btn', onclick: save,
+                           title: 'Use this token for the server' }, 'Save')));
     return;
   }
   setView('patman', tab, false, h('div', { class: 'error' }, String(err.message || err)));
@@ -251,7 +268,7 @@ function showError(err, tab) {
 
 // A search box and optional filter chips above a list of cards. Each item
 // is {card, text, groups} where text is searched and groups lists the
-// filters the item belongs to
+// filters the item belongs to. Each filter is [id, label, tooltip]
 function filteredList(key, items, filters) {
   let current = filters ? filters[0][0] : null;
   try {
@@ -275,8 +292,8 @@ function filteredList(key, items, filters) {
     count.textContent = `${shown} of ${items.length}`;
     empty.hidden = shown > 0;
     if (chips) {
-      chips.replaceChildren(...filters.map(([id, label]) => h('button', {
-        class: id === current ? 'on' : '',
+      chips.replaceChildren(...filters.map(([id, label, tip]) => h('button', {
+        class: id === current ? 'on' : '', title: tip,
         onclick: () => {
           current = id;
           try { localStorage.setItem(`patman-filter-${key}`, id); }
@@ -310,7 +327,8 @@ async function viewSeriesList() {
   setView('Series', 'series', false, ...filteredList('series', items.map((s) => {
     const comments = s.num_comments + s.cover_num_comments;
     const final = Object.entries(s.states).every(([st]) => FINAL_STATES.has(st));
-    const card = h('a', { class: 'card', href: `#/series/${s.id}` },
+    const card = h('a', { class: 'card', href: `#/series/${s.id}`,
+                          title: 'Show the patches in this series' },
       h('div', { class: 'row' },
         h('div', { class: 'grow name' }, s.name),
         h('div', { class: 'ver' }, `v${s.version}`)),
@@ -325,7 +343,8 @@ async function viewSeriesList() {
     const groups = ['all'];
     if (s.link && s.count && !final) groups.push('active');
     return { card, text: `${s.name} ${s.desc || ''}`, groups };
-  }), [['active', 'Active'], ['all', 'All']]));
+  }), [['active', 'Active', 'Sent series with patches still under review'],
+        ['all', 'All', 'All your series']]));
 }
 
 function commentToggle(card, kind, itemId, ups) {
@@ -355,28 +374,31 @@ async function viewSeries(id, wantVer) {
   const versions = ser.versions;
   const sv = versions.find((v) => v.version === wantVer) || versions[0];
   const tabs = versions.length > 1 ? h('div', { class: 'tabs' }, versions.map((v) =>
-    h('button', { class: v === sv ? 'on' : '',
+    h('button', { class: v === sv ? 'on' : '', title: `Show version ${v.version}`,
                   onclick: () => { location.replace(`#/series/${id}/${v.version}`); } },
       `v${v.version}`))) : null;
 
   const cards = [];
   if (sv.cover_id) {
-    const card = h('div', { class: 'card patch' },
+    const card = h('div', { class: 'card patch', title: 'Tap to show the comments' },
       h('div', { class: 'row' },
         h('div', { class: 'grow name' }, 'Cover letter'),
         h('span', { class: 'ncomments' + (sv.cover_num_comments ? ' some' : '') },
           plural(sv.cover_num_comments, 'comment'))),
       sv.cover_name && h('div', { class: 'desc' }, sv.cover_name),
       h('div', { class: 'meta' },
-        h('a', { class: 'extlink', href: mailHref('cover', sv.cover_id, ser.upstream) },
-          'Read'),
+        h('a', { class: 'extlink', href: mailHref('cover', sv.cover_id, ser.upstream),
+                 title: 'Read the cover letter and its comments' }, 'Read'),
         pw && h('a', { class: 'extlink', href: `${pw}/cover/${sv.cover_id}/`,
-                       target: '_blank', rel: 'noopener' }, 'Open in patchwork ↗')));
+                       target: '_blank', rel: 'noopener',
+                       title: 'Open the cover letter on patchwork, in a new tab' },
+                'Open in patchwork ↗')));
     card.addEventListener('click', commentToggle(card, 'cover', sv.cover_id, ser.upstream));
     cards.push(card);
   }
   for (const p of sv.patches) {
-    const card = h('div', { class: 'card patch' },
+    const card = h('div', { class: 'card patch',
+                            title: p.patch_id ? 'Tap to show the comments' : null },
       h('div', { class: 'row' },
         h('span', { class: 'seq' }, p.seq),
         h('div', { class: 'grow' }, p.subject),
@@ -385,10 +407,11 @@ async function viewSeries(id, wantVer) {
       h('div', { class: 'meta' },
         p.state && h('span', { class: `chip ${stClass(p.state)}` }, p.state),
         p.patch_id && h('a', { class: 'extlink',
-          href: mailHref('patch', p.patch_id, ser.upstream) }, 'Read'),
+          href: mailHref('patch', p.patch_id, ser.upstream),
+          title: 'Read the patch and its comments' }, 'Read'),
         pw && p.patch_id && h('a', { class: 'extlink',
-          href: `${pw}/patch/${p.patch_id}/`, target: '_blank', rel: 'noopener' },
-          'patchwork ↗')));
+          href: `${pw}/patch/${p.patch_id}/`, target: '_blank', rel: 'noopener',
+          title: 'Open the patch on patchwork, in a new tab' }, 'patchwork ↗')));
     if (p.patch_id) {
       card.addEventListener('click', commentToggle(card, 'patch', p.patch_id, ser.upstream));
     }
@@ -517,13 +540,19 @@ function diffGap(file, lo, count, after, before) {
   const draw = () => {
     const n = left();
     if (n === 0) { bar.remove(); return; }
-    const btn = (label, add, sub) => h('button', { onclick: () => widen(add, sub) }, label);
+    const btn = (label, add, sub, tip) => h('button', { onclick: () => widen(add, sub),
+                                                        title: tip }, label);
     const first = src ? src.first : (file.new ? lo.new : lo.old);
     bar.replaceChildren(...[
-      after && btn(`↓ ${CONTEXT_LINES} more`, CONTEXT_LINES, 0),
-      before && btn(`↑ ${CONTEXT_LINES} more`, 0, CONTEXT_LINES),
-      n !== null && n > CONTEXT_LINES && btn(`All ${n}`, n, 0),
-      h('a', { href: fileHref(file, near()) }, 'View whole file'),
+      after && btn(`↓ ${CONTEXT_LINES} more`, CONTEXT_LINES, 0,
+                   `Show ${CONTEXT_LINES} more lines below the chunk above`),
+      before && btn(`↑ ${CONTEXT_LINES} more`, 0, CONTEXT_LINES,
+                    `Show ${CONTEXT_LINES} more lines above the chunk below`),
+      n !== null && n > CONTEXT_LINES && btn(`All ${n}`, n, 0,
+                                             'Show all the lines in this gap'),
+      h('a', { href: fileHref(file, near()),
+               title: 'Show the whole file, with line numbers, at this point' },
+        'View whole file'),
       n !== null && h('span', {}, `${plural(n, 'line')} from ${first + ntop}`),
     ].filter(Boolean));
   };
@@ -572,7 +601,8 @@ function renderDiff(diff) {
         file = files.get(idx);
         prev = null;
         out.push(h('span', { class: 'file' }, file.old || file.new
-          ? [h('a', { class: 'view', href: fileHref(file, file.at) }, 'View file'),
+          ? [h('a', { class: 'view', href: fileHref(file, file.at),
+                      title: 'Show the whole file, with line numbers' }, 'View file'),
              ' '] : null, line));
         return;
       }
@@ -591,7 +621,8 @@ function renderDiff(diff) {
   };
   show(DIFF_LINES);
   const more = lines.length > DIFF_LINES && h('div', { class: 'actions' },
-    h('button', { class: 'btn light small', onclick: (ev) => {
+    h('button', { class: 'btn light small', title: 'Show the rest of the diff',
+                  onclick: (ev) => {
       show(lines.length);
       ev.target.remove();
     } }, `Show all ${lines.length} lines`));
@@ -655,7 +686,8 @@ async function viewMail(kind, id, ups) {
         ser && h('span', {}, `series ${ser.id} v${ser.version}`)),
       m.web_url && h('div', { class: 'actions' },
         h('a', { class: 'btn light small', href: m.web_url, target: '_blank',
-                 rel: 'noopener' }, 'patchwork ↗'))),
+                 rel: 'noopener', title: 'Open this on patchwork, in a new tab' },
+          'patchwork ↗'))),
     h('div', { class: 'section' }, kind === 'patch' ? 'Commit message' : 'Cover letter'),
     h('div', { class: 'card' }, renderMail(m.content)),
     m.diff && renderDiff(m.diff),
@@ -675,7 +707,9 @@ function mailToggle(kind, id, ups) {
   const box = h('div', { class: 'inline-mail' });
   let open = false;
   let mail = null;
-  const btn = h('button', { class: 'btn light small', onclick: async () => {
+  const btn = h('button', { class: 'btn light small',
+                            title: `Show or hide the ${what} here, next to its review`,
+                            onclick: async () => {
     open = !open;
     btn.textContent = `${open ? 'Hide' : 'Show'} the ${what}`;
     if (!open) { box.replaceChildren(); return; }
@@ -713,10 +747,11 @@ async function startJob(path, data, msg) {
   }
 }
 
-// A button which needs a second tap to confirm
-function confirmButton(label, cls, action) {
+// A button which needs a second tap to confirm. 'tip' says what it does
+function confirmButton(label, cls, action, tip) {
   let armed = null;
-  const btn = h('button', { class: cls, onclick: () => {
+  const btn = h('button', { class: cls, title: tip && `${tip}; tap twice to confirm`,
+                            onclick: () => {
     if (armed) { clearTimeout(armed); armed = null; btn.textContent = label; action(); return; }
     btn.textContent = 'Tap to confirm';
     armed = setTimeout(() => { armed = null; btn.textContent = label; }, 3000);
@@ -726,9 +761,12 @@ function confirmButton(label, cls, action) {
 
 function reviewActions() {
   return h('div', { class: 'actions', style: 'margin:0 0 12px' },
-    h('a', { class: 'btn', href: '#/review/new' }, '+ Review a series'),
+    h('a', { class: 'btn', href: '#/review/new',
+             title: 'Have the agent review a series from patchwork' }, '+ Review a series'),
     confirmButton('Scan for new versions', 'btn light',
-                  () => startJob('review/scan', { drafts: true })));
+                  () => startJob('review/scan', { drafts: true }),
+                  'Look on patchwork for new versions of series you reviewed, and ' +
+                  'review them'));
 }
 
 async function viewReviewList() {
@@ -741,7 +779,8 @@ async function viewReviewList() {
           ...filteredList('reviews', list.map((r) => ({
     text: `${r.name} ${r.desc || ''}`,
     groups: r.replies_waiting ? ['all', 'replies'] : ['all'],
-    card: h('a', { class: 'card', href: `#/reviews/${r.id}` },
+    card: h('a', { class: 'card', href: `#/reviews/${r.id}`,
+                   title: 'Show the reviews of this series' },
       h('div', { class: 'row' },
         h('div', { class: 'grow name' }, r.desc || r.name),
         r.version && h('div', { class: 'ver' }, `v${r.version}`)),
@@ -753,7 +792,8 @@ async function viewReviewList() {
         Object.entries(r.statuses).map(([st, n]) =>
           h('span', {}, `${n} ${REVIEW_STATUS[st] || st}`)),
         r.timestamp && h('span', {}, ago(parseTime(r.timestamp))))) })),
-    [['all', 'All'], ['replies', 'Needs reply']]));
+    [['all', 'All', 'All your reviews'],
+     ['replies', 'Needs reply', 'Reviews with replies waiting for your response']]));
 }
 
 // Show a job which acts on some reviews, in a strip on each of their cards,
@@ -762,7 +802,8 @@ async function viewReviewList() {
 // to read the reviews again, and gives the new text of each, by review ID
 async function trackJob(job, verb, targets, refresh) {
   const before = new Map(targets.map((t) => [t.r.id, t.r.body]));
-  const output = () => h('a', { href: `#/jobs/${job.id}` }, 'View output');
+  const output = () => h('a', { href: `#/jobs/${job.id}`,
+                                title: 'Show the output of the job' }, 'View output');
   const say = (t, cls, ...kids) => {
     t.strip.className = `jobstrip ${cls}`;
     t.strip.replaceChildren(...kids.filter((kid) => kid !== null && kid !== false));
@@ -808,12 +849,13 @@ async function trackJob(job, verb, targets, refresh) {
       const was = h('div', { class: 'notes', hidden: true },
                     h('div', { class: 'hint' }, 'Before:'), renderMail(old));
       say(t, 'done', h('span', {}, changed ? `${verb} done` : `${verb} done, no change`),
-        changed ? ' ' : null, changed ? h('button', { class: 'link', onclick: () => {
+        changed ? ' ' : null, changed ? h('button', { class: 'link',
+          title: 'Show or hide the text from before the job', onclick: () => {
           was.hidden = !was.hidden;
         } }, 'Show changes') : null,
         ' ', output(), ' ',
-        h('button', { class: 'link', onclick: () => t.strip.replaceChildren() },
-          'Dismiss'), was);
+        h('button', { class: 'link', onclick: () => t.strip.replaceChildren(),
+                      title: 'Hide this message' }, 'Dismiss'), was);
     });
     return;
   }
@@ -825,6 +867,7 @@ async function viewReview(id, wantVer) {
   const sv = versions.find((v) => v.version === wantVer) || versions[0];
   const tabs = versions.length > 1 ? h('div', { class: 'tabs' }, versions.map((v) =>
     h('button', { class: v === sv ? 'on' : '',
+                  title: `Show the reviews of version ${v.version}`,
                   onclick: () => { location.replace(`#/reviews/${id}/${v.version}`); } },
       `v${v.version}`))) : null;
   const unsent = (r) => r.status !== 'sent' && r.status !== 'replied';
@@ -867,7 +910,8 @@ async function viewReview(id, wantVer) {
       ? mailToggle(r.seq ? 'patch' : 'cover', itemId, ser.upstream) : [null, null];
     const title = h('div', { class: 'row' },
       h('div', { class: 'grow name' }, itemId
-        ? h('a', { href: mailHref(r.seq ? 'patch' : 'cover', itemId, ser.upstream) },
+        ? h('a', { href: mailHref(r.seq ? 'patch' : 'cover', itemId, ser.upstream),
+                   title: `Read the ${r.seq ? 'patch' : 'cover letter'} and its comments` },
             label, pat ? h('span', { class: 'desc' }, ` ${pat.subject}`) : null)
         : label),
       h('span', { class: `chip ${r.approved ? 'st-accepted' : 'st-changes-requested'}` },
@@ -888,15 +932,17 @@ async function viewReview(id, wantVer) {
       (mailBtn || free()) && h('div', { class: 'actions' },
         mailBtn,
         free() && [
-          h('button', { class: 'btn light small',
+          h('button', { class: 'btn light small', title: 'Change the review yourself',
                         onclick: () => editReview(card, r, header, show,
                                                   entries.get(r.id), refresh) },
             'Edit'),
-          h('button', { class: 'btn light small', onclick: () => ask(null) },
-            'Revise'),
-          confirmButton('Redraft', 'btn light small', () => redraft([r.seq])),
+          h('button', { class: 'btn light small', onclick: () => ask(null),
+                        title: 'Ask the agent to change the review' }, 'Revise'),
+          confirmButton('Redraft', 'btn light small', () => redraft([r.seq]),
+                        'Create the Gmail draft of this review again'),
           r.status === 'draft' && confirmButton('Send', 'btn small',
-                                                () => send([r.seq]))]),
+                                                () => send([r.seq]),
+                                                'Send the Gmail draft of this review')]),
       ...(mailBox ? [mailBox] : []),
       ...(r.replies || []).map(replyBox));
     entries.set(r.id, { r, strip, show, busy: false });
@@ -922,15 +968,19 @@ async function viewReview(id, wantVer) {
                () => reviseAll.replaceChildren(),
                (note, drafts, msg) => revise([], null, note, drafts, msg))));
   const actions = sv.link && h('div', { class: 'actions' },
-    anyUnsent && confirmButton('Redraft all', 'btn light small', () => redraft([])),
-    anyUnsent && h('button', { class: 'btn light small', onclick: askAll },
+    anyUnsent && confirmButton('Redraft all', 'btn light small', () => redraft([]),
+                               'Create the Gmail drafts of all the unsent reviews again'),
+    anyUnsent && h('button', { class: 'btn light small', onclick: askAll,
+                               title: 'Ask the agent to change all the unsent reviews' },
                    'Revise all'),
     drafts > 0 && confirmButton(drafts === 1 ? 'Send the draft' : `Send ${drafts} drafts`,
-                                'btn small', () => send([])),
+                                'btn small', () => send([]),
+                                'Send the Gmail drafts of the reviews'),
     confirmButton('Review again', 'btn light small', () => startJob('review',
-      { target: sv.link, ups: ser.upstream, drafts: true, force: true })),
+      { target: sv.link, ups: ser.upstream, drafts: true, force: true }),
+      'Have the agent review this version of the series again'),
     ser.patchwork_url && h('a', { class: 'btn light small', target: '_blank',
-      rel: 'noopener',
+      rel: 'noopener', title: 'Open the series on patchwork, in a new tab',
       href: ser.project ? `${ser.patchwork_url}/project/${ser.project}/list/?series=${sv.link}`
                       : ser.patchwork_url },
       'patchwork ↗'));
@@ -983,16 +1033,22 @@ function replyBox(rp) {
       rp.response && h('div', { class: 'section' }, 'Your response'),
       rp.response && h('div', { class: 'notes' }, renderMail(rp.response)),
       rp.status !== 'sent' && h('div', { class: 'actions' },
-        h('button', { class: 'btn light small', onclick: edit },
+        h('button', { class: 'btn light small', onclick: edit,
+                      title: 'Write your response to this reply yourself' },
           rp.response ? 'Edit response' : 'Write a response'),
         rp.response && confirmButton('Send', 'btn small',
-                                     () => startJob(`replies/${rp.id}/send`, {})),
+                                     () => startJob(`replies/${rp.id}/send`, {}),
+                                     'Send your response'),
         rp.response && confirmButton(
           rp.status === 'draft' ? 'Update Gmail draft' : 'Create Gmail draft',
-          'btn light small', () => startJob(`replies/${rp.id}`, { draft: true })),
+          'btn light small', () => startJob(`replies/${rp.id}`, { draft: true }),
+          'Put your response in a Gmail draft, to check or send from Gmail'),
         confirmButton('Suggest a response', 'btn light small',
-                      () => startJob(`replies/${rp.id}/suggest`, {})),
-        waiting && h('button', { class: 'btn light small', onclick: async () => {
+                      () => startJob(`replies/${rp.id}/suggest`, {}),
+                      'Have the agent suggest a response to this reply'),
+        waiting && h('button', { class: 'btn light small',
+                                 title: 'Mark this reply as needing no response',
+                                 onclick: async () => {
           Object.assign(rp, await api(`replies/${rp.id}`, { json: { skip: true } }));
           show();
         } }, 'No reply needed')));
@@ -1002,7 +1058,8 @@ function replyBox(rp) {
     text.value = rp.response || quoteReply(rp);
     const draft = h('input', { type: 'checkbox', checked: true });
     const msg = h('div', { class: 'msg' });
-    const save = h('button', { class: 'btn light small', onclick: async () => {
+    const save = h('button', { class: 'btn light small', title: 'Save your response',
+                               onclick: async () => {
       save.disabled = true;
       msg.textContent = '';
       try {
@@ -1029,13 +1086,14 @@ function replyBox(rp) {
         return;
       }
       startJob(`replies/${rp.id}/send`, {}, msg);
-    });
+    }, 'Save your response and send it');
     box.replaceChildren(h('div', { class: 'who' }, `Response to ${rp.sender}`),
       h('div', { class: 'form' }, text,
-        h('label', { class: 'check' }, draft,
+        h('label', { class: 'check', title: 'Also put the response in a Gmail draft' }, draft,
           rp.status === 'draft' ? 'Update the Gmail draft' : 'Create the Gmail draft'),
         h('div', { class: 'actions' }, send, save,
-          h('button', { class: 'btn light small', onclick: show }, 'Cancel')),
+          h('button', { class: 'btn light small', onclick: show,
+                        title: 'Close the response without saving it' }, 'Cancel')),
         msg));
     text.focus();
   };
@@ -1056,14 +1114,16 @@ function reviseForm(part, drafted, cancel, submit) {
     msg.textContent = '';
     await submit(text.value, box.checked, msg);
     send.disabled = false;
-  } }, 'Revise');
+  }, title: 'Ask the agent to make this change' }, 'Revise');
   const form = h('div', { class: 'form' },
     part && h('div', { class: 'hint' }, 'About this part:'),
     part && h('div', { class: 'notes revise-part' }, renderMail(part)),
     h('label', {}, 'What should change?'), text,
-    h('label', { class: 'check' }, box, 'Update the Gmail draft'),
+    h('label', { class: 'check', title: 'Also update the Gmail draft of the review' },
+      box, 'Update the Gmail draft'),
     h('div', { class: 'actions' }, send,
-      h('button', { class: 'btn light small', onclick: cancel }, 'Cancel')), msg);
+      h('button', { class: 'btn light small', onclick: cancel,
+                    title: 'Close this without changing anything' }, 'Cancel')), msg);
   setTimeout(() => text.focus(), 0);
   return form;
 }
@@ -1101,12 +1161,14 @@ function chunkForm(comment, drafted, cancel, submit) {
       msg.textContent = err.message;
       save.disabled = false;
     }
-  } }, 'Save');
+  }, title: 'Save the changed comment' }, 'Save');
   const form = h('div', { class: 'form' }, text,
-    h('label', { class: 'check' }, box, 'Update the Gmail draft'),
+    h('label', { class: 'check', title: 'Also update the Gmail draft of the review' },
+      box, 'Update the Gmail draft'),
     h('div', { class: 'hint' }, 'Leave it empty to drop the comment and its quote'),
     h('div', { class: 'actions' }, save,
-      h('button', { class: 'btn light small', onclick: cancel }, 'Cancel')), msg);
+      h('button', { class: 'btn light small', onclick: cancel,
+                    title: 'Close this without changing the comment' }, 'Cancel')), msg);
   setTimeout(() => text.focus(), 0);
   return form;
 }
@@ -1126,12 +1188,14 @@ function editReview(card, r, header, show, target, refresh) {
       msg.textContent = err.message;
       save.disabled = false;
     }
-  } }, 'Save');
+  }, title: 'Save the changed review' }, 'Save');
   card.replaceChildren(header, h('div', { class: 'form' }, text,
-    h('label', { class: 'check' }, box, 'Update the Gmail draft'),
+    h('label', { class: 'check', title: 'Also update the Gmail draft of the review' },
+      box, 'Update the Gmail draft'),
     h('div', { class: 'hint' }, "Include a 'Reviewed-by:' line to approve the patch"),
     h('div', { class: 'actions' }, save,
-      h('button', { class: 'btn light small', onclick: show }, 'Cancel')), msg));
+      h('button', { class: 'btn light small', onclick: show,
+                    title: 'Close this without changing the review' }, 'Cancel')), msg));
   text.focus();
   text.setSelectionRange(0, 0);
   text.scrollTop = 0;
@@ -1141,20 +1205,24 @@ async function viewReviewForm() {
   const upstreams = await api('upstreams').catch(() => []);
   const field = (label, input, hint) => [h('label', {}, label), input,
                                          hint && h('div', { class: 'hint' }, hint)];
-  const check = (label, checked) => {
+  const check = (label, checked, tip) => {
     const box = h('input', { type: 'checkbox', checked });
-    return [box, h('label', { class: 'check' }, box, label)];
+    return [box, h('label', { class: 'check', title: tip }, box, label)];
   };
   const target = h('input', { type: 'text', inputmode: 'url',
                               placeholder: 'e.g. 471234 or a patchwork URL' });
   const title = h('input', { type: 'text', placeholder: 'Words from the title' });
   const version = h('input', { type: 'number', min: 1, placeholder: 'Latest' });
   const index = h('input', { type: 'text', placeholder: 'All', inputmode: 'numeric' });
-  const ups = h('select', {}, upstreams.map((u) =>
+  const ups = h('select', { title: 'The upstream whose patchwork has the series' },
+                upstreams.map((u) =>
     h('option', { value: u.name, selected: u.default }, `${u.name} (${u.patchwork_url})`)));
-  const [drafts, draftsRow] = check('Create Gmail drafts', true);
-  const [whole, wholeRow] = check('Whole series, for a patch URL', false);
-  const [force, forceRow] = check('Review again if already reviewed', false);
+  const [drafts, draftsRow] = check('Create Gmail drafts', true,
+                                    'Put each review in a Gmail draft, ready to send');
+  const [whole, wholeRow] = check('Whole series, for a patch URL', false,
+                                  'Review the whole series which the patch is part of');
+  const [force, forceRow] = check('Review again if already reviewed', false,
+                                  'Review the series even if you have reviewed it already');
   const msg = h('div', { class: 'msg' });
   const submit = h('button', { class: 'btn', onclick: async () => {
     submit.disabled = true;
@@ -1164,7 +1232,7 @@ async function viewReviewForm() {
       index: index.value, ups: ups.value, drafts: drafts.checked,
       whole: whole.checked, force: force.checked }, msg);
     submit.disabled = false;
-  } }, 'Start review');
+  }, title: 'Start a job in which the agent reviews the series' }, 'Start review');
   setView('New review', 'reviews', true, h('div', { class: 'card form' },
     field('Patchwork series or patch', target,
           'A series ID, or the URL of a series or patch'),
@@ -1186,17 +1254,21 @@ function inboxDetails(s, ups) {
     h('div', { class: 'list' }, s.patches.map((p, i) => h('div', { class: 'row' },
       h('span', { class: 'seq' }, i + 1),
       h('div', { class: 'grow' },
-        h('a', { href: mailHref('patch', p.id, ups) }, p.name))))),
+        h('a', { href: mailHref('patch', p.id, ups),
+                 title: 'Read the patch and its comments' }, p.name))))),
     h('div', { class: 'actions' },
       confirmButton(s.reviewed ? 'Review again' : 'Review', 'btn small',
         () => startJob('review', { target: String(s.id), ups, drafts: true,
-                                   force: !!s.reviewed })),
+                                   force: !!s.reviewed }),
+        'Have the agent review this series'),
       s.web_url && h('a', { class: 'btn light small', href: s.web_url,
-                            target: '_blank', rel: 'noopener' }, 'patchwork ↗')));
+                            target: '_blank', rel: 'noopener',
+                            title: 'Open the series on patchwork, in a new tab' },
+        'patchwork ↗')));
 }
 
 function inboxCard(s, ups, pw) {
-  const card = h('div', { class: 'card patch' },
+  const card = h('div', { class: 'card patch', title: 'Tap to show the patches' },
     h('div', { class: 'row' },
       h('div', { class: 'grow name' }, s.name),
       s.version && h('div', { class: 'ver' }, `v${s.version}`)),
@@ -1204,9 +1276,10 @@ function inboxCard(s, ups, pw) {
       h('span', {}, s.submitter || ''),
       h('span', {}, ago(parseTime(s.date, true))),
       h('span', {}, npatches(s.total || s.patches.length)),
-      s.reviewed && h('a', { class: 'chip st-accepted', href: `#/reviews/${s.reviewed}` },
-                      'reviewed'),
-      s.earlier && h('a', { class: 'chip st-under-review', href: `#/reviews/${s.earlier}` },
+      s.reviewed && h('a', { class: 'chip st-accepted', href: `#/reviews/${s.reviewed}`,
+                             title: 'Show your reviews of this series' }, 'reviewed'),
+      s.earlier && h('a', { class: 'chip st-under-review', href: `#/reviews/${s.earlier}`,
+                            title: 'Show your reviews of an earlier version' },
                      'earlier version reviewed'),
       s.mine && h('span', { class: 'chip st-other' }, 'yours'),
       !s.received_all && h('span', { class: 'chip st-changes-requested' }, 'incomplete')));
@@ -1240,18 +1313,24 @@ async function viewInbox(more) {
   inbox.done = data.series.length < data.per_page;
 
   const upsTabs = upstreams.length > 1 && h('div', { class: 'tabs' },
-    upstreams.map((u) => h('button', { class: u.name === ups ? 'on' : '', onclick: () => {
+    upstreams.map((u) => h('button', { class: u.name === ups ? 'on' : '',
+                                       title: `Show the series on ${u.name}'s patchwork`,
+                                       onclick: () => {
       try { localStorage.setItem('patman-inbox-ups', u.name); } catch (e) { /* ignore */ }
       route();
     } }, u.name)));
   const loadMore = !inbox.done && h('div', { class: 'actions' },
-    h('button', { class: 'btn light', onclick: (ev) => {
+    h('button', { class: 'btn light', title: 'Read more series from patchwork',
+                  onclick: (ev) => {
       ev.target.disabled = true;
       viewInbox(true).catch((err) => showError(err, 'inbox'));
     } }, 'Load more'));
   setView('Inbox', 'inbox', false, upsTabs,
     ...filteredList('inbox', inbox.series.map((s) => inboxCard(s, ups, pw)),
-                    [['todo', 'To review'], ['newver', 'New versions'], ['all', 'All']]),
+                    [['todo', 'To review',
+                      'Series which you have not reviewed and are not yours'],
+                     ['newver', 'New versions', 'New versions of series you reviewed earlier'],
+                     ['all', 'All', 'All the series listed']]),
     loadMore);
 }
 
@@ -1264,7 +1343,8 @@ async function viewTodo() {
   }
   const due = list.filter((t) => t.due);
   const later = list.filter((t) => !t.due);
-  const card = (t) => h('a', { class: 'card', href: `#/series/${t.series_id}` },
+  const card = (t) => h('a', { class: 'card', href: `#/series/${t.series_id}`,
+                               title: 'Show this series' },
     h('div', { class: 'row' },
       h('div', { class: 'grow name' }, t.name),
       h('span', { class: `chip ${t.due ? 'st-changes-requested' : 'st-other'}` },
@@ -1387,9 +1467,10 @@ function viewSync() {
   const st = syncState || { results: [] };
   const active = st.running || st.queued;
   const btn = h('button', { class: 'btn', disabled: active,
+                            title: 'Gather the review tags for your series from patchwork now',
                             onclick: () => { btn.disabled = true; startSync(); } },
                 st.queued ? 'Waiting…' : st.running ? 'Syncing…' : 'Sync now');
-  const cancel = active && h('button', { class: 'btn danger',
+  const cancel = active && h('button', { class: 'btn danger', title: 'Stop the sync',
       onclick: () => { cancel.disabled = true; cancelSync(); } }, 'Cancel');
   const [output, follow] = jobOutput(st);
   setView('Sync', null, true,
@@ -1422,7 +1503,8 @@ async function viewJobs() {
   setView('Jobs', 'jobs', false, reviewActions(), h('div', { class: 'list' },
     jobs.map((j) => {
       const [text, cls] = jobStatus(j);
-      return h('a', { class: 'card', href: `#/jobs/${j.id}` },
+      return h('a', { class: 'card', href: `#/jobs/${j.id}`,
+                      title: 'Show the job and its output' },
         h('div', { class: 'row' },
           h('div', { class: 'grow name' }, j.title),
           h('span', { class: `chip ${cls}` }, text)),
@@ -1439,7 +1521,8 @@ async function viewJob(id) {
   const active = !st.finished;
   pollJobs(`#/jobs/${id}`, active);
   const [text, cls] = jobStatus(st);
-  const cancel = active && h('button', { class: 'btn danger', onclick: async () => {
+  const cancel = active && h('button', { class: 'btn danger', title: 'Stop this job',
+                                         onclick: async () => {
     cancel.disabled = true;
     await api(`jobs/${id}/cancel`, { method: 'POST' });
     route();

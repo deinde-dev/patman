@@ -327,6 +327,54 @@ class TestWebServer(unittest.TestCase, TestCommon):
                          [(t['name'], t['due']) for t in data])
         self.assertEqual(ser_id, data[0]['series_id'])
 
+    def test_version(self):
+        """The server gives the version of patman which it runs"""
+        with mock.patch.object(server.info, 'get_version',
+                               return_value='1.2.3 (v1.2.3-4-gabcdef0)'):
+            status, data = self.call(self.make_server(), 'GET', '/api/version')
+        self.assertEqual(200, status)
+        self.assertEqual({'version': '1.2.3 (v1.2.3-4-gabcdef0)'}, data)
+
+        with mock.patch.object(server.info, 'get_version', return_value=None):
+            _, data = self.call(self.make_server(), 'GET', '/api/version')
+        self.assertEqual({'version': None}, data)
+
+    def test_get_version(self):
+        """The version comes from a checkout, with its commit, or the package"""
+        top = os.path.join(self.tmpdir, 'checkout')
+        os.mkdir(top)
+        tools.write_file(os.path.join(top, 'pyproject.toml'),
+                         '[project]\nname = "patch-manager"\n'
+                         'version = "1.2.3"\n', binary=False)
+        self.assertEqual('1.2.3', server.info.get_version(top))
+
+        # In a git checkout at the release, the version alone; after it, the
+        # commit too
+        def git(*args):
+            subprocess.run(['git', *args], cwd=top, check=True,
+                           capture_output=True)
+        git('init', '-q')
+        git('add', '.')
+        git('commit', '-q', '-m', 'Release')
+        git('tag', 'v1.2.3')
+        self.assertEqual('1.2.3', server.info.get_version(top))
+        git('commit', '-q', '--allow-empty', '-m', 'More')
+        self.assertRegex(server.info.get_version(top),
+                         r'^1\.2\.3 \(v1\.2\.3-1-g[0-9a-f]+\)$')
+
+        # Another project's pyproject.toml is not patman's
+        other = os.path.join(self.tmpdir, 'other')
+        os.mkdir(other)
+        tools.write_file(os.path.join(other, 'pyproject.toml'),
+                         '[project]\nname = "other"\nversion = "9.9"\n',
+                         binary=False)
+        with mock.patch.object(server.info.metadata, 'version',
+                               return_value='0.4.0'):
+            self.assertEqual('0.4.0', server.info.get_version(other))
+        with mock.patch.object(server.info.metadata, 'version',
+                               side_effect=server.info.metadata.PackageNotFoundError):
+            self.assertIsNone(server.info.get_version(other))
+
     def test_comments(self):
         """Comments are read from patchwork and trimmed down"""
         srv = self.make_server()
