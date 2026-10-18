@@ -7,6 +7,7 @@
 import asyncio
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -22,6 +23,20 @@ from u_boot_pylib import tout
 from patman import cmdline
 from patman import control
 from patman import cseries
+
+
+def clear_git_env():
+    """Stop the tests' git commands from using the repo which runs the tests
+
+    Git sets variables such as GIT_DIR when it runs a hook or the command
+    given to 'git rebase --exec'. A git command run by a test would then act
+    on that repo rather than the test's own one, e.g. making commits in it.
+    Remove these variables, as git's documentation suggests for hooks.
+    """
+    res = subprocess.run(['git', 'rev-parse', '--local-env-vars'],
+                         capture_output=True, text=True, check=False)
+    for var in res.stdout.split():
+        os.environ.pop(var, None)
 
 
 def find_source_dir():

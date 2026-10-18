@@ -40,6 +40,7 @@ def run_patman():
         # pylint: disable=C0415
         from patman import func_test
         from patman import test_checkpatch
+        from patman import test_common
         from patman import test_cseries
         from patman import test_review
         from patman import test_send
@@ -47,6 +48,7 @@ def run_patman():
         from patman import test_settings
         from u_boot_pylib import test_command
 
+        test_common.clear_git_env()
         to_run = args.testname if args.testname not in [None, 'test'] else None
         result = test_util.run_test_suites(
             'patman', False, args.verbose, args.no_capture,
