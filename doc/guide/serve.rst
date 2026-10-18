@@ -72,9 +72,9 @@ folded, e.g. '11 quoted lines', and open when tapped:
    :alt: The review of patch 1, with its comments
 
 Each review has 'Show the patch', which shows the commit message and diff
-just below it, so that the two can be read together. 'View file' shows the
-whole of a changed file, and the buttons between the chunks show more of the
-lines around them:
+just below it, so that the two can be read together. 'View whole file' shows
+the whole of a changed file, and the buttons between the chunks show more of
+the lines around them:
 
 .. image:: images/serve-patch.png
    :width: 320px

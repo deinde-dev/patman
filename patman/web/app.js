@@ -602,7 +602,7 @@ function renderDiff(diff) {
         prev = null;
         out.push(h('span', { class: 'file' }, file.old || file.new
           ? [h('a', { class: 'view', href: fileHref(file, file.at),
-                      title: 'Show the whole file, with line numbers' }, 'View file'),
+                      title: 'Show the whole file, with line numbers' }, 'View whole file'),
              ' '] : null, line));
         return;
       }
