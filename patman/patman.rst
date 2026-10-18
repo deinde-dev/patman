@@ -53,6 +53,9 @@ conventions, and can be turned off for projects which do not use them.
 Where to start
 --------------
 
+A quick look
+    There is a short introduction, with a demo, at https://deinde.dev/patman/
+
 New to patman
     :doc:`The guide </guide/index>` shows how to use it, step by step, with a
     real U-Boot series: setting up, sending a first series, checking its
