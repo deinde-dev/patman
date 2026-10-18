@@ -27,6 +27,12 @@ files live in ``scripts/`` and ``u_boot_pylib`` is installed from PyPI as
 surrounding U-Boot source is needed. ``checkpatch.pl`` does need ``perl``
 to be installed.
 
+The tests which run ``checkpatch.pl`` use the copy in ``scripts/`` with the
+options in ``.checkpatch.conf``, wherever the suite is run from. Since
+neither is installed with patman, these tests are skipped when patman's
+sources are not present, e.g. when running ``patman test`` from an
+installed copy.
+
 Building the documentation
 --------------------------
 

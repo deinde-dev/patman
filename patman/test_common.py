@@ -5,6 +5,7 @@
 """Functional tests for checking that patman behaves correctly"""
 
 import asyncio
+import functools
 import os
 import re
 import shutil
@@ -21,6 +22,7 @@ from u_boot_pylib import terminal
 from u_boot_pylib import tools
 from u_boot_pylib import tout
 
+from patman import checkpatch
 from patman import cmdline
 from patman import control
 from patman import cseries
@@ -47,7 +49,8 @@ def find_source_dir():
 
     This is the directory above the patman package, or the current directory,
     e.g. when a packager runs the tests from the sources after installing
-    patman.
+    patman. A U-Boot tree has both files too, but not the patman package, so
+    is not used.
 
     Returns:
         str or None: Directory holding scripts/checkpatch.pl and
@@ -55,10 +58,58 @@ def find_source_dir():
     """
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     for path in (here, os.getcwd()):
-        if (os.path.isfile(os.path.join(path, 'scripts', 'checkpatch.pl')) and
-                os.path.isfile(os.path.join(path, '.checkpatch.conf'))):
+        if all(os.path.isfile(os.path.join(path, fname))
+               for fname in ('scripts/checkpatch.pl', '.checkpatch.conf',
+                             'patman/checkpatch.py')):
             return path
     return None
+
+
+def use_source_checkpatch(test):
+    """Run the checkpatch.pl kept with the sources, with their options
+
+    checkpatch.pl reads its options from .checkpatch.conf in the current
+    directory, else the home directory, and patman finds checkpatch.pl from
+    the current directory too, so what it reports depends on where the tests
+    are run. Use scripts/checkpatch.pl and run it from a temporary directory
+    holding a copy of .checkpatch.conf, so that the results are the same
+    wherever the tests run. Both are restored when the test finishes.
+
+    Skip the test if the sources are not here, e.g. when patman is
+    installed, since another checkpatch.pl may report different things.
+
+    Args:
+        test (unittest.TestCase): Test which runs checkpatch.pl
+    """
+    source = find_source_dir()
+    if not source:
+        test.skipTest("needs patman's sources, for scripts/checkpatch.pl and "
+                      '.checkpatch.conf')
+    tmpdir = tempfile.mkdtemp(prefix='patman-checkpatch.')
+    test.addCleanup(shutil.rmtree, tmpdir)
+    shutil.copy(os.path.join(source, '.checkpatch.conf'), tmpdir)
+
+    old_cwd = os.getcwd()
+    os.chdir(tmpdir)
+    test.addCleanup(os.chdir, old_cwd)
+
+    patcher = mock.patch.object(
+        checkpatch, 'find_check_patch',
+        return_value=os.path.join(source, 'scripts', 'checkpatch.pl'))
+    patcher.start()
+    test.addCleanup(patcher.stop)
+
+
+def needs_checkpatch(func):
+    """Decorator for a test which runs checkpatch.pl
+
+    See use_source_checkpatch()
+    """
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        use_source_checkpatch(self)
+        return func(self, *args, **kwargs)
+    return wrapper
 
 
 class TestCommon:
@@ -118,17 +169,8 @@ class TestCommon:
                   allow_colour=False)
         tout.stdout_is_tty = False
 
-        # Run from the source tree, if it is here, so that checkpatch.pl is
-        # the one kept with the sources and reads their .checkpatch.conf,
-        # whichever directory the tests are started from
-        self._old_cwd = os.getcwd()
-        source = find_source_dir()
-        if source:
-            os.chdir(source)
-
     def tearDown(self):
         """Delete the temporary dir"""
-        os.chdir(self._old_cwd)
         self._env.stop()
         if self.preserve_outdirs:
             print(f'Output dir: {self.tmpdir}')
