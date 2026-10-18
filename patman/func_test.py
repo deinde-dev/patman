@@ -60,7 +60,9 @@ class TestFunctional(unittest.TestCase, TestCommon):
     def setUp(self):
         TestCommon.setUp(self)
         self.repo = None
-        self._patman_pathname = os.path.realpath(sys.argv[0])
+        # Run this copy of patman, however the tests are started, e.g. by
+        # pytest
+        self._patman_cmd = [sys.executable, str(PATMAN_DIR / '__main__.py')]
 
     def tearDown(self):
         TestCommon.tearDown(self)
@@ -496,7 +498,7 @@ Changes in v2:
 
             # Finally, do the test
             with terminal.capture():
-                output = tools.run(self._patman_pathname, '--dry-run')
+                output = tools.run(*self._patman_cmd, '--dry-run')
                 # Assert the email address is part of the dry-run
                 # output.
                 self.assertIn('hello@there.com', output)
@@ -650,7 +652,7 @@ diff --git a/lib/efi_loader/efi_memory.c b/lib/efi_loader/efi_memory.c
         Return:
             CommandResult: Result of execution
         """
-        all_args = [self._patman_pathname] + list(args)
+        all_args = self._patman_cmd + list(args)
         return command.run_one(*all_args, capture=True, capture_stderr=True)
 
     def test_full_help(self):
