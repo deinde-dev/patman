@@ -31,6 +31,7 @@
    :maxdepth: 2
    :caption: Technical documentation
 
+   internals
    database
    serve-protocol
    review-internals
