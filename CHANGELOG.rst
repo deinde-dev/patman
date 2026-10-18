@@ -38,7 +38,8 @@ Added
   it all from a phone with ``patman serve``, and dealing with common
   problems.
 - The docs have a command reference generated from patman's options, a page
-  on how patch review works, and the contributing notes. The manual's
+  on how patch review works, a map of the source, and the contributing
+  notes. The manual's
   chapters link to each other and to the guide, and 'patman -H' shows the
   links as plain text.
 - ``patman status -C`` shows the comments on the cover letter, as
