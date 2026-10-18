@@ -910,7 +910,8 @@ def setup_parser():
         them as specified by tags you place in the commits. Use -n to do a dry
         run first.'''
 
-    parser = ErrorCatchingArgumentParser(epilog=epilog)
+    # Use the same name however patman is started, e.g. 'python -m patman'
+    parser = ErrorCatchingArgumentParser(prog='patman', epilog=epilog)
     parser.add_argument(
         '-D', '--debug', action='store_true',
         help='Enabling debugging (provides a full traceback on error)')
