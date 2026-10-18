@@ -17,6 +17,12 @@ Added
   with the commit when the server runs from a git checkout which is not at a
   release. ``GET /api/version`` gives it.
 
+Changed
+~~~~~~~
+- On the ``patman serve`` page, the button at the top of each file in a diff
+  is called 'View whole file', as is the link between its chunks which goes
+  to the same place, and looks like a button rather than part of the diff.
+
 Fixed
 ~~~~~
 - ``patman test`` gives the same results whichever directory it is run
