@@ -42,10 +42,14 @@ def run_patman():
         from patman import test_checkpatch
         from patman import test_common
         from patman import test_cseries
+        from patman import test_database
         from patman import test_review
         from patman import test_send
         from patman import test_server
         from patman import test_settings
+        from patman import test_status
+        from patman import test_upstream
+        from patman import test_workflow
         from u_boot_pylib import test_command
 
         test_common.clear_git_env()
@@ -55,10 +59,11 @@ def run_patman():
             args.test_preserve_dirs, None, to_run, None,
             [test_checkpatch.TestPatch, func_test.TestFunctional,
              'patman.settings', test_cseries.TestCseries,
-             test_cseries.TestGetUpstreamBranch, test_review.TestReview,
-             test_send.TestSend,
-             test_settings.TestSettings, test_server.TestWebServer,
-             test_command.TestRunInteractive])
+             test_cseries.TestGetUpstreamBranch, test_status.TestSeriesStatus,
+             test_upstream.TestUpstream, test_workflow.TestWorkflow,
+             test_database.TestDatabase, test_review.TestReview,
+             test_send.TestSend, test_settings.TestSettings,
+             test_server.TestWebServer, test_command.TestRunInteractive])
         sys.exit(0 if result.wasSuccessful() else 1)
 
     # Process commits, produce patches files, check them, email them
