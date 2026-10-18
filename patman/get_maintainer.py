@@ -19,9 +19,9 @@ def find_get_maintainer(script_file_name):
     It searches in PATH and falls back to a path relative to the top
     of the current git repository.
     """
-    get_maintainer = shutil.which(script_file_name)
-    if get_maintainer:
-        return get_maintainer
+    script = shutil.which(script_file_name)
+    if script:
+        return script
 
     git_relative_script = os.path.join(gitutil.get_top_level() or '',
                                        script_file_name)
@@ -48,19 +48,19 @@ def get_maintainer(script_file_name, fname, verbose=False):
     """
     # Expand `script_file_name` into a file name and its arguments, if
     # any.
-    get_maintainer = None
+    script = None
     arguments = None
     if script_file_name:
         cmd_args = shlex.split(script_file_name)
         file_name = cmd_args[0]
         arguments = cmd_args[1:]
 
-        get_maintainer = find_get_maintainer(file_name)
-    if not get_maintainer:
+        script = find_get_maintainer(file_name)
+    if not script:
         if verbose:
             print("WARNING: Couldn't find get_maintainer.pl")
         return []
 
-    stdout = command.output(get_maintainer, *arguments, fname)
+    stdout = command.output(script, *arguments, fname)
     lines = stdout.splitlines()
     return [x.replace('"', '') for x in lines]
