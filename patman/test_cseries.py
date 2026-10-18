@@ -6,6 +6,7 @@
 
 from datetime import datetime
 import os
+import sys
 import unittest
 from unittest import mock
 
@@ -2167,9 +2168,19 @@ class TestCseries(CseriesTester):
         # Use a hermetic get_maintainer stub backed by a fixture
         # MAINTAINERS file, so the maintainer Cc does not depend on
         # running inside a real U-Boot tree
-        get_maint = os.path.join(
+        stub = os.path.join(
             os.path.dirname(os.path.realpath(__file__)), 'test',
             'get_maintainer')
+
+        # Run it with this Python, since a build container may have no
+        # /usr/bin/env to find one
+        get_maint = os.path.join(self.tmpdir, 'get_maintainer')
+        tools.write_file(get_maint,
+                         f'#!{sys.executable}\n'
+                         'import runpy\n'
+                         f'runpy.run_path({stub!r}, run_name="__main__")\n',
+                         binary=False)
+        os.chmod(get_maint, 0o755)
         with terminal.capture() as (out, err):
             self.run_args('series', '-n', '-s', 'second3', 'send',
                           '--no-autolink', '--get-maintainer-script',
