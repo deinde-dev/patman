@@ -24,6 +24,7 @@ This package's modules are:
   app: the web server, with the page and its JSON API
   params: checking requests and turning them into patman arguments
   info: the information which the page shows, from the database
+  jobs: running the jobs which the server starts, one at a time
 
 Each module is imported here, so code outside the package can use, for
 example, server.app.is_loopback() after 'from patman import server'
@@ -31,5 +32,6 @@ example, server.app.is_loopback() after 'from patman import server'
 
 from patman.server import app
 from patman.server import info
+from patman.server import jobs
 from patman.server import params
 from patman.server.app import Server, serve

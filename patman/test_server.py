@@ -1025,7 +1025,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
         # A job is not resumed too often
         with open(fname, 'w', encoding='utf-8') as outf:
             json.dump([{'kind': 'review', 'title': 'Bad', 'cmds': [['false']],
-                        'resumed': server.app.MAX_RESUMES}], outf)
+                        'resumed': server.jobs.MAX_RESUMES}], outf)
         srv = self.make_server(jobs_fname=fname)
         with terminal.capture() as (_, err):
             self.run_jobs(srv, [])
