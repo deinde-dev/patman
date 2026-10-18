@@ -47,7 +47,8 @@ parser by ``doc/_ext/patman_cmdref.py``, so give each new command and option
 a help string. ``doc/guide/`` holds the step-by-step guide, with output from
 real series.
 
-The technical documentation is in ``doc/`` too. ``doc/database.rst``
+The technical documentation is in ``doc/`` too. ``doc/internals.rst`` is a
+map of the source and says how to add a command. ``doc/database.rst``
 describes the database schema; update it along with any schema migration.
 ``doc/serve-protocol.rst`` describes the JSON API provided by
 ``patman serve``; update it along with any change to the API.
