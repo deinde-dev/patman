@@ -22,6 +22,8 @@ DISP=:99
 W=1280
 H=720
 SESS=pdemo
+# Seconds between lines of 'patman send' output
+LINE_DELAY=0.1
 
 WORK=$(mktemp -d)
 cleanup() {
@@ -46,10 +48,24 @@ git remote remove local
 git checkout -q binj-us
 printf '[settings]\npatchwork_url: https://patchwork.ozlabs.org\n' > .patman
 
-# Run patman from this checkout, under its usual name
+# Run patman from this checkout, under its usual name. The output of
+# 'patman send' is longer than the screen, so show it a line at a time, so
+# that it can be read as it scrolls past. Run it under script(1), so that
+# it still sees a terminal and uses colour
 mkdir "$WORK/bin"
-printf '#!/bin/sh\nPYTHONPATH="%s" exec python3 -m patman "$@"\n' \
-	"$PATMAN_DIR" > "$WORK/bin/patman"
+cat > "$WORK/bin/patman" <<EOF
+#!/bin/bash
+export PYTHONPATH="$PATMAN_DIR"
+if [ "\$1" = send ] && [ -t 1 ]; then
+	script -qfec "python3 -m patman \$*" /dev/null |
+		while IFS= read -r line; do
+			printf '%s\n' "\$line"
+			sleep $LINE_DELAY
+		done
+	exit \${PIPESTATUS[0]}
+fi
+exec python3 -m patman "\$@"
+EOF
 chmod +x "$WORK/bin/patman"
 export PATH="$WORK/bin:$PATH"
 patman patchwork set-project U-Boot us >/dev/null
@@ -102,7 +118,7 @@ say "patman reads its settings from tags in the commits"
 run "git log -1 | tail -13" 3.5
 run "clear" 0.3
 say "Check the series and see who it goes to, without sending"
-run "patman send -n" 4
+run "patman send -n" 9
 run "clear" 0.3
 say "After review, see the new tags on patchwork"
 run "git checkout -q align-fix" 0.5
@@ -121,5 +137,5 @@ ffmpeg -loglevel error -y -i $RAW -c:v libvpx-vp9 -b:v 0 -crf 30 -row-mt 1 \
 	-pix_fmt yuv420p "$OUT"
 ffmpeg -loglevel error -y -i $RAW -c:v libx264 -crf 26 -preset slow \
 	-pix_fmt yuv420p -movflags +faststart "${OUT%.webm}.mp4"
-ffmpeg -loglevel error -y -ss 36 -i $RAW -frames:v 1 "${OUT%.webm}.png"
+ffmpeg -loglevel error -y -ss 41 -i $RAW -frames:v 1 "${OUT%.webm}.png"
 echo "Wrote $OUT, ${OUT%.webm}.mp4 and ${OUT%.webm}.png"
