@@ -12,21 +12,21 @@
 </head>
 <body>
 <header>
-  <button class="back" id="back" hidden aria-label="Back">&#8249;</button>
+  <button class="back" id="back" hidden aria-label="Back" title="Back">&#8249;</button>
   <h1 id="title">patman</h1>
-  <button id="sync" title="Sync status"><span class="dot"></span><span id="sync-text">sync</span></button>
+  <button id="sync" title="Show the sync with patchwork, to follow, start or cancel one"><span class="dot"></span><span id="sync-text">sync</span></button>
 </header>
 <main id="main"><div class="spinner">Loading…</div></main>
 <nav>
-  <a href="#/series" data-tab="series">
+  <a href="#/series" data-tab="series" title="Your series and their state on patchwork">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Series</a>
-  <a href="#/reviews" data-tab="reviews">
+  <a href="#/reviews" data-tab="reviews" title="Your reviews of other people's series">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Reviews</a>
-  <a href="#/inbox" data-tab="inbox">
+  <a href="#/inbox" data-tab="inbox" title="Recent series on patchwork, to review">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>Inbox</a>
-  <a href="#/jobs" data-tab="jobs">
+  <a href="#/jobs" data-tab="jobs" title="Reviews and other commands started from the page, and the syncs">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></svg>Jobs</a>
-  <a href="#/todo" data-tab="todo">
+  <a href="#/todo" data-tab="todo" title="Series marked with 'patman workflow todo'">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg>Todo</a>
 </nav>
 <script src="static/app.js"></script>

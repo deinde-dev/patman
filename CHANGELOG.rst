@@ -8,6 +8,12 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+Added
+~~~~~
+- The buttons, links and tabs on the ``patman serve`` page have tooltips
+  saying what they do, shown when hovering over them or, on a phone, with a
+  long press. A button which needs a second tap says so.
+
 Fixed
 ~~~~~
 - ``patman test`` gives the same results whichever directory it is run
