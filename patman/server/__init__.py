@@ -22,10 +22,12 @@ Jobs (syncs and reviews) run one at a time, in the order they are started.
 This package's modules are:
 
   app: the web server, with the page and its JSON API
+  params: checking requests and turning them into patman arguments
 
 Each module is imported here, so code outside the package can use, for
 example, server.app.is_loopback() after 'from patman import server'
 """
 
 from patman.server import app
+from patman.server import params
 from patman.server.app import Server, serve

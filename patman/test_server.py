@@ -608,7 +608,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
     def test_parse_review_req(self):
         """Review requests are turned into 'patman review' arguments"""
         ups = ['us', 'ci']
-        parse = server.app.parse_review_req
+        parse = server.params.parse_review_req
         self.assertEqual((['-s', '123'], 'Review series 123'),
                          parse({'target': ' 123 '}, ups))
         self.assertEqual(

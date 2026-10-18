@@ -2,22 +2,9 @@
 #
 # Copyright 2026 Simon Glass <sjg@chromium.org>
 #
-"""Serve series status and reviews over HTTP for viewing on a phone
+"""The web server, which gives the page and its JSON API
 
-'patman serve' runs a small web server in the git tree. It provides a JSON
-API over the patman database plus a mobile-friendly page which uses it.
-Comments on patches and cover letters are not stored in the database, so
-these are read live from patchwork when asked for.
-
-The server can optionally keep the database up to date by running
-'patman series gather-all -G' (and optionally 'patman review --sync')
-periodically in a child process. The -G flag matters: without it,
-gather-all writes review tags into the local branches, which must never
-happen behind the user's back.
-
-The JSON API is described in doc/serve-protocol.rst
-
-Jobs (syncs and reviews) run one at a time, in the order they are started.
+The API is described in doc/serve-protocol.rst
 """
 
 import asyncio
@@ -40,6 +27,7 @@ from u_boot_pylib import tout
 from patman import database
 from patman import review as review_mod
 from patman.patchwork import Patchwork
+from patman.server import params
 from patman.workflow import Wtype
 
 # Directory holding the web page and its assets
@@ -74,10 +62,6 @@ def _state_counts(pcommits):
             value (int): number of patches in that state
     """
     return dict(Counter(pcm.state or 'unknown' for pcm in pcommits))
-
-
-class BadRequest(ValueError):
-    """A request is not valid, e.g. a missing field or a bad value"""
 
 
 class JobBusyError(Exception):
@@ -196,7 +180,7 @@ async def read_blob(topdir, hashes):
     """
     for oid in hashes:
         if not RE_BLOB.match(oid):
-            raise BadRequest(f"Invalid blob hash '{oid}'")
+            raise params.BadRequest(f"Invalid blob hash '{oid}'")
         proc = await asyncio.create_subprocess_exec(
             'git', 'cat-file', 'blob', oid, cwd=topdir,
             stdout=asyncio.subprocess.PIPE,
@@ -483,127 +467,8 @@ def get_todo_list(cser):
     return out
 
 
-# Patch selection for 'review -i', e.g. '3' or '1,3-5'
-RE_INDEX = re.compile(r'^\d+(-\d+)?(,\d+(-\d+)?)*$')
-
 # Tag given in a review which approves the patch
 RE_REVIEWED_BY = re.compile(r'^Reviewed-by:', re.MULTILINE)
-
-# Patchwork series or patch in a URL, e.g. '.../series/123/', '?series=123'
-RE_SERIES_URL = re.compile(r'series[=/](\d+)')
-RE_PATCH_URL = re.compile(r'/patch/(\d+)')
-
-
-def _get_int(data, key):
-    """Get an optional positive integer from a request
-
-    Args:
-        data (dict): Request data
-        key (str): Key to read
-
-    Return:
-        int or None: Value, or None if missing
-
-    Raises:
-        ValueError: The value is not a positive integer
-    """
-    val = data.get(key)
-    if val in (None, ''):
-        return None
-    if isinstance(val, bool) or not str(val).isdigit() or not int(val):
-        raise BadRequest(f"Invalid {key} '{val}'")
-    return int(val)
-
-
-def _parts_text(seqs):
-    """Describe which parts of a review a job acts on
-
-    Args:
-        seqs (list of int): Patches (0 for the cover letter), or empty for all
-
-    Return:
-        str: Description, e.g. 'patch 2', 'the cover letter' or 'reviews'
-    """
-    if len(seqs) != 1:
-        return 'reviews'
-    return f'patch {seqs[0]}' if seqs[0] else 'the cover letter'
-
-
-def parse_review_req(data, upstreams):
-    """Work out the 'patman review' arguments for a review request
-
-    The request is a dict with these keys, all optional except that one of
-    'target' and 'title' is needed:
-        target (str): Patchwork series ID, or the URL of a series or patch
-        title (str): Search for a series by its cover-letter title
-        version (int): Version to review, with 'title'
-        patch (int): Patchwork patch ID, to review just that patch
-        whole (bool): With a patch, review its whole series
-        index (str): Review only these patches, e.g. '1,3-5'
-        ups (str): Upstream whose patchwork server to use
-        drafts (bool): Create Gmail drafts for the reviews
-        force (bool): Review again, even if already reviewed
-
-    Args:
-        data (dict): Request
-        upstreams (list of str): Names of the known upstreams
-
-    Return:
-        tuple:
-            list of str: Arguments for 'patman review'
-            str: Description of the review, for display
-
-    Raises:
-        ValueError: The request is not valid
-    """
-    target = str(data.get('target') or '').strip()
-    title = str(data.get('title') or '').strip()
-    patch = _get_int(data, 'patch')
-    args = []
-    if target:
-        mpatch = RE_PATCH_URL.search(target)
-        mseries = RE_SERIES_URL.search(target)
-        if target.isdigit():
-            args += ['-s', target]
-            desc = f'series {target}'
-        elif mpatch:
-            patch = int(mpatch.group(1))
-        elif mseries:
-            args += ['-s', mseries.group(1)]
-            desc = f'series {mseries.group(1)}'
-        else:
-            raise BadRequest(f"Cannot find a series or patch in '{target}'")
-    if patch:
-        args += ['-p', str(patch)]
-        desc = f'patch {patch}'
-        if data.get('whole'):
-            args.append('-w')
-            desc = f'series of patch {patch}'
-    if title:
-        args += ['-S', title]
-        desc = f"'{title}'"
-        version = _get_int(data, 'version')
-        if version:
-            args += ['-V', str(version)]
-    if not args:
-        raise BadRequest('Please give a series, patch or title to review')
-    if len([1 for opt in ('-s', '-p', '-S') if opt in args]) != 1:
-        raise BadRequest('Please give only one of a series, patch or title')
-    index = str(data.get('index') or '').replace(' ', '')
-    if index:
-        if not RE_INDEX.match(index):
-            raise BadRequest(f"Invalid patch selection '{index}'")
-        args += ['-i', index]
-    ups = data.get('ups')
-    if ups:
-        if ups not in upstreams:
-            raise BadRequest(f"Unknown upstream '{ups}'")
-        args += ['-U', ups]
-    if data.get('drafts'):
-        args.append('-d')
-    if data.get('force'):
-        args.append('-f')
-    return args, f'Review {desc}'
 
 
 class Job:
@@ -1135,7 +1000,7 @@ class Server:
             return await handler(request)
         except JobBusyError as exc:
             return web.json_response({'error': str(exc)}, status=409)
-        except BadRequest as exc:
+        except params.BadRequest as exc:
             return web.json_response({'error': str(exc)}, status=400)
         except ValueError as exc:
             return web.json_response({'error': str(exc)}, status=404)
@@ -1274,7 +1139,7 @@ class Server:
 
     async def _inbox(self, request):
         ups = request.query.get('ups') or self.cser.db.upstream_get_default()
-        page = _get_int(request.query, 'page') or 1
+        page = params.get_int(request.query, 'page') or 1
         proj = self.cser.project_get(ups)
         if not proj:
             raise ValueError(f"No patchwork project for upstream '{ups}'")
@@ -1312,9 +1177,9 @@ class Server:
         try:
             data = await request.json()
         except ValueError as exc:
-            raise BadRequest('Invalid JSON in request') from exc
+            raise params.BadRequest('Invalid JSON in request') from exc
         if not isinstance(data, dict):
-            raise BadRequest('Request must be a JSON object')
+            raise params.BadRequest('Request must be a JSON object')
         return data
 
     def _review_job(self, title, *args, target=None):
@@ -1376,7 +1241,7 @@ class Server:
 
     async def _review_post(self, request):
         data = await self._read_json(request)
-        args, title = parse_review_req(
+        args, title = params.parse_review_req(
             data, list(self.cser.db.upstream_get_dict()))
         return self._review_job(title, *args)
 
@@ -1388,7 +1253,7 @@ class Server:
     async def _redraft(self, request):
         idnum = int(request.match_info['idnum'])
         data = await self._read_json(request)
-        return self._redraft_job(idnum, _get_int(data, 'version'),
+        return self._redraft_job(idnum, params.get_int(data, 'version'),
                                  data.get('seqs') or [])
 
     def _series_review_args(self, idnum, version, seqs, *action):
@@ -1413,7 +1278,7 @@ class Server:
         """
         if not isinstance(seqs, list) or not all(
                 isinstance(seq, int) and seq >= 0 for seq in seqs):
-            raise BadRequest('Invalid seqs')
+            raise params.BadRequest('Invalid seqs')
         name, desc, ups = self.rcser.db.series_get_info(idnum)
         version = version or self.rcser.db.series_get_max_version(idnum)
         link = self.rcser.db.ser_ver_get_link(idnum, version)
@@ -1463,29 +1328,29 @@ class Server:
         data = await self._read_json(request)
         seqs = data.get('seqs') or []
         args, what, target = self._series_review_args(
-            idnum, _get_int(data, 'version'), seqs, '--send')
-        return self._review_job(f'Send {_parts_text(seqs)} of {what}', *args,
-                                target=target)
+            idnum, params.get_int(data, 'version'), seqs, '--send')
+        return self._review_job(f'Send {params.parts_text(seqs)} of {what}',
+                                *args, target=target)
 
     async def _revise(self, request):
         idnum = int(request.match_info['idnum'])
         data = await self._read_json(request)
         note = data.get('note')
         if not isinstance(note, str) or not note.strip():
-            raise BadRequest('Please say what to change')
+            raise params.BadRequest('Please say what to change')
         note = note.strip()
         part = data.get('part')
         if part:
             if not isinstance(part, str):
-                raise BadRequest('Invalid part')
+                raise params.BadRequest('Invalid part')
             note = f'About this part of the review:\n\n{part.strip()}' \
                    f'\n\n{note}'
         seqs = data.get('seqs') or []
         args, what, target = self._series_review_args(
-            idnum, _get_int(data, 'version'), seqs, '--revise', note)
+            idnum, params.get_int(data, 'version'), seqs, '--revise', note)
         if data.get('drafts'):
             args.append('-d')
-        return self._review_job(f'Revise {_parts_text(seqs)} of {what}',
+        return self._review_job(f'Revise {params.parts_text(seqs)} of {what}',
                                 *args, target=target)
 
     async def _review_item(self, request):
@@ -1497,7 +1362,7 @@ class Server:
                 {'error': 'This review has already been sent'}, status=409)
         body = data.get('body', rev.body)
         if not isinstance(body, str) or not body.strip():
-            raise BadRequest('The review cannot be empty')
+            raise params.BadRequest('The review cannot be empty')
         svr = db.ser_ver_get_by_id(rev.svid)
         self.check_free(svr.series_id, svr.version, [rev.seq], [rev.seq])
         # Unless told otherwise, the review approves if it gives the tag
@@ -1520,7 +1385,7 @@ class Server:
         if 'response' in data:
             response = data['response']
             if not isinstance(response, str):
-                raise BadRequest('Invalid response')
+                raise params.BadRequest('Invalid response')
             db.reply_set_response(
                 reply.idnum, response if response.strip() else None,
                 database.REPLY_SUGGESTED if response.strip() else
@@ -1545,7 +1410,7 @@ class Server:
             return web.json_response(
                 {'error': 'The response has already been sent'}, status=409)
         if not (reply.response or '').strip():
-            raise BadRequest('There is no response to send')
+            raise params.BadRequest('There is no response to send')
         return self._review_job(f'Send the response to reply {reply.idnum}',
                                 '--send-reply', str(reply.idnum))
 
