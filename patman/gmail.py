@@ -13,7 +13,6 @@ sessions.
 """
 
 import base64
-from collections import namedtuple
 import os
 import re
 from email.header import Header, decode_header
@@ -21,11 +20,6 @@ from email.mime.text import MIMEText
 from email.utils import formataddr, getaddresses
 
 from u_boot_pylib import tout
-
-# Common parameters for draft creation
-DraftParams = namedtuple('DraftParams',
-                         'service fallback_addr list_email '
-                         'dry_run sender cover_msgid')
 
 # Config paths - use patman.d to avoid conflict with existing ~/.config/patman
 CONFIG_DIR = os.path.expanduser('~/.config/patman.d')
@@ -457,42 +451,128 @@ def _get_msgid(patch_data, hdrs):
             hdrs.get('Message-ID'))
 
 
-def _make_draft(params, patch_data, body, hdrs, refs=None):
-    """Create a Gmail draft for a review reply
+def _envelope(patch_data, hdrs, fallback_addr, list_email, refs=None):
+    """Work out the headers for a review sent as a reply to a patch
 
     Args:
-        params (DraftParams): Common draft parameters
         patch_data (dict): Patch or cover letter data from patchwork
-        body (str): Review email body
-        hdrs (dict): Email headers
+        hdrs (dict): Email headers of the patch or cover letter
+        fallback_addr (str): Address to reply to if there is no Reply-To
+        list_email (str or None): Mailing list email address
         refs (str or None): References header value. If None, uses
             the Message-ID as the reference (for cover letters).
 
     Returns:
-        str or None: Gmail draft ID, or None for dry run
+        dict: Headers for the reply:
+            subject (str): Subject
+            in_reply_to (str or None): Message-ID of the patch
+            references (str or None): References
+            to (str): To addresses
+            cc (str): Cc addresses
     """
     subject = _decode_hdr(hdrs.get('Subject', patch_data.get('name', '')))
     if not subject.startswith('Re: '):
         subject = f"Re: {subject}"
     msgid = _get_msgid(patch_data, hdrs)
-    if refs is None:
-        refs = msgid
-    to_addr = _format_addrs([hdrs.get('Reply-To') or params.fallback_addr])
-    cc = _build_cc(hdrs, params.list_email)
-    if params.dry_run:
-        tout.notice(f"Would create draft: {subject}")
-        tout.notice(f"  To: {to_addr}, Cc: {cc}")
-        return None
-    draft = create_draft(params.service, to_addr, subject,
-                         body, in_reply_to=msgid,
-                         references=refs, cc=cc,
-                         sender=params.sender)
-    tout.notice(f"Created draft: {subject}")
-    return draft['id']
+    return {
+        'subject': subject,
+        'in_reply_to': msgid,
+        'references': msgid if refs is None else refs,
+        'to': _format_addrs([hdrs.get('Reply-To') or fallback_addr]),
+        'cc': _build_cc(hdrs, list_email),
+    }
+
+
+def review_envelopes(series_data, patch_headers, indexes):
+    """Work out the headers for reviews sent as replies to their patches
+
+    Each review is threaded as a reply to the patch (or cover letter) it is
+    about, and goes to its sender, the people it was sent to and the
+    mailing list. The result can be stored, so that the review can be
+    drafted again without asking patchwork for the patch's headers.
+
+    Args:
+        series_data (dict): Series data from patchwork get_series(),
+            containing 'patches', 'cover_letter', 'submitter', 'project'
+        patch_headers (dict): Map of patch index to headers dict from
+            patchwork get_patch(); 0 is the cover letter
+        indexes (iterable of int): Patch indexes to work out headers for,
+            with 0 for the cover letter and 1..N for the patches
+
+    Returns:
+        dict: Map of patch index to the headers, see _envelope()
+    """
+    fallback_addr = series_data.get('submitter', {}).get('email', '')
+    list_email = series_data.get('project', {}).get('list_email')
+    cover = series_data.get('cover_letter')
+    patches = series_data.get('patches', [])
+    cover_msgid = (_get_msgid(cover, patch_headers.get(0, {})) if cover
+                   else None)
+    wanted = set(indexes)
+
+    envelopes = {}
+    if cover and 0 in wanted:
+        envelopes[0] = _envelope(cover, patch_headers.get(0, {}),
+                                 fallback_addr, list_email)
+    for i, patch in enumerate(patches):
+        idx = i + 1
+        if idx not in wanted:
+            continue
+        hdrs = patch_headers.get(idx, {})
+        msgid = _get_msgid(patch, hdrs)
+        refs = f'{cover_msgid} {msgid}' if cover_msgid else msgid
+        envelopes[idx] = _envelope(patch, hdrs, fallback_addr, list_email,
+                                   refs)
+    return envelopes
+
+
+def create_drafts_from_envelopes(envelopes, review_bodies, dry_run=False,
+                                 account=None, sender=None):
+    """Create Gmail drafts of reviews, given the headers for each
+
+    Args:
+        envelopes (dict): Map of patch index to the headers, see
+            review_envelopes()
+        review_bodies (dict): Map of patch index to review body text
+        dry_run (bool): If True, print what would be created
+            without calling the API
+        account (str or None): Gmail account email to use
+        sender (str or None): Reviewer identity, e.g.
+            'Name <email>'. If this differs from the Gmail
+            account, it is set as the From header.
+
+    Returns:
+        dict: Map of patch index to Gmail draft ID (empty for
+            dry run)
+    """
+    service = None
+    if not dry_run:
+        if not check_available():
+            return {}
+        service = get_service(account)
+
+    draft_ids = {}
+    for idx in sorted(envelopes):
+        if idx not in review_bodies:
+            continue
+        env = envelopes[idx]
+        if dry_run:
+            tout.notice(f"Would create draft: {env['subject']}")
+            tout.notice(f"  To: {env['to']}, Cc: {env['cc']}")
+            continue
+        draft = create_draft(service, env['to'], env['subject'],
+                             review_bodies[idx],
+                             in_reply_to=env['in_reply_to'],
+                             references=env['references'], cc=env['cc'],
+                             sender=sender)
+        tout.notice(f"Created draft: {env['subject']}")
+        draft_ids[idx] = draft['id']
+    return draft_ids
 
 
 def create_review_drafts(series_data, review_bodies, patch_headers=None,
-                         dry_run=False, account=None, sender=None):
+                         dry_run=False, account=None, sender=None,
+                         envelopes=None):
     """Create Gmail drafts for a reviewed series
 
     Creates one draft per patch (and optionally the cover letter),
@@ -512,72 +592,19 @@ def create_review_drafts(series_data, review_bodies, patch_headers=None,
         sender (str or None): Reviewer identity, e.g.
             'Name <email>'. If this differs from the Gmail
             account, it is set as the From header.
+        envelopes (dict or None): If given, this is updated with the
+            headers for each review, see review_envelopes(), so that they
+            can be stored
 
     Returns:
         dict: Map of patch index to Gmail draft ID (empty for
             dry run)
     """
-    if patch_headers is None:
-        patch_headers = {}
-    submitter = series_data.get('submitter', {})
-    fallback_addr = submitter.get('email', '')
-    project = series_data.get('project', {})
-    list_email = project.get('list_email')
-    cover = series_data.get('cover_letter')
-    patches = series_data.get('patches', [])
-
-    cover_hdrs = patch_headers.get(0, {})
-    cover_msgid = _get_msgid(cover, cover_hdrs) if cover else None
-
-    service = None
-    if not dry_run:
-        if not check_available():
-            return {}
-        service = get_service(account)
-
-    params = DraftParams(service, fallback_addr, list_email,
-                         dry_run, sender, cover_msgid)
-
-    return _make_all_drafts(params, cover, patches,
-                            review_bodies, patch_headers)
-
-
-def _make_all_drafts(params, cover, patches, review_bodies,
-                     patch_headers):
-    """Create drafts for the cover letter and each patch
-
-    Args:
-        params (DraftParams): Common draft parameters
-        cover (dict or None): Cover letter data from patchwork
-        patches (list of dict): Patch data from patchwork
-        review_bodies (dict): Map of index to review body text
-        patch_headers (dict): Map of index to email headers
-
-    Returns:
-        dict: Map of patch index to Gmail draft ID
-    """
-    draft_ids = {}
-
-    if cover and 0 in review_bodies:
-        hdrs = patch_headers.get(0, {})
-        did = _make_draft(params, cover, review_bodies[0],
-                          hdrs)
-        if did:
-            draft_ids[0] = did
-
-    for i, patch in enumerate(patches):
-        idx = i + 1
-        if idx not in review_bodies:
-            continue
-        hdrs = patch_headers.get(idx, {})
-        msgid = _get_msgid(patch, hdrs)
-        refs = (f'{params.cover_msgid} {msgid}'
-                if params.cover_msgid else msgid)
-        did = _make_draft(params, patch, review_bodies[idx], hdrs, refs)
-        if did:
-            draft_ids[idx] = did
-
-    return draft_ids
+    envs = review_envelopes(series_data, patch_headers or {}, review_bodies)
+    if envelopes is not None:
+        envelopes.update(envs)
+    return create_drafts_from_envelopes(envs, review_bodies, dry_run,
+                                        account, sender)
 
 
 def fetch_thread_replies(service, thread_id, after_msg_id):
