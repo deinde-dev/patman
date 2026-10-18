@@ -8,6 +8,9 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+0.4.0 - 2026-10-18
+------------------
+
 Added
 ~~~~~
 - ``patman status`` and ``patman series gather`` add a review tag given in
