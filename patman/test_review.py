@@ -145,7 +145,6 @@ class TestReview(CseriesTester):
 
     def test_scan_review_stats(self):
         """_review_stats counts patches, comments and approvals per series"""
-        from patman import database
         cser = self.get_database()
         sid = cser.db.series_add('vid', 'My series')
         cser.db.series_set_source(sid, 'review')
@@ -501,12 +500,11 @@ class TestReview(CseriesTester):
 
     def test_review_drafts_fetch_cover_headers(self):
         """Drafts fetch the cover's headers so its reply is a reply-all"""
-        from unittest.mock import AsyncMock
 
         pwork = mock.Mock()
-        pwork.get_cover = AsyncMock(
+        pwork.get_cover = mock.AsyncMock(
             return_value={'headers': {'To': 'list@x', 'Cc': 'maint@x'}})
-        pwork.get_patch = AsyncMock(
+        pwork.get_patch = mock.AsyncMock(
             return_value={'headers': {'Message-Id': '<1@x>'}})
         ctx = types.SimpleNamespace(
             pwork=pwork, cser=mock.Mock(), branch_name='b', series_id=1,
@@ -534,26 +532,25 @@ class TestReview(CseriesTester):
 
     def test_review_search_series_version(self):
         """Test -V selects a specific version when searching by title"""
-        from patman import review as review_mod
         pwork = self._review_pwork()
 
         with terminal.capture():
             # Default picks the most recent (v2)
             self.assertEqual(
                 str(self.REVIEW_LINK_V2),
-                review_mod.lookup.search_series(pwork, self.REVIEW_NAME))
+                review.lookup.search_series(pwork, self.REVIEW_NAME))
             # -V selects the requested version
             self.assertEqual(
                 str(self.REVIEW_LINK),
-                review_mod.lookup.search_series(pwork, self.REVIEW_NAME, 1))
+                review.lookup.search_series(pwork, self.REVIEW_NAME, 1))
             self.assertEqual(
                 str(self.REVIEW_LINK_V2),
-                review_mod.lookup.search_series(pwork, self.REVIEW_NAME, 2))
+                review.lookup.search_series(pwork, self.REVIEW_NAME, 2))
 
         # An unavailable version errors, listing what is available
         with terminal.capture():
             with self.assertRaises(ValueError) as cm:
-                review_mod.lookup.search_series(pwork, self.REVIEW_NAME, 5)
+                review.lookup.search_series(pwork, self.REVIEW_NAME, 5)
         self.assertIn('available', str(cm.exception))
         self.assertIn('v1', str(cm.exception))
 
@@ -1770,14 +1767,14 @@ VERDICT: approved"""
         ctx = self._make_review_ctx(author_name='Marek Vasut',
             author_email='marex@denx.de', date='2026-03-21',
             diffstat=' drivers/pci.c | 2 +-\n 1 file changed')
-        email = format_review_email(ctx, greeting, verdict, comments,
+        reply = format_review_email(ctx, greeting, verdict, comments,
             commit_message='pci: Fix the return type\n\nThe return is wrong.')
-        self.assertNotIn('Hi Marek,', email)
-        self.assertIn('On 2026-03-21, Marek Vasut', email)
-        self.assertIn('> pci: Fix the return type', email)
-        self.assertIn('> The return is wrong.', email)
-        self.assertIn('>  drivers/pci.c', email)
-        self.assertIn('Reviewed-by: Test <test@test.com>', email)
+        self.assertNotIn('Hi Marek,', reply)
+        self.assertIn('On 2026-03-21, Marek Vasut', reply)
+        self.assertIn('> pci: Fix the return type', reply)
+        self.assertIn('> The return is wrong.', reply)
+        self.assertIn('>  drivers/pci.c', reply)
+        self.assertIn('Reviewed-by: Test <test@test.com>', reply)
 
     def test_review_parse_skip(self):
         """Test parsing a skipped review (e.g. cover letter with no issues)"""
@@ -1792,7 +1789,6 @@ VERDICT: skip"""
 
     def test_review_empty_dropped(self):
         """Test a non-approval with no comments yields no review"""
-        from patman import review as review_mod
 
         ctx = self._make_review_ctx(author_name='Quentin',
             author_email='qstrydom0@gmail.com', date='2026-06-19')
@@ -1806,17 +1802,17 @@ VERDICT: skip"""
             return True, 'GREETING: Quentin\n'
 
         loop = asyncio.new_event_loop()
-        with mock.patch.object(review_mod.core.claude_mod, 'run_agent_collect',
+        with mock.patch.object(review.core.claude_mod, 'run_agent_collect',
                                side_effect=mock_agent), \
              mock.patch.object(review.common, 'ClaudeAgentOptions',
                                mock.MagicMock()), \
-             mock.patch.object(review_mod.prompts, 'build_review_prompt',
+             mock.patch.object(review.prompts, 'build_review_prompt',
                                return_value='prompt'), \
-             mock.patch.object(review_mod.core.gitutil, 'diff_stat',
+             mock.patch.object(review.core.gitutil, 'diff_stat',
                                return_value=''), \
              terminal.capture():
             result = loop.run_until_complete(
-                review_mod.core._review_single_patch(
+                review.core._review_single_patch(
                     ctx, cmt, 1, [(1, 'abc1234', 'spl: pad')]))
         loop.close()
         self.assertIsNone(result)
@@ -2083,19 +2079,17 @@ VERDICT: skip"""
 
     def test_run_coverity_unavailable(self):
         """Test --coverity is skipped cleanly when the tools are missing"""
-        from patman import review as review_mod
         ctx = self._make_review_ctx()
         args = types.SimpleNamespace(coverity_defconfig=None)
         with mock.patch('patman.coverity.check_available',
                         return_value=False):
             with terminal.capture() as (out, err):
-                result = review_mod.core._run_coverity(ctx, args)
+                result = review.core._run_coverity(ctx, args)
         self.assertIsNone(result)
         self.assertIn('skipping --coverity', err.getvalue())
 
     def test_run_coverity_reports_new(self):
         """Test _run_coverity returns a summary of the new defects only"""
-        from patman import review as review_mod
         ctx = self._make_review_ctx()
         ctx.main_repo = self.tmpdir
         ctx.repo_path = self.tmpdir
@@ -2116,28 +2110,26 @@ VERDICT: skip"""
                 mock.patch('patman.review.core.subprocess.run'), \
                 mock.patch('patman.review.core.gitutil.remove_worktree'):
             with terminal.capture():
-                text = review_mod.core._run_coverity(ctx, args)
+                text = review.core._run_coverity(ctx, args)
         self.assertIn('RESOURCE_LEAK', text)
         self.assertIn('drivers/foo.c:42', text)
         self.assertNotIn('mergeKey', text)
 
     def test_review_prompt_coverity(self):
         """Test new Coverity defects are placed in the review prompt"""
-        from patman import review as review_mod
         ctx = self._make_review_ctx()
         ctx.comments_path = None
         ctx.spelling = 'British'
         ctx.coverity_text = '- RESOURCE_LEAK: drivers/foo.c:42: Handle leaked'
         with mock.patch.object(
-                review_mod.voice, 'get_voice', return_value=None):
-            prompt = review_mod.prompts.build_review_prompt(
+                review.voice, 'get_voice', return_value=None):
+            prompt = review.prompts.build_review_prompt(
                 ctx, 'abc1234', 1, [(1, 'abc1234', 'subj')], None)
         self.assertIn('COVERITY', prompt)
         self.assertIn('drivers/foo.c:42', prompt)
 
     def test_review_aligns_by_subject(self):
         """Test reviews attach to the patchwork patch by subject, not order"""
-        from patman import review as review_mod
         from patman.review.common import ReviewContext
 
         ctx = ReviewContext(None, None, {'patches': [
@@ -2164,16 +2156,16 @@ VERDICT: skip"""
             return f'review-{cmt.subject}'
 
         loop = asyncio.new_event_loop()
-        with mock.patch.object(review_mod.core.claude_mod, 'check_available',
+        with mock.patch.object(review.core.claude_mod, 'check_available',
                                return_value=True), \
-                mock.patch.object(review_mod.core.patchstream,
+                mock.patch.object(review.core.patchstream,
                                   'get_metadata_for_list',
                                   return_value=series), \
-                mock.patch.object(review_mod.core, '_review_single_patch',
+                mock.patch.object(review.core, '_review_single_patch',
                                   side_effect=fake_single), \
                 terminal.capture():
             bodies = loop.run_until_complete(
-                review_mod.core.review_patches(ctx))
+                review.core.review_patches(ctx))
         loop.close()
         # beta is patchwork patch 2 and gamma is 3 -- not 1 and 2
         self.assertEqual({2: 'review-beta', 3: 'review-gamma'}, bodies)
@@ -2189,7 +2181,6 @@ VERDICT: skip"""
 
     def test_series_review_stores(self):
         """Test 'series review' stores the findings in the database"""
-        from patman import review as review_mod
         cser = self.get_cser()
         sid = cser.db.series_add('foo', 'foo')
         cser.db.ser_ver_add(sid, 1)
@@ -2209,16 +2200,16 @@ VERDICT: skip"""
              [('> diff --git a/x b/x\n> @@ -1 +1 @@', 'Fix this.')], 'm'),
             ('', 'approved', [], 'm')]
 
-        with mock.patch.object(review_mod.core.claude_mod, 'check_available',
+        with mock.patch.object(review.core.claude_mod, 'check_available',
                                return_value=True), \
-                mock.patch.object(review_mod.core.gitutil, 'get_top_level',
+                mock.patch.object(review.core.gitutil, 'get_top_level',
                                   return_value=self.tmpdir), \
-                mock.patch.object(review_mod.core, '_run_cover_review_sync',
+                mock.patch.object(review.core, '_run_cover_review_sync',
                                   return_value=cover), \
-                mock.patch.object(review_mod.core, '_run_patch_review_sync',
+                mock.patch.object(review.core, '_run_patch_review_sync',
                                   side_effect=results), \
                 terminal.capture():
-            review_mod.core.review_series(cser, sid, svid, 1, 'foo', series)
+            review.core.review_series(cser, sid, svid, 1, 'foo', series)
 
         stored = {r.seq: r for r in cser.db.review_get_for_version(svid)}
         self.assertEqual(3, len(stored))
@@ -2285,12 +2276,12 @@ VERDICT: skip"""
 
         # The fix applies within a full email: prose is cleaned, the quoted
         # commit-message line keeps its double quotes
-        email = ('> +\tkeyfile = "some_key";\n\n'
+        reply = ('> +\tkeyfile = "some_key";\n\n'
                  'Please quote "some_key" consistently')
         self.assertEqual(
             '> +\tkeyfile = "some_key";\n\n'
             "Please quote 'some_key' consistently",
-            cleanup_review_text(email))
+            cleanup_review_text(reply))
 
     def test_review_greeting_fallback(self):
         """Test greeting falls back to email when name is empty"""
@@ -2300,22 +2291,20 @@ VERDICT: skip"""
         ctx = self._make_review_ctx(author_name='Simon Glass',
             author_email='simon.glass@xxx.com', date='2026-04-01',
             signoff='Regards,\nTest')
-        email = format_review_email(ctx, '', 'changes_needed',
+        reply = format_review_email(ctx, '', 'changes_needed',
             [('> +\tsome code', 'Fix this')])
-        self.assertIn('Hi Simon,', email)
+        self.assertIn('Hi Simon,', reply)
 
         # Unguessable email falls back to bare 'Hi,'
         ctx = self._make_review_ctx(author_email='x@test.com',
                                      date='2026-04-01')
-        email = format_review_email(ctx, '', 'changes_needed',
+        reply = format_review_email(ctx, '', 'changes_needed',
             [('> +\tsome code', 'Fix this')])
-        self.assertIn('Hi,', email)
-        self.assertNotIn('Hi ,', email)
+        self.assertIn('Hi,', reply)
+        self.assertNotIn('Hi ,', reply)
 
     def test_review_refine_skips_approved(self):
         """Test that refinement skips approved reviews without comments"""
-        import asyncio
-        from unittest.mock import patch, AsyncMock
 
         from patman.review.emails import refine_reviews
 
@@ -2329,7 +2318,7 @@ VERDICT: skip"""
 
         # Should be returned unchanged without calling the agent
         loop = asyncio.new_event_loop()
-        with patch('patman.review.voice.get_voice', return_value=None):
+        with mock.patch('patman.review.voice.get_voice', return_value=None):
             result = loop.run_until_complete(
                 refine_reviews({1: approved}))
         loop.close()
@@ -2337,10 +2326,6 @@ VERDICT: skip"""
 
     def test_review_refine_processes_comments(self):
         """Test that refinement processes reviews with comments"""
-        import asyncio
-        import sys
-        import types
-        from unittest.mock import patch, MagicMock
 
         review_with_comments = (
             'Hi Marek,\n\n'
@@ -2356,17 +2341,16 @@ VERDICT: skip"""
         async def mock_agent(prompt, options):
             return True, refined
 
-        from patman import review as review_mod
 
         loop = asyncio.new_event_loop()
-        with patch.object(review_mod.voice, 'get_voice', return_value=None), \
-             patch.object(review_mod.core.claude_mod, 'run_agent_collect',
-                          side_effect=mock_agent), \
-             patch.object(
-                 review_mod.common, 'ClaudeAgentOptions', MagicMock()), \
+        with mock.patch.object(review.voice, 'get_voice', return_value=None), \
+             mock.patch.object(review.core.claude_mod, 'run_agent_collect',
+                               side_effect=mock_agent), \
+             mock.patch.object(
+                 review.common, 'ClaudeAgentOptions', mock.MagicMock()), \
              terminal.capture():
             result = loop.run_until_complete(
-                review_mod.emails.refine_reviews({1: review_with_comments}))
+                review.emails.refine_reviews({1: review_with_comments}))
         loop.close()
         self.assertIn('Fix this.', result[1])
 
@@ -2399,12 +2383,12 @@ VERDICT: changes_needed"""
         ctx = self._make_review_ctx(author_name='J. Neuschäfer',
             author_email='j.ne@posteo.net', date='2026-03-29',
             signoff='Regards,\nSimon')
-        email = format_review_email(ctx, greeting, verdict, comments)
-        self.assertIn('Hi J.,', email)
-        self.assertIn('> +\tif (ret < 0)', email)
-        self.assertIn('goto err', email)
-        self.assertNotIn('Reviewed-by', email)
-        self.assertIn('Regards,\nSimon', email)
+        reply = format_review_email(ctx, greeting, verdict, comments)
+        self.assertIn('Hi J.,', reply)
+        self.assertIn('> +\tif (ret < 0)', reply)
+        self.assertIn('goto err', reply)
+        self.assertNotIn('Reviewed-by', reply)
+        self.assertIn('Regards,\nSimon', reply)
 
     def test_review_commit_msg_no_duplicate(self):
         """Test that the commit-msg builder avoids duplicating the subject"""
@@ -2437,10 +2421,10 @@ VERDICT: changes_needed"""
         ctx = self._make_review_ctx(author_name='Author',
             author_email='a@b.com', date='2026-04-01',
             diffstat=' file.c | 1 +\n 1 file changed')
-        email = format_review_email(ctx, '', 'approved', [],
+        reply = format_review_email(ctx, '', 'approved', [],
             commit_message='Fix the bug\n\nThe bug causes a crash.')
-        self.assertIn('> Fix the bug', email)
-        self.assertIn('> The bug causes a crash.', email)
+        self.assertIn('> Fix the bug', reply)
+        self.assertIn('> The bug causes a crash.', reply)
 
     def test_gmail_subject_preserves_patch_prefix(self):
         """Test that reply subjects use the original Subject header"""
@@ -2490,10 +2474,8 @@ VERDICT: changes_needed"""
         """Test that create_draft sets From when sender is provided"""
         from patman.gmail import create_draft
         from email import message_from_bytes
-        from unittest.mock import MagicMock, patch
-        import base64
 
-        service = MagicMock()
+        service = mock.MagicMock()
         service.users().drafts().create().execute.return_value = {
             'id': 'draft123'}
 
@@ -2512,10 +2494,8 @@ VERDICT: changes_needed"""
         """Test that create_draft omits From when sender is None"""
         from patman.gmail import create_draft
         from email import message_from_bytes
-        from unittest.mock import MagicMock
-        import base64
 
-        service = MagicMock()
+        service = mock.MagicMock()
         service.users().drafts().create().execute.return_value = {
             'id': 'draft123'}
 
@@ -2535,7 +2515,6 @@ VERDICT: changes_needed"""
         series_id = cser.db.series_add('test-delete', 'Test')
         svid = cser.db.ser_ver_add(series_id, 1)
 
-        from datetime import datetime
         ts = datetime.now().isoformat()
         cser.db.review_add(svid, 1, 'review body 1', True, ts)
         cser.db.review_add(svid, 2, 'review body 2', False, ts)

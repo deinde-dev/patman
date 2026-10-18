@@ -14,7 +14,6 @@ from patman import checkpatch
 from patman import patchstream
 from patman import series
 from patman import commit
-from u_boot_pylib import gitutil
 from patman.test_common import find_source_dir
 
 
