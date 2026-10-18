@@ -1419,13 +1419,33 @@ class TestReview(CseriesTester):
         self.assertIn('Already reviewed', output)
         self.assertIn('All reviews already have Gmail drafts', output)
 
-        # --redraft deletes the old drafts and recreates them
+        # --redraft deletes the old drafts and recreates them, from the
+        # headers stored with the reviews, without asking patchwork
+        before = pwork.request_count
         with mock.patch('patman.gmail.delete_draft') as mock_del:
             output = run('--redraft')
-        self.assertIn('Already reviewed', output)
+        self.assertIn('Drafting stored reviews', output)
+        self.assertNotIn('Already reviewed', output)
         self.assertIn('Deleted 1 old Gmail draft', output)
         self.assertIn('Created 1 Gmail draft', output)
         mock_del.assert_called_once()
+        self.assertEqual(before, pwork.request_count)
+
+        # A review drafted before the headers were stored asks patchwork for
+        # them, then stores them
+        cser = self.cser
+        svid = cser.db.series_find_by_link(str(self.REVIEW_LINK))[3]
+        rev = cser.db.review_get_for_version(svid)[0]
+        cser.db.review_set_envelope(rev.idnum, None)
+        cser.db.commit()
+        with mock.patch('patman.gmail.delete_draft'):
+            output = run('--redraft')
+        self.assertIn('Already reviewed', output)
+        self.assertIn('Created 1 Gmail draft', output)
+        self.assertLess(before, pwork.request_count)
+        env = self.cser.db.review_get_envelope(rev.idnum)
+        self.assertTrue(env['subject'].startswith('Re: '))
+        self.assertTrue(env['in_reply_to'])
 
     def test_delete_gmail_drafts(self):
         """Test only reviews that have a recorded draft are deleted"""

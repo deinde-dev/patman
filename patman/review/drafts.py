@@ -81,23 +81,129 @@ def create_drafts(ctx, args, review_bodies, review_ids):
 
     common.run(_fetch_patch_headers())
 
-    sender = None
-    if ctx.reviewer_email and args.gmail_account:
-        if ctx.reviewer_email.lower() != args.gmail_account.lower():
-            sender = ctx.reviewer_tag
-
+    envelopes = {}
     draft_ids = gmail.create_review_drafts(ctx.series_data, to_draft,
         patch_headers=patch_headers, dry_run=args.dry_run,
-        account=args.gmail_account, sender=sender)
+        account=args.gmail_account,
+        sender=_sender(args, getattr(ctx, 'reviewer_name', ''),
+                       ctx.reviewer_email),
+        envelopes=envelopes)
     where = _draft_location(ctx)
     if args.dry_run:
         tout.notice(f'Dry run: would create {len(to_draft)} draft(s){where}')
     else:
+        # Keep the headers, so that the review can be drafted again
+        # without asking patchwork for them
+        for seq, env in envelopes.items():
+            if seq in review_ids:
+                ctx.cser.db.review_set_envelope(review_ids[seq], env)
         for seq, draft_id in draft_ids.items():
             if seq in review_ids:
                 ctx.cser.db.review_set_draft_id(review_ids[seq], draft_id)
         ctx.cser.commit()
         tout.notice(f'Created {len(draft_ids)} Gmail draft(s){where}')
+
+
+def _sender(args, reviewer_name, reviewer_email):
+    """Get the From identity for review drafts
+
+    Args:
+        args (Namespace): Command-line arguments (for gmail_account)
+        reviewer_name (str): Reviewer's name
+        reviewer_email (str): Reviewer's email address
+
+    Returns:
+        str or None: 'Name <email>' if the reviewer's address differs from
+            the Gmail account, else None to send as the account
+    """
+    account = getattr(args, 'gmail_account', None)
+    if (reviewer_email and account and
+            reviewer_email.lower() != account.lower()):
+        return f'{reviewer_name} <{reviewer_email}>'
+    return None
+
+
+def _reviewer_from_bodies(reviews):
+    """Find the reviewer from the Reviewed-by tag in some reviews
+
+    Args:
+        reviews (list of Review): Review records
+
+    Returns:
+        tuple: (name, email), each '' if no review has a Reviewed-by tag
+    """
+    for rev in reviews:
+        match = re.search(r'Reviewed-by:\s*(.+?)\s*<(.+?)>', rev.body)
+        if match:
+            return match.group(1).strip(), match.group(2).strip()
+    return '', ''
+
+
+def _reviews_to_draft(args, reviews):
+    """Pick out the stored reviews which should get a Gmail draft
+
+    Args:
+        args (Namespace): Command-line arguments (for redraft, patches)
+        reviews (list of Review): Review records
+
+    Returns:
+        list of Review: Reviews to draft
+    """
+    sel = common.parse_patch_selection(getattr(args, 'patches', None))
+    return [rev for rev in reviews
+            if needs_draft(rev, args.redraft) and (not sel or rev.seq in sel)]
+
+
+def redraft_from_db(args, cser, link):
+    """Recreate the Gmail drafts of a reviewed series from the database
+
+    Each review keeps the headers it needs to be sent as a reply to its
+    patch, once it has had a draft, so its draft can be created again
+    without asking patchwork for the series and the patches' headers.
+
+    Args:
+        args (Namespace): Command-line arguments
+        cser (Cseries): Cseries instance holding the reviews
+        link (str): Patchwork series link/ID
+
+    Returns:
+        bool: True if the drafts were created, False if patchwork is needed,
+            since the series is not in the database or a review to be
+            drafted has no stored headers
+    """
+    existing = cser.db.series_find_by_link(link)
+    if not existing:
+        return False
+    reviews = cser.db.review_get_for_version(existing[3])
+    need_draft = _reviews_to_draft(args, reviews)
+    if not need_draft:
+        tout.notice('No reviews to draft: all have been sent')
+        return True
+    envelopes = {rev.seq: cser.db.review_get_envelope(rev.idnum)
+                 for rev in need_draft}
+    if not all(envelopes.values()):
+        return False
+
+    tout.notice(f"Drafting stored reviews of '{existing[1]}' v{existing[2]}")
+    if not args.dry_run:
+        # Remove the drafts we are about to recreate so they do not linger
+        # as duplicates in the same Gmail thread
+        delete_gmail_drafts(args, need_draft)
+    name, email = _reviewer_from_bodies(need_draft)
+    draft_ids = gmail.create_drafts_from_envelopes(
+        envelopes, {rev.seq: rev.body for rev in need_draft},
+        dry_run=args.dry_run, account=getattr(args, 'gmail_account', None),
+        sender=_sender(args, name, email))
+    if args.dry_run:
+        tout.notice(f'Dry run: would create {len(need_draft)} draft(s) '
+                    f'(link {link})')
+        return True
+    for rev in need_draft:
+        if rev.seq in draft_ids:
+            cser.db.review_set_draft_id(rev.idnum, draft_ids[rev.seq])
+    cser.commit()
+    tout.notice(f'Created {len(draft_ids)} Gmail draft(s) (link {link})')
+    return True
 
 
 # Number of drafts to check before saving progress
@@ -290,10 +396,7 @@ def draft_stored_reviews(args, reviews, series_data, pwork, cser):
         pwork (Patchwork): Patchwork instance
         cser (Cseries): Cseries instance
     """
-    sel = common.parse_patch_selection(getattr(args, 'patches', None))
-    need_draft = [rev for rev in reviews
-                  if needs_draft(rev, args.redraft) and
-                  (not sel or rev.seq in sel)]
+    need_draft = _reviews_to_draft(args, reviews)
     if not need_draft:
         tout.notice('All reviews already have Gmail drafts')
         return
@@ -304,14 +407,6 @@ def draft_stored_reviews(args, reviews, series_data, pwork, cser):
     review_bodies = {rev.seq: rev.body for rev in need_draft}
     review_ids = {rev.seq: rev.idnum
                   for rev in need_draft}
-    rname = remail = None
-    for rev in need_draft:
-        match = re.search(r'Reviewed-by:\s*(.+?)\s*<(.+?)>', rev.body)
-        if match:
-            rname = match.group(1).strip()
-            remail = match.group(2).strip()
-            break
     ctx = common.ReviewContext(pwork, cser, series_data)
-    ctx.reviewer_name = rname or ''
-    ctx.reviewer_email = remail or ''
+    ctx.reviewer_name, ctx.reviewer_email = _reviewer_from_bodies(need_draft)
     create_drafts(ctx, args, review_bodies, review_ids)

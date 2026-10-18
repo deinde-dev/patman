@@ -6,7 +6,7 @@ The patman database
 Patman stores series tracking, review and workflow state in a SQLite
 database (``.patman.db``) in the top-level git directory. The schema is
 versioned and migrated automatically when patman starts; it is currently at
-v12. The :doc:`db` chapter of the manual covers where the database is
+v13. The :doc:`db` chapter of the manual covers where the database is
 kept, the separate review database and sharing it between patman runs.
 
 The database allows patman to track a patch series across multiple
@@ -143,6 +143,13 @@ gmail_thread_id   TEXT      Gmail thread ID for replies (added v9)
 session_id        TEXT      ID of the agent session which wrote the
                             review, so that a revision can carry on
                             from it (added v12)
+envelope          TEXT      JSON object with the headers for sending
+                            the review as a reply to its patch:
+                            ``subject``, ``in_reply_to``,
+                            ``references``, ``to`` and ``cc``, stored
+                            when its first draft is created so that
+                            it can be drafted again without patchwork
+                            (added v13)
 ================  ========  ==========================================
 
 reply

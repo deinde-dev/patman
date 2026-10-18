@@ -22,6 +22,11 @@ Changed
 - On the ``patman serve`` page, the button at the top of each file in a diff
   is called 'View whole file', as is the link between its chunks which goes
   to the same place, and looks like a button rather than part of the diff.
+- ``patman review --redraft``, and Redraft on the ``patman serve`` page, no
+  longer ask patchwork for the series and its patches' email headers. Each
+  review stores the headers for its reply when its first draft is created,
+  so its drafts can be recreated when patchwork is slow or cannot be
+  reached. The database is updated to v13 to hold them.
 
 Fixed
 ~~~~~

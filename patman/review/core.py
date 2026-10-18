@@ -933,4 +933,10 @@ def do_review(args, pwork, cser):
 
     if getattr(args, 'send', False) or getattr(args, 'revise', None):
         return stored.do_stored(args, pwork, cser, link)
+
+    # A redraft needs nothing from patchwork if the reviews' headers are
+    # stored, so it works when patchwork is slow or cannot be reached
+    if (getattr(args, 'redraft', False) and not getattr(args, 'force', False)
+            and drafts.redraft_from_db(args, cser, link)):
+        return 0
     return _review_link(args, pwork, cser, link)

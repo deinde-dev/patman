@@ -290,6 +290,13 @@ been reviewed and the drafts already exist::
 Any existing draft is deleted first, so it is not left as a duplicate
 in the thread.
 
+Each review keeps the headers it needs to be sent as a reply to its patch:
+the subject, the Message-ID it replies to and the To and Cc addresses.
+These are stored when its first draft is created, so ``--redraft`` does not
+need patchwork, which helps when the server is slow or cannot be reached.
+A review whose first draft was made by an older patman asks patchwork for
+them once.
+
 If the reviewer email (from ``--reviewer`` or git config) differs from
 the ``--gmail-account``, patman sets the From header on the draft so
 the email is sent with the correct identity.
