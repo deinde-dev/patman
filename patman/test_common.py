@@ -6,6 +6,7 @@
 
 import asyncio
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -22,6 +23,8 @@ from u_boot_pylib import tout
 from patman import cmdline
 from patman import control
 from patman import cseries
+from patman import patchstream
+from patman.patchwork import Patchwork
 
 
 def find_source_dir():
@@ -371,3 +374,301 @@ class CseriesTester(unittest.TestCase, TestCommon):
                       f'ended:\n{out[-3000:]}')
         if was_open:
             self.db_open()
+
+    class _Stage:
+        def __init__(self, name):
+            self.name = name
+
+        def __enter__(self):
+            if not terminal.USE_CAPTURE:
+                print(f"--- starting '{self.name}'")
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            if not terminal.USE_CAPTURE:
+                print(f"--- finished '{self.name}'\n")
+
+    def stage(self, name):
+        """Context manager to count requests across a range of patchwork calls
+
+        Args:
+            name (str): Stage name
+
+        Return:
+            _Stage: contect object
+
+        Usage:
+            with self.stage('name'):
+                ...do things
+
+            Note that the output only appears if the -N flag is used
+        """
+        return self._Stage(name)
+
+    def assert_finished(self, itr):
+        """Assert that an iterator is finished
+
+        Args:
+            itr (iter): Iterator to check
+        """
+        self.assertFalse(list(itr))
+
+    def _fake_patchwork_cser(self, subpath):
+        """Fake Patchwork server for the function below
+
+        This handles accessing various things used by the tests below. It has
+        hard-coded data, about from self.autolink_extra which can be adjusted
+        by the test.
+
+        Args:
+            subpath (str): URL subpath to use
+        """
+        # Get a list of projects; return them one per page to check that
+        # pagination works
+        re_proj = re.match(r'projects/\?page=(\d+)&per_page=\d+$', subpath)
+        if re_proj:
+            page = int(re_proj.group(1))
+            projects = [
+                {'id': self.PROJ_ID, 'name': 'U-Boot',
+                 'link_name': self.PROJ_LINK_NAME},
+                {'id': 9, 'name': 'other', 'link_name': 'other'}
+            ]
+            return projects[page - 1:page]
+
+        # Search for series by their cover-letter name
+        re_search = re.match(r'series/\?project=(\d+)&q=.*$', subpath)
+        if re_search:
+            result = [
+                {'id': 56, 'name': 'contains first name', 'version': 1},
+                {'id': 43, 'name': 'has first in it', 'version': 1},
+                {'id': 1234, 'name': 'first series', 'version': 1},
+                {'id': self.SERIES_ID_SECOND_V1, 'name': self.TITLE_SECOND,
+                 'version': 1},
+                {'id': self.SERIES_ID_SECOND_V2, 'name': self.TITLE_SECOND,
+                 'version': 2},
+                {'id': 12345, 'name': 'i2c: I2C things', 'version': 1},
+            ]
+            if self.autolink_extra:
+                result += [self.autolink_extra]
+            return result
+
+        # Read information about a series, given its link (patchwork series ID)
+        m_series = re.match(r'series/(\d+)/$', subpath)
+        series_id = int(m_series.group(1)) if m_series else ''
+        if series_id:
+            if series_id == self.SERIES_ID_SECOND_V1:
+                # series 'second'
+                return {
+                    'patches': [
+                        {'id': '10',
+                         'name': '[PATCH,1/3] video: Some video improvements',
+                         'content': ''},
+                        {'id': '11',
+                         'name': '[PATCH,2/3] serial: Add a serial driver',
+                         'content': ''},
+                        {'id': '12', 'name': '[PATCH,3/3] bootm: Make it boot',
+                         'content': ''},
+                    ],
+                    'cover_letter': {
+                        'id': 39,
+                        'name': 'The name of the cover letter',
+                    }
+                }
+            if series_id == self.SERIES_ID_SECOND_V2:
+                # series 'second2'
+                return {
+                    'patches': [
+                        {'id': '110',
+                         'name':
+                             '[PATCH,v2,1/3] video: Some video improvements',
+                         'content': ''},
+                        {'id': '111',
+                         'name': '[PATCH,v2,2/3] serial: Add a serial driver',
+                         'content': ''},
+                        {'id': '112',
+                         'name': '[PATCH,v2,3/3] bootm: Make it boot',
+                         'content': ''},
+                    ],
+                    'cover_letter': {
+                        'id': 139,
+                        'name': 'The name of the cover letter',
+                    }
+                }
+            if series_id == self.SERIES_ID_FIRST_V3:
+                # series 'first3'
+                return {
+                    'patches': [
+                        {'id': 20, 'name': '[PATCH,v3,1/2] i2c: I2C things',
+                         'content': ''},
+                        {'id': 21, 'name': '[PATCH,v3,2/2] spi: SPI fixes',
+                         'content': ''},
+                    ],
+                    'cover_letter': {
+                        'id': 29,
+                        'name': 'Cover letter for first',
+                    }
+                }
+            if series_id == 123:
+                return {
+                    'patches': [
+                        {'id': 20, 'name': '[PATCH,1/2] i2c: I2C things',
+                         'content': ''},
+                        {'id': 21, 'name': '[PATCH,2/2] spi: SPI fixes',
+                         'content': ''},
+                    ],
+                }
+            if series_id == 1234:
+                return {
+                    'patches': [
+                        {'id': 20, 'name': '[PATCH,v2,1/2] i2c: I2C things',
+                         'content': ''},
+                        {'id': 21, 'name': '[PATCH,v2,2/2] spi: SPI fixes',
+                         'content': ''},
+                    ],
+                }
+            raise ValueError(f'Fake Patchwork unknown series_id: {series_id}')
+
+        # Read patch status
+        m_pat = re.search(r'patches/(\d*)/$', subpath)
+        patch_id = int(m_pat.group(1)) if m_pat else ''
+        if patch_id:
+            if patch_id in [10, 110]:
+                return {'state': 'accepted',
+                        'content':
+                            'Reviewed-by: Fred Bloggs <fred@bloggs.com>'}
+            if patch_id in [11, 111]:
+                return {'state': 'changes-requested', 'content': ''}
+            if patch_id in [12, 112]:
+                return {'state': 'rejected',
+                        'content': "I don't like this at all, sorry"}
+            if patch_id == 20:
+                return {'state': 'awaiting-upstream', 'content': ''}
+            if patch_id == 21:
+                return {'state': 'not-applicable', 'content': ''}
+            raise ValueError(f'Fake Patchwork unknown patch_id: {patch_id}')
+
+        # Read comments a from patch
+        m_comm = re.search(r'patches/(\d*)/comments/', subpath)
+        patch_id = int(m_comm.group(1)) if m_comm else ''
+        if patch_id:
+            if patch_id in [10, 110]:
+                return [
+                    {'id': 1, 'content': ''},
+                    {'id': 2,
+                     'content':
+                         '''On some date Mary Smith <msmith@wibble.com> wrote:
+> This was my original patch
+> which is being quoted
+
+I like the approach here and I would love to see more of it.
+
+Reviewed-by: Fred Bloggs <fred@bloggs.com>
+''',
+                     'submitter': {
+                         'name': 'Fred Bloggs',
+                         'email': 'fred@bloggs.com',
+                         }
+                     },
+                ]
+            if patch_id in [11, 111]:
+                return []
+            if patch_id in [12, 112]:
+                return [
+                    {'id': 4, 'content': ''},
+                    {'id': 5, 'content': ''},
+                    {'id': 6, 'content': ''},
+                ]
+            if patch_id == 20:
+                return [
+                    {'id': 7, 'content':
+                     '''On some date Alex Miller <alex@country.org> wrote:
+
+> Sometimes we need to create a patch.
+> This is one of those times
+
+Tested-by: Mary Smith <msmith@wibble.com>   # yak
+'''},
+                    {'id': 8, 'content': ''},
+                ]
+            if patch_id == 21:
+                return []
+            raise ValueError(
+                f'Fake Patchwork does not understand patch_id {patch_id}: '
+                f'{subpath}')
+
+        # Read comments from a cover letter
+        m_cover_id = re.search(r'covers/(\d*)/comments/', subpath)
+        cover_id = int(m_cover_id.group(1)) if m_cover_id else ''
+        if cover_id:
+            if cover_id in [39, 139]:
+                return [
+                    {'content': 'some comment',
+                        'submitter': {
+                            'name': 'A user',
+                            'email': 'user@user.com',
+                          },
+                        'date': 'Sun 13 Apr 14:06:02 MDT 2025',
+                     },
+                    {'content': 'another comment',
+                        'submitter': {
+                            'name': 'Ghenkis Khan',
+                            'email': 'gk@eurasia.gov',
+                        },
+                     'date': 'Sun 13 Apr 13:06:02 MDT 2025',
+                     },
+                ]
+            if cover_id == 29:
+                return []
+
+            raise ValueError(f'Fake Patchwork unknown cover_id: {cover_id}')
+
+        raise ValueError(f'Fake Patchwork does not understand: {subpath}')
+
+    def setup_second(self, do_sync=True):
+        """Set up the 'second' series synced with the fake patchwork
+
+        Args:
+            do_sync (bool): True to sync the series
+
+        Return: tuple:
+            Cseries: New Cseries object
+            pwork: Patchwork object
+        """
+        with self.stage('setup second'):
+            cser = self.get_cser()
+            pwork = Patchwork.for_testing(self._fake_patchwork_cser)
+            pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+
+            with terminal.capture() as (out, _):
+                cser.add('first', '', allow_unmarked=True)
+                cser.add('second', allow_unmarked=True)
+
+            series = patchstream.get_metadata_for_list('second', self.gitdir,
+                                                       3)
+            self.assertEqual('456', series.links)
+
+            with terminal.capture() as (out, _):
+                cser.increment('second')
+
+            series = patchstream.get_metadata_for_list('second', self.gitdir,
+                                                       3)
+            self.assertEqual('456', series.links)
+
+            series = patchstream.get_metadata_for_list('second2', self.gitdir,
+                                                       3)
+            self.assertEqual('1:456', series.links)
+
+            if do_sync:
+                with terminal.capture() as (out, _):
+                    cser.link_auto(pwork, 'second', 2, True)
+                with terminal.capture() as (out, _):
+                    cser.gather(pwork, 'second', 2, False, True, False)
+                lines = out.getvalue().splitlines()
+                self.assertEqual(
+                    "Updating series 'second' version 2 from link '457'",
+                    lines[0])
+                self.assertEqual(
+                    '3 patches and cover letter updated (8 requests)',
+                    lines[1])
+                self.assertEqual(2, len(lines))
+
+        return cser, pwork
