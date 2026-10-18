@@ -2225,7 +2225,7 @@ class TestCseries(CseriesTester):
         self.assertEqual('3', series.version)
 
         with terminal.capture():
-            self.run_args('series', '-n', 'send', pwork=pwork)
+            self.run_args('series', '-n', 'send', '--no-check', pwork=pwork)
 
         cser.set_fake_time(h_sleep)
         with terminal.capture() as (out, _):
