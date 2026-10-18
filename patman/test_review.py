@@ -1419,13 +1419,33 @@ class TestReview(CseriesTester):
         self.assertIn('Already reviewed', output)
         self.assertIn('All reviews already have Gmail drafts', output)
 
-        # --redraft deletes the old drafts and recreates them
+        # --redraft deletes the old drafts and recreates them, from the
+        # headers stored with the reviews, without asking patchwork
+        before = pwork.request_count
         with mock.patch('patman.gmail.delete_draft') as mock_del:
             output = run('--redraft')
-        self.assertIn('Already reviewed', output)
+        self.assertIn('Drafting stored reviews', output)
+        self.assertNotIn('Already reviewed', output)
         self.assertIn('Deleted 1 old Gmail draft', output)
         self.assertIn('Created 1 Gmail draft', output)
         mock_del.assert_called_once()
+        self.assertEqual(before, pwork.request_count)
+
+        # A review drafted before the headers were stored asks patchwork for
+        # them, then stores them
+        cser = self.cser
+        svid = cser.db.series_find_by_link(str(self.REVIEW_LINK))[3]
+        rev = cser.db.review_get_for_version(svid)[0]
+        cser.db.review_set_envelope(rev.idnum, None)
+        cser.db.commit()
+        with mock.patch('patman.gmail.delete_draft'):
+            output = run('--redraft')
+        self.assertIn('Already reviewed', output)
+        self.assertIn('Created 1 Gmail draft', output)
+        self.assertLess(before, pwork.request_count)
+        env = self.cser.db.review_get_envelope(rev.idnum)
+        self.assertTrue(env['subject'].startswith('Re: '))
+        self.assertTrue(env['in_reply_to'])
 
     def test_delete_gmail_drafts(self):
         """Test only reviews that have a recorded draft are deleted"""
@@ -2448,6 +2468,47 @@ VERDICT: changes_needed"""
         with terminal.capture():
             create_review_drafts(series_data, review_bodies,
                                  patch_headers=patch_headers, dry_run=True)
+
+    def test_review_envelopes(self):
+        """The headers for a review reply its patch, threaded on the cover"""
+        series_data = {
+            'submitter': {'email': 'author@b.com'},
+            'project': {'list_email': 'list@test.com'},
+            'cover_letter': {'id': 9, 'name': 'Some fixes',
+                             'msgid': '<0@test.com>'},
+            'patches': [
+                {'id': 1, 'name': 'Fix the bug', 'msgid': '<1@test.com>'},
+                {'id': 2, 'name': 'Fix another', 'msgid': '<2@test.com>'},
+            ],
+        }
+        patch_headers = {
+            0: {'Subject': '[PATCH 0/2] Some fixes'},
+            2: {'Subject': '[PATCH 2/2] Fix another',
+                'To': 'list@test.com', 'Cc': 'Maint <maint@test.com>',
+                'Reply-To': 'Other <other@b.com>'},
+        }
+        envs = gmail.review_envelopes(series_data, patch_headers, [0, 2])
+        self.assertEqual([0, 2], sorted(envs))
+        self.assertEqual({
+            'subject': 'Re: [PATCH 0/2] Some fixes',
+            'in_reply_to': '<0@test.com>', 'references': '<0@test.com>',
+            'to': 'author@b.com', 'cc': 'list@test.com'}, envs[0])
+        self.assertEqual({
+            'subject': 'Re: [PATCH 2/2] Fix another',
+            'in_reply_to': '<2@test.com>',
+            'references': '<0@test.com> <2@test.com>',
+            'to': 'Other <other@b.com>',
+            'cc': 'list@test.com, Maint <maint@test.com>'}, envs[2])
+
+        # create_review_drafts() gives the headers it used, to be stored
+        stored = {}
+        with terminal.capture() as (out, _):
+            gmail.create_review_drafts(series_data, {2: 'Looks good'},
+                                       patch_headers=patch_headers,
+                                       dry_run=True, envelopes=stored)
+        self.assertEqual({2: envs[2]}, stored)
+        self.assertIn('Would create draft: Re: [PATCH 2/2] Fix another',
+                      out.getvalue())
 
     def test_gmail_subject_falls_back_to_name(self):
         """Test that reply subjects fall back to patchwork name"""

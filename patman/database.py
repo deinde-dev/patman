@@ -13,6 +13,7 @@ and write some code in migrate_to() to call it.
 
 from collections import namedtuple, OrderedDict
 import fcntl
+import json
 import os
 import sqlite3
 
@@ -21,7 +22,7 @@ from u_boot_pylib import tout
 from patman.series import Series
 
 # Schema version (version 0 means there is no database yet)
-LATEST = 12
+LATEST = 13
 
 # Information about a review record
 # Review status values
@@ -317,6 +318,10 @@ class Database:  # pylint:disable=R0904
         """Add the agent session ID to the review table"""
         self.cur.execute('ALTER TABLE review ADD COLUMN session_id')
 
+    def _migrate_to_v13(self):
+        """Add the headers for replying with a review to the review table"""
+        self.cur.execute('ALTER TABLE review ADD COLUMN envelope')
+
     # pylint: disable=R0912
     def migrate_to(self, dest_version):
         """Migrate the database to the selected version
@@ -373,6 +378,8 @@ class Database:  # pylint:disable=R0904
                 self._migrate_to_v11()
             elif version == 12:
                 self._migrate_to_v12()
+            elif version == 13:
+                self._migrate_to_v13()
 
             # Save the new version if we have a schema_version table
             if version > 1:
@@ -1461,6 +1468,31 @@ class Database:  # pylint:disable=R0904
         rec = self.execute('SELECT session_id FROM review WHERE id = ?',
                            (review_id,)).fetchone()
         return rec[0] if rec else None
+
+    def review_set_envelope(self, review_id, envelope):
+        """Set the headers for sending a review as a reply to its patch
+
+        Args:
+            review_id (int): Review record ID
+            envelope (dict or None): Headers, as given by
+                gmail.review_envelopes(), or None to clear them
+        """
+        self.execute('UPDATE review SET envelope = ? WHERE id = ?',
+                     (json.dumps(envelope) if envelope else None, review_id))
+
+    def review_get_envelope(self, review_id):
+        """Get the headers for sending a review as a reply to its patch
+
+        Args:
+            review_id (int): Review record ID
+
+        Return:
+            dict or None: Headers, as given by gmail.review_envelopes(), or
+                None if they are not known
+        """
+        rec = self.execute('SELECT envelope FROM review WHERE id = ?',
+                           (review_id,)).fetchone()
+        return json.loads(rec[0]) if rec and rec[0] else None
 
     def review_set_draft_id(self, review_id, draft_id):
         """Set the Gmail draft ID for a review record
