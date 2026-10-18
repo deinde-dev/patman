@@ -59,7 +59,7 @@ patman = "patman.__main__:run_patman"
 patch-manager = "patman.__main__:run_patman"
 
 [tool.setuptools]
-packages = ["patman", "patman.review"]
+packages = ["patman", "patman.review", "patman.server"]
 
 [tool.setuptools.package-data]
 patman = ["*.rst", "test/*", "web/*"]
