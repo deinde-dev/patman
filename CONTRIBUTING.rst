@@ -66,6 +66,25 @@ Building the package
     python -m build
     twine check --strict dist/*
 
+Building the snap
+-----------------
+
+``snap/snapcraft.yaml`` packages patman as a snap with classic confinement,
+since patman works on your own git trees and runs your git, git send-email
+and editor. Build it with::
+
+    snapcraft pack
+
+which uses LXD to build it in a clean Ubuntu container. Install the result
+for testing with::
+
+    sudo snap install --dangerous --classic patman_*.snap
+
+The snap takes git, perl (for ``checkpatch.pl``) and Claude Code (for
+``patman review``) from the host. It leaves out the copy of Claude Code which
+the Claude Agent SDK bundles, and the Google API client's descriptions of
+APIs other than Gmail's, which would make it considerably larger.
+
 Continuous integration
 ----------------------
 
