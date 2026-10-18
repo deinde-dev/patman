@@ -1191,6 +1191,37 @@ class TestWebServer(unittest.TestCase, TestCommon):
                 loop.close()
             self.assertEqual(expect, sleeps)
 
+    def test_patchwork_timeout_message(self):
+        """A server which never responds gives an error saying which it is"""
+        real_sleep = asyncio.sleep
+
+        async def handler(_request):
+            await real_sleep(1)
+            return web.json_response({})
+
+        app = web.Application()
+        app.router.add_get('/api/1.2/{tail:.*}', handler)
+
+        async def _go():
+            async with TestServer(app) as tserver:
+                url = str(tserver.make_url('')).rstrip('/')
+                pwork = Patchwork(url, show_progress=False)
+                async with aiohttp.ClientSession() as client:
+                    with self.assertRaises(asyncio.TimeoutError) as exc:
+                        await pwork._request(client, 'patches/1/')
+                return url, str(exc.exception)
+
+        loop = asyncio.new_event_loop()
+        try:
+            with mock.patch.object(patchwork, 'REQUEST_TIMEOUT', 0.05), \
+                    mock.patch.object(asyncio, 'sleep',
+                                      side_effect=self._no_sleep(asyncio.sleep)):
+                url, msg = loop.run_until_complete(_go())
+        finally:
+            loop.close()
+        self.assertEqual(f"Patchwork '{url}' did not respond within 0.05 "
+                         f'seconds, after {patchwork.RETRIES + 1} tries', msg)
+
     def test_patchwork_timeout_setting(self):
         """The patchwork_timeout setting sets the request timeout"""
         args = cmdline.parse_args(['--patchwork-timeout', '7', 'upstream',

@@ -239,10 +239,18 @@ class Patchwork:
                             i == RETRIES:
                         raise
                     await asyncio.sleep(i + 1)
+                except asyncio.TimeoutError as exc:
+                    # The server may stall when busy. Say which one, since
+                    # the exception itself has no message
+                    if i == RETRIES:
+                        raise asyncio.TimeoutError(
+                            f"Patchwork '{self.url}' did not respond within "
+                            f'{REQUEST_TIMEOUT} seconds, after '
+                            f'{RETRIES + 1} tries') from exc
+                    await asyncio.sleep(i + 1)
                 except (aiohttp.ServerDisconnectedError,
-                        aiohttp.ClientOSError, asyncio.TimeoutError):
-                    # The server may drop, reset or stall connections when
-                    # busy
+                        aiohttp.ClientOSError):
+                    # The server may drop or reset connections when busy
                     if i == RETRIES:
                         raise
                     await asyncio.sleep(i + 1)

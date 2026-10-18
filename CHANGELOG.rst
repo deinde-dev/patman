@@ -25,6 +25,8 @@ Changed
 
 Fixed
 ~~~~~
+- When a patchwork server does not respond, the error says which server and
+  how long patman waited, rather than just ``TimeoutError``.
 - ``patman test`` gives the same results whichever directory it is run
   from. The tests which run ``checkpatch.pl`` failed when run outside
   patman's sources, since they found another ``checkpatch.pl`` or missed
