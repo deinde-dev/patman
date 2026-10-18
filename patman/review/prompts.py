@@ -140,91 +140,9 @@ USER CONTEXT (extra notes from the reviewer for this run):
 '''
 
 
-def build_review_prompt(ctx, commit_hash, seq, all_commits,
-                         previous_review):
-    """Build the Claude agent prompt for reviewing a single patch
-
-    Args:
-        ctx (ReviewContext): Review context (uses cover_content,
-            comments_path, spelling)
-        commit_hash (str): Git commit hash of the patch on the local branch
-        seq (int): Patch sequence number (1-based)
-        all_commits (list of tuple): (seq, hash, subject) for all patches
-        previous_review (str or None): Previous review text (for v2+)
-
-    Returns:
-        str: The prompt text for the agent
-    """
-    cover_section = ''
-    if ctx.cover_content:
-        cover_section = f'''
-SERIES CONTEXT (cover letter):
-{ctx.cover_content}
-'''
-
-    prev_section = ''
-    if previous_review:
-        prev_section = f'''
-PREVIOUS REVIEW (from earlier version):
-{previous_review}
-
-This is a FOLLOW-UP review. The reviewer convention is that the
-initial review says what needs to be said; later versions should not
-pile on with fresh nits the reviewer chose not to raise the first
-time round. Apply that convention here:
-
-- Confirm whether each point in the previous review was addressed
-  (acknowledge it, or push back if it was not).
-- Do NOT raise new issues in code that already existed in the
-  previous version. If something was not flagged then, it is not
-  fair to flag it now.
-- It IS fair to comment on:
-  * material the author added or substantially rewrote in this
-    version (whether in response to feedback or otherwise), and
-  * clear regressions introduced since the previous version.
-- If the previous feedback is addressed and nothing new is wrong,
-  approve. Prefer 'approved' over fishing for something to say.
-'''
-
-    style = voice_section()
-
-    # Build the series overview
-    series_lines = []
-    total = len(all_commits)
-    for s, h, subj in all_commits:
-        marker = '>>>' if s == seq else '   '
-        series_lines.append(f"  {marker} {s}/{total} {h[:12]} {subj}")
-    series_overview = '\n'.join(series_lines)
-
-    comments_section = ''
-    if ctx.comments_path:
-        comments_section = f'''
-EXISTING COMMENTS:
-Other reviewers (or the author) may have already commented on this
-series. Read the file below for context.
-(see file: {ctx.comments_path})
-
-CRITICAL: If another reviewer has already raised a point, do NOT repeat
-it, rephrase it, or elaborate on it — even to add a suggestion. The
-author has already been told. Simply skip that issue entirely and focus
-on things that have NOT been said.
-'''
-
-    context_section = _context_section(ctx)
-
-    coverity_section = ''
-    if getattr(ctx, 'coverity_text', None):
-        coverity_section = f'''
-COVERITY (new static-analysis defects introduced by this series):
-{ctx.coverity_text}
-
-If any of these defects fall in the code this patch changes, raise them
-in your review. Ignore defects unrelated to this patch.
-'''
-
-    return f'''You are an experienced U-Boot developer reviewing \
+REVIEW_PROMPT = '''You are an experienced U-Boot developer reviewing \
 a patch submitted to
-the U-Boot mailing list. This is patch {seq}/{len(all_commits)} in the series.
+the U-Boot mailing list. This is patch {seq}/{total} in the series.
 {style}
 SERIES OVERVIEW (all patches, >>> marks the one you are reviewing):
 {series_overview}
@@ -321,7 +239,7 @@ Rules:
   in the patch is worse than no comment at all.
 - Be specific and constructive, but brief — use as few words as
   possible to make the point. Avoid restating what the code does;
-{QUOTING_RULES}
+{quoting_rules}
 - If another reviewer has already made a point, do NOT repeat it,
   rephrase it, or add to it — skip it entirely
 - Focus on what is wrong and what to do instead
@@ -329,7 +247,7 @@ Rules:
 - Do not nitpick trivial style issues that checkpatch would catch
 - Focus on logic, correctness, and design issues
 - If unsure about something, say so rather than guessing
-- Use {ctx.spelling} spelling in your comments
+- Use {spelling} spelling in your comments
 - Write each comment paragraph on a single line — do not hard-wrap the
   prose; the reader's mail client will wrap it. Keep the quoted '> '
   lines and any indented code exactly as they are
@@ -337,61 +255,142 @@ Rules:
 '''
 
 
-def build_cover_review_prompt(ctx, all_commits, previous_review=None):
-    """Build prompt for reviewing the cover letter / series
+def _previous_section(previous_review):
+    """Get the prompt section with the review of the previous version
 
     Args:
-        ctx (ReviewContext): Review context (uses cover_content,
-            comments_path, spelling)
-        all_commits (list of tuple): (seq, hash, subject) for all patches
-        previous_review (str or None): Previous cover-letter review text
-            (for v2+ reviews)
+        previous_review (str or None): Previous review text (for v2+)
 
     Returns:
-        str: The prompt text
+        str: Section text, or '' if there is no previous review
     """
-    style = voice_section()
-    series_lines = []
-    for s, h, subj in all_commits:
-        series_lines.append(f"  {s}. {h[:12]} {subj}")
-    series_overview = '\n'.join(series_lines)
-
-    cover_section = ''
-    if ctx.cover_content:
-        cover_section = f'''
-COVER LETTER:
-{ctx.cover_content}
-'''
-
-    comments_section = ''
-    if ctx.comments_path:
-        comments_section = f'''
-EXISTING COMMENTS:
-(see file: {ctx.comments_path})
-'''
-
-    context_section = _context_section(ctx)
-
-    prev_section = ''
-    if previous_review:
-        prev_section = f'''
-PREVIOUS COVER-LETTER REVIEW (from earlier version):
+    if not previous_review:
+        return ''
+    return f'''
+PREVIOUS REVIEW (from earlier version):
 {previous_review}
 
 This is a FOLLOW-UP review. The reviewer convention is that the
 initial review says what needs to be said; later versions should not
 pile on with fresh nits the reviewer chose not to raise the first
-time round. Confirm whether the previous points were addressed,
-comment only on material that is new or substantially reworked in
-this version, and prefer VERDICT: skip when there is nothing new to
-add at the series level.
+time round. Apply that convention here:
+
+- Confirm whether each point in the previous review was addressed
+  (acknowledge it, or push back if it was not).
+- Do NOT raise new issues in code that already existed in the
+  previous version. If something was not flagged then, it is not
+  fair to flag it now.
+- It IS fair to comment on:
+  * material the author added or substantially rewrote in this
+    version (whether in response to feedback or otherwise), and
+  * clear regressions introduced since the previous version.
+- If the previous feedback is addressed and nothing new is wrong,
+  approve. Prefer 'approved' over fishing for something to say.
 '''
 
-    return f'''You are an experienced U-Boot developer reviewing a patch series
+
+def _comments_section(ctx):
+    """Get the prompt section pointing to the comments from patchwork
+
+    Args:
+        ctx (ReviewContext): Review context (uses comments_path)
+
+    Returns:
+        str: Section text, or '' if there are no comments
+    """
+    if not ctx.comments_path:
+        return ''
+    return f'''
+EXISTING COMMENTS:
+Other reviewers (or the author) may have already commented on this
+series. Read the file below for context.
+(see file: {ctx.comments_path})
+
+CRITICAL: If another reviewer has already raised a point, do NOT repeat
+it, rephrase it, or elaborate on it — even to add a suggestion. The
+author has already been told. Simply skip that issue entirely and focus
+on things that have NOT been said.
+'''
+
+
+def _coverity_section(ctx):
+    """Get the prompt section with the defects which Coverity found
+
+    Args:
+        ctx (ReviewContext): Review context (uses coverity_text)
+
+    Returns:
+        str: Section text, or '' if Coverity was not run or found nothing
+    """
+    if not getattr(ctx, 'coverity_text', None):
+        return ''
+    return f'''
+COVERITY (new static-analysis defects introduced by this series):
+{ctx.coverity_text}
+
+If any of these defects fall in the code this patch changes, raise them
+in your review. Ignore defects unrelated to this patch.
+'''
+
+
+def _series_overview(all_commits, seq):
+    """List the patches of a series, marking the one being reviewed
+
+    Args:
+        all_commits (list of tuple): (seq, hash, subject) for all patches
+        seq (int): Patch being reviewed (1-based)
+
+    Returns:
+        str: One line for each patch
+    """
+    series_lines = []
+    total = len(all_commits)
+    for s, h, subj in all_commits:
+        marker = '>>>' if s == seq else '   '
+        series_lines.append(f"  {marker} {s}/{total} {h[:12]} {subj}")
+    return '\n'.join(series_lines)
+
+
+def build_review_prompt(ctx, commit_hash, seq, all_commits,
+                         previous_review):
+    """Build the Claude agent prompt for reviewing a single patch
+
+    Args:
+        ctx (ReviewContext): Review context (uses cover_content,
+            comments_path, spelling)
+        commit_hash (str): Git commit hash of the patch on the local branch
+        seq (int): Patch sequence number (1-based)
+        all_commits (list of tuple): (seq, hash, subject) for all patches
+        previous_review (str or None): Previous review text (for v2+)
+
+    Returns:
+        str: The prompt text for the agent
+    """
+    cover_section = ''
+    if ctx.cover_content:
+        cover_section = f'''
+SERIES CONTEXT (cover letter):
+{ctx.cover_content}
+'''
+
+    return REVIEW_PROMPT.format(
+        seq=seq, total=len(all_commits), commit_hash=commit_hash,
+        style=voice_section(),
+        series_overview=_series_overview(all_commits, seq),
+        comments_section=_comments_section(ctx),
+        cover_section=cover_section,
+        prev_section=_previous_section(previous_review),
+        context_section=_context_section(ctx),
+        coverity_section=_coverity_section(ctx),
+        quoting_rules=QUOTING_RULES, spelling=ctx.spelling)
+
+
+COVER_REVIEW_PROMPT = '''You are an experienced U-Boot developer \
+reviewing a patch series
 submitted to the U-Boot mailing list. Review the series as a whole,
 replying to the cover letter.
 {style}
-SERIES ({len(all_commits)} patches):
+SERIES ({total} patches):
 {series_overview}
 
 You can run 'git show <hash>' on any of these to see the full diff.
@@ -433,11 +432,11 @@ Your comment.
 VERDICT: changes_needed
 
 Rules:
-{QUOTING_RULES}
+{quoting_rules}
 - Do NOT quote code fragments in the cover-letter reply — code
   belongs in the per-patch reviews. Describe series-level issues in
   prose only.
-- Use {ctx.spelling} spelling
+- Use {spelling} spelling
 - Write each comment paragraph on a single line — do not hard-wrap the
   prose; the reader's mail client will wrap it
 - Be brief — only raise series-level concerns, not per-patch nits
@@ -445,6 +444,61 @@ Rules:
 - VERDICT: skip means no cover letter reply will be sent
 - Always end with exactly one VERDICT: line
 '''
+
+
+def build_cover_review_prompt(ctx, all_commits, previous_review=None):
+    """Build prompt for reviewing the cover letter / series
+
+    Args:
+        ctx (ReviewContext): Review context (uses cover_content,
+            comments_path, spelling)
+        all_commits (list of tuple): (seq, hash, subject) for all patches
+        previous_review (str or None): Previous cover-letter review text
+            (for v2+ reviews)
+
+    Returns:
+        str: The prompt text
+    """
+    style = voice_section()
+    series_lines = []
+    for s, h, subj in all_commits:
+        series_lines.append(f"  {s}. {h[:12]} {subj}")
+    series_overview = '\n'.join(series_lines)
+
+    cover_section = ''
+    if ctx.cover_content:
+        cover_section = f'''
+COVER LETTER:
+{ctx.cover_content}
+'''
+
+    comments_section = ''
+    if ctx.comments_path:
+        comments_section = f'''
+EXISTING COMMENTS:
+(see file: {ctx.comments_path})
+'''
+
+    prev_section = ''
+    if previous_review:
+        prev_section = f'''
+PREVIOUS COVER-LETTER REVIEW (from earlier version):
+{previous_review}
+
+This is a FOLLOW-UP review. The reviewer convention is that the
+initial review says what needs to be said; later versions should not
+pile on with fresh nits the reviewer chose not to raise the first
+time round. Confirm whether the previous points were addressed,
+comment only on material that is new or substantially reworked in
+this version, and prefer VERDICT: skip when there is nothing new to
+add at the series level.
+'''
+
+    return COVER_REVIEW_PROMPT.format(
+        style=style, total=len(all_commits), series_overview=series_overview,
+        cover_section=cover_section, comments_section=comments_section,
+        context_section=_context_section(ctx), prev_section=prev_section,
+        quoting_rules=QUOTING_RULES, spelling=ctx.spelling)
 
 
 REFINE_REVIEWS_PROMPT = '''You are editing draft code-review \
