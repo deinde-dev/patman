@@ -608,7 +608,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
     def test_parse_review_req(self):
         """Review requests are turned into 'patman review' arguments"""
         ups = ['us', 'ci']
-        parse = server.parse_review_req
+        parse = server.app.parse_review_req
         self.assertEqual((['-s', '123'], 'Review series 123'),
                          parse({'target': ' 123 '}, ups))
         self.assertEqual(
@@ -1025,7 +1025,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
         # A job is not resumed too often
         with open(fname, 'w', encoding='utf-8') as outf:
             json.dump([{'kind': 'review', 'title': 'Bad', 'cmds': [['false']],
-                        'resumed': server.MAX_RESUMES}], outf)
+                        'resumed': server.app.MAX_RESUMES}], outf)
         srv = self.make_server(jobs_fname=fname)
         with terminal.capture() as (_, err):
             self.run_jobs(srv, [])
@@ -1200,12 +1200,12 @@ class TestWebServer(unittest.TestCase, TestCommon):
 
     def test_is_loopback(self):
         """Loopback addresses are detected"""
-        self.assertTrue(server.is_loopback('127.0.0.1'))
-        self.assertTrue(server.is_loopback('::1'))
-        self.assertTrue(server.is_loopback('localhost'))
-        self.assertFalse(server.is_loopback('0.0.0.0'))
-        self.assertFalse(server.is_loopback('100.64.1.2'))
-        self.assertFalse(server.is_loopback('myhost'))
+        self.assertTrue(server.app.is_loopback('127.0.0.1'))
+        self.assertTrue(server.app.is_loopback('::1'))
+        self.assertTrue(server.app.is_loopback('localhost'))
+        self.assertFalse(server.app.is_loopback('0.0.0.0'))
+        self.assertFalse(server.app.is_loopback('100.64.1.2'))
+        self.assertFalse(server.app.is_loopback('myhost'))
 
     def test_serve_cmdline(self):
         """The serve command passes its options through to the server"""
@@ -1215,7 +1215,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
         args = cmdline.parse_args(
             ['serve', '--host', '0.0.0.0', '--port', '1234', '-s', '-r',
              '-t', 'tok'], config_fname=False)
-        with mock.patch.object(server.web, 'run_app') as run_app, \
+        with mock.patch.object(server.app.web, 'run_app') as run_app, \
                 terminal.capture() as (out, err):
             control.do_serve(args, dbdir)
         run_app.assert_called_once()
@@ -1229,7 +1229,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
 
         args = cmdline.parse_args(['serve', '--host', '0.0.0.0'],
                                   config_fname=False)
-        with mock.patch.object(server.web, 'run_app'), \
+        with mock.patch.object(server.app.web, 'run_app'), \
                 terminal.capture() as (out, err):
             control.do_serve(args, dbdir)
         self.assertIn('no --token', out.getvalue() + err.getvalue())

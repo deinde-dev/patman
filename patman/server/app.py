@@ -43,7 +43,8 @@ from patman.patchwork import Patchwork
 from patman.workflow import Wtype
 
 # Directory holding the web page and its assets
-WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web')
+WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), 'web')
 
 # Maximum amount of output to keep from each command run by a job
 MAX_JOB_OUTPUT = 20000
