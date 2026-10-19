@@ -1519,6 +1519,30 @@ function jobOutput(st) {
     h('div', { class: 'section cmd' }, `${r.cmd} — ${cmdStatus(r, st)}`), logs[i]]), follow];
 }
 
+// Show a number of bytes in a short form, e.g. '1.2 MB'
+function fmtBytes(n) {
+  if (n < 1000) return `${n} B`;
+  if (n < 1e6) return `${(n / 1e3).toFixed(1)} KB`;
+  return `${(n / 1e6).toFixed(1)} MB`;
+}
+
+// Show the requests which patman has sent to each patchwork server recently,
+// so that it is easy to see whether it is sending too many
+function trafficCard(list) {
+  const periods = [['hour', 'This hour'], ['today', 'Today'], ['week', 'Last 7 days']];
+  return h('div', { class: 'card' },
+    h('div', { class: 'name' }, 'Patchwork traffic'),
+    list.length ? list.map((item) => h('div', {},
+      h('div', { class: 'meta', title: 'Patchwork server' }, item.url),
+      h('div', { class: 'traffic',
+                 title: 'Requests sent to the server and data received from it' },
+        periods.flatMap(([key, label]) => [
+          h('span', { class: 'label' }, label),
+          h('span', {}, `${plural(item[key][0], 'request')}, ` +
+                        fmtBytes(item[key][1]))]))))
+      : h('div', { class: 'meta' }, 'No requests in the last 7 days'));
+}
+
 function viewSync() {
   const st = syncState || { results: [] };
   const active = st.running || st.queued;
@@ -1544,6 +1568,7 @@ function viewSync() {
         st.started && h('span', {}, `last started ${ago(parseTime(st.started))}`),
         st.cancelled && h('span', {}, 'cancelled')),
       h('div', { class: 'actions' }, btn, cancel)),
+    st.traffic && trafficCard(st.traffic),
     output);
   follow();
 }

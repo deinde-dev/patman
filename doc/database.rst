@@ -6,7 +6,7 @@ The patman database
 Patman stores series tracking, review and workflow state in a SQLite
 database (``.patman.db``) in the top-level git directory. The schema is
 versioned and migrated automatically when patman starts; it is currently at
-v13. The :doc:`db` chapter of the manual covers where the database is
+v14. The :doc:`db` chapter of the manual covers where the database is
 kept, the separate review database and sharing it between patman runs.
 
 The database allows patman to track a patch series across multiple
@@ -239,6 +239,24 @@ data            TEXT      JSON payload
 ser_ver_id      INTEGER   FK -> ser_ver.id (added v7b)
 ==============  ========  ==========================================
 
+traffic
+~~~~~~~
+
+The number of requests which patman sends to each patchwork server, and
+how much it receives, in hourly totals, so that it is easy to see whether
+patman is sending a lot of them. Each patman process adds its counts when
+it exits; ``patman serve`` adds them as it goes. Counts older than 90 days
+are dropped. Added in v14.
+
+==============  ========  ==========================================
+Column          Type      Description
+==============  ========  ==========================================
+hour            TEXT      Local hour, e.g. '2026-10-19 08'
+url             TEXT      URL of the patchwork server
+requests        INTEGER   Number of requests sent, including retries
+bytes           INTEGER   Number of bytes received in responses
+==============  ========  ==========================================
+
 schema_version
 ~~~~~~~~~~~~~~
 
@@ -249,5 +267,5 @@ automatically.
 ==============  ========  ==========================================
 Column          Type      Description
 ==============  ========  ==========================================
-version         INTEGER   Current schema version (currently 11)
+version         INTEGER   Current schema version (currently 14)
 ==============  ========  ==========================================

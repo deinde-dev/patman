@@ -10,6 +10,10 @@ Unreleased
 
 Added
 ~~~~~
+- patman counts the requests it sends to each patchwork server, and the
+  data it receives, by the hour, in a new ``traffic`` table (database v14).
+  The sync page of ``patman serve`` shows the totals for this hour, today
+  and the last seven days, and ``GET /api/sync`` gives them.
 - The buttons, links and tabs on the ``patman serve`` page have tooltips
   saying what they do, shown when hovering over them or, on a phone, with a
   long press. A button which needs a second tap says so.

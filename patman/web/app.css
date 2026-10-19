@@ -260,3 +260,8 @@ nav a .badge { position: absolute; top: 2px; left: 50%; margin-left: 6px;
                min-width: 16px; padding: 0 4px; border-radius: 8px;
                background: var(--st-review); color: #fff; font-size: 11px;
                line-height: 16px; text-align: center; }
+
+/* Patchwork traffic on the sync page: one line per period */
+.traffic { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px;
+           font-size: 14px; margin-top: 4px; }
+.traffic .label { color: var(--muted); }

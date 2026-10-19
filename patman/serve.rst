@@ -86,6 +86,12 @@ series you are interested in: tap 'Sync' on a series to run ``patman series
 gather -G`` for the version shown. Without ``--sync``, 'Sync now' on the sync
 page needs a second tap, since it reads all the series.
 
+The sync page also shows how many requests patman has sent to each patchwork
+server this hour, today and in the last seven days, and how much data came
+back. This counts every patman command using the same database, not just the
+server, so it shows whether patman is sending more than a busy server may
+like.
+
 Reading patches
 ---------------
 

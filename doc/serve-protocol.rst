@@ -462,6 +462,10 @@ of the most recent sync, along with:
 - ``review_sync`` (bool): true if the sync runs ``patman review --sync``
 - ``num_series`` (int): number of series which a sync reads, i.e. the latest
   version of each unarchived series with a patchwork link
+- ``traffic`` (list of object): requests sent to each patchwork server by
+  any patman process using this database, each with ``url`` and, as
+  ``[requests, bytes received]``, ``hour`` (this hour), ``today`` (since
+  midnight) and ``week`` (the last seven days)
 
 Before the first sync there is no Job, so only ``queued``, ``running``,
 ``cancelled``, ``started``, ``finished`` and ``results`` are given, along with
