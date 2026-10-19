@@ -907,6 +907,10 @@ def add_serve_subparser(subparsers):
         help='Directory holding a separate database for reviews (the '
              "'review_db_dir' setting)")
     serve.add_argument(
+        '--max-reviews', type=int, default=5, metavar='N',
+        help='Maximum number of reviews to run at once (the '
+             "'max_reviews' setting) [default: %(default)s]")
+    serve.add_argument(
         '-t', '--token', default=None,
         help='Token which clients must provide to use the API; use this '
              'when listening on a non-loopback address')

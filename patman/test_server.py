@@ -1152,15 +1152,13 @@ class TestWebServer(unittest.TestCase, TestCommon):
                     await asyncio.sleep(0.01)
                 return waiting
 
-        # The limit is read when the server is created
+        srv = self.make_server(max_parallel=2)
+        srv.get_patman_cmd = lambda *args: [
+            'sh', '-c', f'echo started; while [ ! -e {flag} ]; do sleep 0.01; '
+                        'done']
         loop = asyncio.new_event_loop()
         try:
-            with mock.patch.object(server.jobs, 'MAX_PARALLEL', 2):
-                srv = self.make_server()
-                srv.get_patman_cmd = lambda *args: [
-                    'sh', '-c', f'echo started; while [ ! -e {flag} ]; '
-                                'do sleep 0.01; done']
-                self.assertTrue(loop.run_until_complete(_go()))
+            self.assertTrue(loop.run_until_complete(_go()))
         finally:
             loop.close()
         self.assertEqual([True] * 4, [job.state['results'][0]['returncode'] == 0
@@ -1569,10 +1567,20 @@ class TestWebServer(unittest.TestCase, TestCommon):
 
         args = cmdline.parse_args(['serve', '--host', '0.0.0.0'],
                                   config_fname=False)
+        self.assertEqual(5, args.max_reviews)
         with mock.patch.object(server.app.web, 'run_app'), \
+                mock.patch.object(server.app, 'Server',
+                                  wraps=server.app.Server) as make, \
                 terminal.capture() as (out, err):
             control.do_serve(args, dbdir)
         self.assertIn('no --token', out.getvalue() + err.getvalue())
+        self.assertEqual(5, make.call_args.args[7])
+
+        args = cmdline.parse_args(['serve', '--max-reviews', '0'],
+                                  config_fname=False)
+        with self.assertRaises(ValueError) as exc:
+            control.do_serve(args, dbdir)
+        self.assertIn('--max-reviews must be at least 1', str(exc.exception))
 
 
 if __name__ == '__main__':

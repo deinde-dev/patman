@@ -49,6 +49,8 @@ The options are:
 - ``-r``, ``--review-sync``: also run ``patman review --sync`` in each sync
 - ``--review-db-dir DIR``: read reviews from a separate database (the
   ``review_db_dir`` setting)
+- ``--max-reviews N``: run at most N reviews at once (default 5; the
+  ``max_reviews`` setting); see `Jobs`_
 
 Keeping the status up to date
 -----------------------------
@@ -193,8 +195,8 @@ Jobs
 
 Commands started from the page run as jobs, one at a time in the order they are
 started, along with the syncs. Reviews of series are the exception: since each
-has its own worktree and mostly waits for the agent, up to five run at once,
-alongside the other jobs. The Jobs tab shows each job with its output as it
+has its own worktree and mostly waits for the agent, up to five run at once
+(see ``--max-reviews``), alongside the other jobs. The Jobs tab shows each job with its output as it
 runs, and lets you cancel it. A job acting on a reviewed series shows the
 series' name, with a link to its reviews. While jobs are waiting or running,
 the tab shows how many there are.
