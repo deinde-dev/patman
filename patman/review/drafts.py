@@ -179,31 +179,58 @@ def redraft_from_db(args, cser, link):
     if not need_draft:
         tout.notice('No reviews to draft: all have been sent')
         return True
-    envelopes = {rev.seq: cser.db.review_get_envelope(rev.idnum)
-                 for rev in need_draft}
-    if not all(envelopes.values()):
+    if not has_envelopes(cser, need_draft):
         return False
-
     tout.notice(f"Drafting stored reviews of '{existing[1]}' v{existing[2]}")
+    redraft_reviews(args, cser, need_draft, link)
+    return True
+
+
+def has_envelopes(cser, reviews):
+    """Check whether reviews can be drafted without asking patchwork
+
+    Args:
+        cser (Cseries): Cseries instance holding the reviews
+        reviews (list of Review): Reviews to check
+
+    Returns:
+        bool: True if each review has the headers for its reply
+    """
+    return all(cser.db.review_get_envelope(rev.idnum) for rev in reviews)
+
+
+def redraft_reviews(args, cser, reviews, link):
+    """Recreate the Gmail drafts of reviews, using their stored headers
+
+    Any existing drafts of the reviews are deleted first, so that they do
+    not linger as duplicates in the same Gmail thread.
+
+    Args:
+        args (Namespace): Command-line arguments (uses dry_run and
+            gmail_account)
+        cser (Cseries): Cseries instance holding the reviews
+        reviews (list of Review): Reviews to draft, each of which must have
+            its headers stored (see has_envelopes())
+        link (str): Patchwork series link/ID, for messages
+    """
+    envelopes = {rev.seq: cser.db.review_get_envelope(rev.idnum)
+                 for rev in reviews}
     if not args.dry_run:
-        # Remove the drafts we are about to recreate so they do not linger
-        # as duplicates in the same Gmail thread
-        delete_gmail_drafts(args, need_draft)
-    name, email = _reviewer_from_bodies(need_draft)
+        delete_gmail_drafts(args, reviews)
+    name, email = _reviewer_from_bodies(reviews)
     draft_ids = gmail.create_drafts_from_envelopes(
-        envelopes, {rev.seq: rev.body for rev in need_draft},
+        envelopes, {rev.seq: rev.body for rev in reviews},
         dry_run=args.dry_run, account=getattr(args, 'gmail_account', None),
         sender=_sender(args, name, email))
     if args.dry_run:
-        tout.notice(f'Dry run: would create {len(need_draft)} draft(s) '
+        tout.notice(f'Dry run: would create {len(reviews)} draft(s) '
                     f'(link {link})')
-        return True
-    for rev in need_draft:
+        return
+    for rev in reviews:
         if rev.seq in draft_ids:
             cser.db.review_set_draft_id(rev.idnum, draft_ids[rev.seq])
     cser.commit()
     tout.notice(f'Created {len(draft_ids)} Gmail draft(s) (link {link})')
-    return True
 
 
 # Number of drafts to check before saving progress
@@ -272,8 +299,9 @@ def _review_subject(db, rev):
 def sync_drafts(service, cser):
     """Sync draft status with Gmail
 
-    Detects sent and deleted drafts, and updates the database. Notes the
-    thread of each draft which is still pending, so that it can be found
+    Detects sent and deleted drafts, including those of reviews which have
+    been edited since their draft was made, and updates the database. Notes
+    the thread of each draft which is still pending, so that it can be found
     there once sent. Refines the voice profile if the sent text of a recent
     review differs from the draft.
 
@@ -285,7 +313,8 @@ def sync_drafts(service, cser):
         bool: True if there were drafts to sync
     """
     db = cser.db
-    reviews = db.review_get_by_status('draft')
+    reviews = (db.review_get_by_status(database.REVIEW_DRAFT) +
+               db.review_get_by_status(database.REVIEW_EDITED))
     if not reviews:
         tout.notice('No pending drafts to sync')
         return False
@@ -308,7 +337,10 @@ def sync_drafts(service, cser):
             db.review_set_sent(review_id, body, msg_id, thread_id)
             tout.notice(f'Review {review_id}: sent')
             draft = by_id[review_id]
-            if (body.strip() != draft.body.strip() and
+            # An edited review no longer has the text of its draft, so the
+            # differences are not all edits made in Gmail
+            if (draft.status == database.REVIEW_DRAFT and
+                    body.strip() != draft.body.strip() and
                     (draft.timestamp or '') >= recent and
                     refined < MAX_VOICE_REFINE):
                 tout.notice(f'Review {review_id}: edits detected, '

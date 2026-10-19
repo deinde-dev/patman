@@ -120,8 +120,10 @@ Each review has 'Show the patch' (or 'Show the cover letter'), which shows the
 commit message and diff just below the review, so the two can be read together.
 
 A review which has not been sent can be edited on the page. Saving it can also
-update its Gmail draft, so that the draft matches. Whether the review approves
-the patch follows from whether the text includes a ``Reviewed-by:`` line.
+update its Gmail draft, so that the draft matches. If it does not, the review
+shows 'draft out of date', and sending it creates the draft again first, so
+that your change is sent. Whether the review approves the patch follows from
+whether the text includes a ``Reviewed-by:`` line.
 
 To change just one comment, tap 'Edit' under it. The comment opens for editing
 in place, between the lines it quotes and the rest of the review. Saving it

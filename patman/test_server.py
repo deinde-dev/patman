@@ -952,6 +952,9 @@ class TestWebServer(unittest.TestCase, TestCommon):
         res = res[:2] + res[3:]
         self.assertEqual(('Please fix', False),
                          (res[0][1]['body'], res[0][1]['approved']))
+
+        # Its Gmail draft is now out of date
+        self.assertEqual('edited', res[0][1]['status'])
         self.assertIn('already been sent', res[2][1]['error'])
         self.assertIn('cannot be empty', res[3][1]['error'])
         rev = db.review_get(rid)

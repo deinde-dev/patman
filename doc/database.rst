@@ -136,7 +136,8 @@ body              TEXT      Review email body text
 approved          BIT       True if Reviewed-by was given
 timestamp         TEXT      ISO datetime of review creation
 draft_id          TEXT      Gmail draft ID (added v9)
-status            TEXT      'new', 'draft', 'sent', 'deleted',
+status            TEXT      'new', 'draft', 'edited' (the draft is
+                            older than the text), 'sent', 'deleted',
                             'replied' (added v9)
 gmail_msg_id      TEXT      Gmail message ID after sending (added v9)
 gmail_thread_id   TEXT      Gmail thread ID for replies (added v9)

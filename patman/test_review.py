@@ -1270,6 +1270,80 @@ class TestReview(CseriesTester):
             run('-i', '2')
         self.assertIn('No Gmail drafts to send', str(exc.exception))
 
+    def test_review_send_edited(self):
+        """A review edited since its draft was made is drafted again first"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'Fred series', None)
+        db.series_set_source(sid, 'review')
+        svid = db.ser_ver_add(sid, 1, link='123')
+        ids = {}
+        for seq in (0, 1, 2):
+            ids[seq] = db.review_add(svid, seq, f'Review {seq}', False,
+                                     '2026-10-01T00:00:00')
+            db.review_set_draft_id(ids[seq], f'd{seq}')
+        db.review_set_envelope(ids[1], {'subject': 'Re: [PATCH 1/2] x'})
+
+        # Saving the same text leaves the draft as it is
+        db.review_set_body(ids[0], 'Review 0', False)
+        db.review_set_body(ids[1], 'Review 1, edited', False)
+        db.commit()
+        self.assertEqual('draft', db.review_get(ids[0]).status)
+        self.assertEqual('edited', db.review_get(ids[1]).status)
+
+        def run(*argv):
+            args = cmdline.parse_args(['review', '-s', '123', '--send',
+                                       *argv], config_fname=False)
+            with mock.patch.object(gmail, 'check_available',
+                                   return_value=True), \
+                    mock.patch.object(gmail, 'get_service'), \
+                    mock.patch.object(gmail, 'delete_draft') as delete, \
+                    mock.patch.object(gmail, 'create_drafts_from_envelopes',
+                                      return_value={1: 'd1b'}) as create, \
+                    mock.patch.object(gmail, 'send_draft', side_effect=lambda
+                                      _service, draft_id: ('Sent', 'm', 't')
+                                      ) as sender, \
+                    terminal.capture() as (out, _):
+                ret = review.stored._do_send(args, cser, '123')
+            return (ret, [call.args[1] for call in delete.call_args_list],
+                    create, [call.args[1] for call in sender.call_args_list],
+                    out.getvalue())
+
+        ret, deleted, create, sent, out = run('-n', '-i', '0,1')
+        self.assertEqual((0, [], []), (ret, deleted, sent))
+        create.assert_not_called()
+        self.assertIn('would send the review of the cover letter', out)
+        self.assertIn('would draft again and send the review of patch 1', out)
+
+        # Without its headers, patch 2's review cannot be drafted again, so
+        # nothing is sent
+        db.review_set_body(ids[2], 'Review 2, edited', False)
+        db.commit()
+        with self.assertRaises(ValueError) as exc:
+            run()
+        self.assertIn('cannot be drafted again without patchwork, so use '
+                      '--redraft first: patch 2', str(exc.exception))
+
+        ret, deleted, create, sent, out = run('-i', '0,1')
+        self.assertEqual((0, ['d1'], ['d0', 'd1b']), (ret, deleted, sent))
+        self.assertEqual(({1: {'subject': 'Re: [PATCH 1/2] x'}},
+                          {1: 'Review 1, edited'}), create.call_args.args)
+        self.assertIn('1 review(s) changed since being drafted', out)
+        self.assertEqual('sent', db.review_get(ids[1]).status)
+
+        # An edited review is still synced, but its sent text is not taken
+        # as an edit made in Gmail
+        def fake_sync(_service, items):
+            return {items[0].idnum: ('Sent', 'm2', 't2')}, [], {}
+
+        with mock.patch.object(gmail, 'sync_drafts', side_effect=fake_sync), \
+                mock.patch.object(review.voice,
+                                  'refine_voice_sync') as refine, \
+                terminal.capture():
+            review.drafts.sync_drafts(None, cser)
+        refine.assert_not_called()
+        self.assertEqual('sent', db.review_get(ids[2]).status)
+
     def test_gmail_send_draft(self):
         """A draft is read, then sent"""
         service = mock.MagicMock()

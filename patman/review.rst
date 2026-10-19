@@ -336,7 +336,14 @@ Once you are happy with the drafts, you can send them without opening Gmail.
 ``--send`` sends the Gmail drafts of a series' reviews, the cover letter's
 first, and records each review as sent, with the text which was sent, in
 case you changed it in Gmail. Use ``-i`` to send only some of them, and
-``-n`` to see what would be sent::
+``-n`` to see what would be sent.
+
+If a review has been changed since its draft was made, e.g. edited on the
+``patman serve`` page without updating the draft, or revised without
+``-d``, its draft no longer matches it. Its status is then 'edited', and
+``--send`` creates its draft again before sending it, so that the change is
+sent. A review stored before patman kept the headers of its reply needs
+patchwork for this, so ``--send`` stops and asks for ``--redraft`` first::
 
     patman review -s 497923 -U us --send -n
     patman review -s 497923 -U us --send -i 0,2

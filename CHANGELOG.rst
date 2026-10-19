@@ -46,6 +46,11 @@ Changed
 
 Fixed
 ~~~~~
+- A review which is changed after its Gmail draft is made, without
+  updating the draft, is marked 'edited' ('draft out of date' on the
+  ``patman serve`` page). ``patman review --send``, and Send on the page,
+  create its draft again before sending it. Before, the old draft was sent
+  and the change was lost.
 - When a patchwork server does not respond, the error says which server and
   how long patman waited, rather than just ``TimeoutError``.
 - ``patman test`` gives the same results whichever directory it is run
