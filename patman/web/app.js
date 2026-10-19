@@ -809,6 +809,22 @@ const REVIEW_STATUS = {
   replied: 'replied', deleted: 'deleted',
 };
 
+// Reviews which still need something done before they are sent are shown in
+// one colour, and those which have been sent in another
+const REVIEW_STATUS_CLASS = {
+  new: 'rs-todo', draft: 'rs-todo', edited: 'rs-todo', sent: 'rs-done',
+  replied: 'rs-done',
+};
+const REVIEW_STATUS_TIP = {
+  new: 'There is no Gmail draft of this review yet',
+  draft: 'The Gmail draft of this review is ready to send',
+  edited: 'The review has changed since its Gmail draft was made; sending it ' +
+          'makes the draft again',
+  sent: 'This review has been sent',
+  replied: 'This review has been sent, and someone has replied',
+  deleted: 'The Gmail draft was deleted without being sent',
+};
+
 // Check whether a review has a Gmail draft. An edited review's draft is
 // created again when it is sent
 const hasDraft = (r) => r.status === 'draft' || r.status === 'edited';
@@ -868,7 +884,7 @@ async function viewReviewList() {
           : null,
         h('span', {}, `${r.approved}/${r.num_reviews} approved`),
         Object.entries(r.statuses).map(([st, n]) =>
-          h('span', {}, `${n} ${REVIEW_STATUS[st] || st}`)),
+          h('span', { class: REVIEW_STATUS_CLASS[st] }, `${n} ${REVIEW_STATUS[st] || st}`)),
         r.timestamp && h('span', {}, ago(parseTime(r.timestamp))))) })),
     [['all', 'All', 'All your reviews'],
      ['replies', 'Needs reply', 'Reviews with replies waiting for your response']]));
@@ -1017,7 +1033,9 @@ async function viewReview(id, wantVer) {
         : label),
       h('span', { class: `chip ${r.approved ? 'st-accepted' : 'st-changes-requested'}` },
         r.approved ? 'Reviewed-by' : 'comments'),
-      h('span', { class: 'ver' }, REVIEW_STATUS[r.status] || r.status || ''));
+      h('span', { class: `ver ${REVIEW_STATUS_CLASS[r.status] || ''}`,
+                  title: REVIEW_STATUS_TIP[r.status] },
+        REVIEW_STATUS[r.status] || r.status || ''));
     const header = h('div', {}, title, strip);
     const ask = (part) => fill(card, header, reviseForm(
       part, hasDraft(r), show,

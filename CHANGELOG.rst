@@ -50,6 +50,9 @@ Added
 
 Changed
 ~~~~~~~
+- On the ``patman serve`` page, the status of each review, and the counts in
+  the list of reviews, are amber when the review is still to be sent and
+  green once it has been sent, with a tooltip saying what the status means.
 - ``patman serve`` keeps its jobs, with their output, when it restarts, so
   the Jobs tab and the job numbers carry on. A job which the server no longer
   knows about says so, rather than showing 'No job 1'.
