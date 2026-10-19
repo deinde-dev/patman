@@ -52,9 +52,10 @@ def _do_send(args, cser, link):
     """Send the Gmail drafts of the reviews of a series
 
     The cover letter's review is sent first, then the patches' in order.
-    With -i, only those patches' drafts are sent. Each review is recorded as
-    sent, with the text which was sent, since the draft may have been
-    changed in Gmail.
+    With -i, only those patches' drafts are sent. A review which has been
+    edited since its draft was made has its draft created again first, so
+    that the edit is sent. Each review is recorded as sent, with the text
+    which was sent, since the draft may have been changed in Gmail.
 
     Args:
         args (Namespace): Command-line arguments
@@ -70,18 +71,35 @@ def _do_send(args, cser, link):
     _, name, version, svid = existing
     sel = common.parse_patch_selection(args.patches)
     reviews = sorted((rev for rev in cser.db.review_get_for_version(svid)
-                      if rev.status == database.REVIEW_DRAFT and
+                      if rev.status in (database.REVIEW_DRAFT,
+                                        database.REVIEW_EDITED) and
                       rev.draft_id and (not sel or rev.seq in sel)),
                      key=lambda rev: rev.seq)
     if not reviews:
         raise ValueError(f"No Gmail drafts to send in '{name}' v{version}")
+    edited = [rev for rev in reviews if rev.status == database.REVIEW_EDITED]
+    stuck = [rev for rev in edited if not drafts.has_envelopes(cser, [rev])]
+    if stuck:
+        labels = ', '.join(_review_label(rev.seq) for rev in stuck)
+        raise ValueError(
+            'These reviews have changed since their drafts were made, but '
+            'cannot be drafted again without patchwork, so use --redraft '
+            f'first: {labels}')
     if args.dry_run:
         for rev in reviews:
-            tout.notice(f'Dry run: would send the review of '
+            what = ('draft again and send' if rev in edited else 'send')
+            tout.notice(f'Dry run: would {what} the review of '
                         f'{_review_label(rev.seq)}')
         return 0
     if not gmail.check_available():
         return 1
+
+    if edited:
+        tout.notice(f'{len(edited)} review(s) changed since being drafted')
+        drafts.redraft_reviews(args, cser, edited, link)
+        # Pick up the new draft IDs
+        reviews = [cser.db.review_get(rev.idnum) for rev in reviews]
+        reviews = [rev for rev in reviews if rev.draft_id]
 
     service = gmail.get_service(getattr(args, 'gmail_account', None))
     failed = 0

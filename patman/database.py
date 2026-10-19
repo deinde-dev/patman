@@ -28,6 +28,7 @@ LATEST = 13
 # Review status values
 REVIEW_NEW = 'new'          # AI review generated, no draft created
 REVIEW_DRAFT = 'draft'      # Gmail draft created
+REVIEW_EDITED = 'edited'    # Gmail draft created, but the review has changed
 REVIEW_SENT = 'sent'        # Draft was sent
 REVIEW_DELETED = 'deleted'  # Draft was deleted without sending
 REVIEW_REPLIED = 'replied'  # Author has replied to our review
@@ -1525,11 +1526,18 @@ class Database:  # pylint:disable=R0904
     def review_set_body(self, review_id, body, approved):
         """Change the text of a review which has not been sent
 
+        If the review has a Gmail draft and its text changes, it is marked
+        as edited, since the draft no longer matches it. Creating the draft
+        again marks it as a draft.
+
         Args:
             review_id (int): Review record ID
             body (str): New review email body text
             approved (bool): True if Reviewed-by is given
         """
+        self.execute(
+            'UPDATE review SET status = ? WHERE id = ? AND status = ? AND '
+            'body != ?', (REVIEW_EDITED, review_id, REVIEW_DRAFT, body))
         self.execute(
             'UPDATE review SET body = ?, approved = ? WHERE id = ?',
             (body, 1 if approved else 0, review_id))

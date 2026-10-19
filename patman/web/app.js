@@ -781,9 +781,13 @@ function mailToggle(kind, id, ups) {
 // --- Reviews ---
 
 const REVIEW_STATUS = {
-  new: 'not drafted', draft: 'draft', sent: 'sent', replied: 'replied',
-  deleted: 'deleted',
+  new: 'not drafted', draft: 'draft', edited: 'draft out of date', sent: 'sent',
+  replied: 'replied', deleted: 'deleted',
 };
+
+// Check whether a review has a Gmail draft. An edited review's draft is
+// created again when it is sent
+const hasDraft = (r) => r.status === 'draft' || r.status === 'edited';
 
 // Start a job and show it
 async function startJob(path, data, msg) {
@@ -948,8 +952,7 @@ async function viewReview(id, wantVer) {
                                     unsent);
   const revise = (seqs, part, note, drafts, msg) => runHere(`reviews/${id}/revise`,
     { part, note, drafts }, seqs, 'Revise', unsent, msg);
-  const send = (seqs) => runHere(`reviews/${id}/send`, {}, seqs, 'Send',
-                                 (r) => r.status === 'draft');
+  const send = (seqs) => runHere(`reviews/${id}/send`, {}, seqs, 'Send', hasDraft);
   const reviewCard = (r) => {
     const card = h('div', { class: 'card review' });
     const strip = h('div', { class: 'jobstrip' });
@@ -969,10 +972,10 @@ async function viewReview(id, wantVer) {
       h('span', { class: 'ver' }, REVIEW_STATUS[r.status] || r.status || ''));
     const header = h('div', {}, title, strip);
     const ask = (part) => card.replaceChildren(header, reviseForm(
-      part, r.status === 'draft', show,
+      part, hasDraft(r), show,
       (note, drafts, msg) => revise([r.seq], part, note, drafts, msg)));
     const editChunk = (comment, splice, cancel) => chunkForm(
-      comment, r.status === 'draft', cancel,
+      comment, hasDraft(r), cancel,
       (text, redraft) => saveReview(r, splice(text), redraft, entries.get(r.id),
                                     refresh));
     // A review can be changed if it has not been sent and no job is acting on it
@@ -990,9 +993,11 @@ async function viewReview(id, wantVer) {
                         title: 'Ask the agent to change the review' }, 'Revise'),
           confirmButton('Redraft', 'btn light small', () => redraft([r.seq]),
                         'Create the Gmail draft of this review again'),
-          r.status === 'draft' && confirmButton('Send', 'btn small',
-                                                () => send([r.seq]),
-                                                'Send the Gmail draft of this review')]),
+          hasDraft(r) && confirmButton('Send', 'btn small', () => send([r.seq]),
+            r.status === 'edited'
+              ? 'Create the Gmail draft of this review again, since it has changed, ' +
+                'and send it'
+              : 'Send the Gmail draft of this review')]),
       ...(mailBox ? [mailBox] : []),
       ...(r.replies || []).map(replyBox));
     entries.set(r.id, { r, strip, show, busy: false });
@@ -1010,11 +1015,11 @@ async function viewReview(id, wantVer) {
     if (st) trackJob(st, st.title.split(' ')[0], targets, refresh);
   });
   const anyUnsent = sv.reviews.some(unsent);
-  const drafts = sv.reviews.filter((r) => r.status === 'draft').length;
+  const drafts = sv.reviews.filter(hasDraft).length;
   const reviseAll = h('div', {});
   const askAll = () => reviseAll.replaceChildren(h('div', { class: 'card' },
     h('div', { class: 'name' }, 'Revise all the reviews'),
-    reviseForm(null, sv.reviews.some((r) => r.status === 'draft'),
+    reviseForm(null, sv.reviews.some(hasDraft),
                () => reviseAll.replaceChildren(),
                (note, drafts, msg) => revise([], null, note, drafts, msg))));
   const actions = sv.link && h('div', { class: 'actions' },
@@ -1025,7 +1030,8 @@ async function viewReview(id, wantVer) {
                    'Revise all'),
     drafts > 0 && confirmButton(drafts === 1 ? 'Send the draft' : `Send ${drafts} drafts`,
                                 'btn small', () => send([]),
-                                'Send the Gmail drafts of the reviews'),
+                                'Send the Gmail drafts of the reviews, first drafting again ' +
+                                'any which are out of date'),
     confirmButton('Review again', 'btn light small', () => startJob('review',
       { target: sv.link, ups: ser.upstream, drafts: true, force: true }),
       'Have the agent review this version of the series again'),
@@ -1227,7 +1233,7 @@ function chunkForm(comment, drafted, cancel, submit) {
 function editReview(card, r, header, show, target, refresh) {
   const text = h('textarea', { spellcheck: 'true' });
   text.value = r.body;
-  const box = h('input', { type: 'checkbox', checked: r.status === 'draft' });
+  const box = h('input', { type: 'checkbox', checked: hasDraft(r) });
   const msg = h('div', { class: 'msg' });
   const save = h('button', { class: 'btn small', onclick: async () => {
     save.disabled = true;
