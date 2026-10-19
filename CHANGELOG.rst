@@ -8,13 +8,6 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
-Changed
-~~~~~~~
-- ``patman serve`` keeps the inbox it reads from patchwork for ten minutes,
-  so that showing it again, on any device, sends no requests. The inbox says
-  when it was read and has 'Refresh' to read it again. ``GET /api/inbox``
-  gives ``fetched`` and takes ``refresh=1``.
-
 0.5.0 - 2026-10-19
 ------------------
 
@@ -69,6 +62,10 @@ Added
 
 Changed
 ~~~~~~~
+- ``patman serve`` keeps the inbox it reads from patchwork for ten minutes,
+  so that showing it again, on any device, sends no requests. The inbox says
+  when it was read and has 'Refresh' to read it again. ``GET /api/inbox``
+  gives ``fetched`` and takes ``refresh=1``.
 - 'Comments' under a review on the ``patman serve`` page leaves out your own
   comments on patchwork, such as the review itself, since they need no
   response. ``GET /api/comments`` marks each comment from your git
