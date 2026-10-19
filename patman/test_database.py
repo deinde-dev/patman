@@ -5,6 +5,7 @@
 """Tests for 'patman database' and migrating the database"""
 
 import os
+from unittest import mock
 
 
 from u_boot_pylib import terminal
@@ -14,6 +15,7 @@ from patman import control
 from patman import cseries
 from patman.database import Pcommit
 from patman import database
+from patman import traffic
 from patman.test_common import CseriesTester
 
 #pylint: disable=protected-access
@@ -254,7 +256,43 @@ class TestDatabase(CseriesTester):
             self.assertEqual(f'Update database to v{version}',
                              out.getvalue().strip())
             self.assertEqual(version, db.get_schema_version())
-        self.assertEqual(13, database.LATEST)
+        self.assertEqual(14, database.LATEST)
+
+    def test_traffic(self):
+        """Requests to patchwork are counted by the hour"""
+        db = database.Database(f'{self.tmpdir}/.patman.db')
+        with terminal.capture():
+            db.start()
+        db.traffic_add('2026-10-18 09', {'https://pw': (5, 100)})
+        db.traffic_add('2026-10-19 08', {'https://pw': (2, 20),
+                                         'https://other': (1, 5)})
+        db.traffic_add('2026-10-19 08', {'https://pw': (1, 10)})
+        self.assertEqual({'https://pw': (8, 130), 'https://other': (1, 5)},
+                         db.traffic_get('2026-10-18 00'))
+        self.assertEqual({'https://pw': (3, 30), 'https://other': (1, 5)},
+                         db.traffic_get('2026-10-19 08'))
+
+        # Old counts are dropped
+        db.traffic_add('2026-10-19 09', {}, drop_before='2026-10-19 00')
+        self.assertEqual({'https://pw': (3, 30), 'https://other': (1, 5)},
+                         db.traffic_get('2000-01-01 00'))
+
+        # At exit, counts are only written if the database is closed, since
+        # it may hold changes which a command did not mean to keep
+        traffic.take()
+        traffic.add('https://pw', requests=4, nbytes=40)
+        with mock.patch.object(traffic, '_db_path', db.db_path):
+            traffic._save_at_exit()
+            self.assertEqual({'https://pw': (4, 40)}, traffic.take())
+
+            traffic.add('https://pw', requests=4, nbytes=40)
+            db.close()
+            traffic._save_at_exit()
+        self.assertEqual({}, traffic.take())
+        db.open_it()
+        hour = traffic.hour_key()
+        self.assertEqual({'https://pw': (4, 40)}, db.traffic_get(hour))
+        db.close()
 
     def test_migrate_future_version(self):
         """Test that a database newer than patman is rejected"""

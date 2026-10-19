@@ -22,6 +22,7 @@ from aiohttp import web
 from u_boot_pylib import tout
 
 from patman import database
+from patman import traffic
 from patman.patchwork import Patchwork
 from patman.server import info
 from patman.server import jobs
@@ -206,7 +207,8 @@ class Server(jobs.JobRunner):
 
     @property
     def sync_state(self):
-        """dict: State of the most recent sync, with the sync settings"""
+        """dict: State of the most recent sync, with the sync settings and
+        the recent traffic to each patchwork server"""
         job = self._sync_job()
         state = dict(job.state) if job else {
             'queued': False, 'running': False, 'cancelled': False,
@@ -214,6 +216,7 @@ class Server(jobs.JobRunner):
         state['interval'] = self.sync_interval
         state['review_sync'] = self.review_sync
         state['num_series'] = info.get_gather_count(self.cser)
+        state['traffic'] = traffic.get_summary(self.cser.db)
         return state
 
     def _start_sync(self):
@@ -303,6 +306,25 @@ class Server(jobs.JobRunner):
                 return web.json_response({'error': 'Unauthorised'},
                                          status=401)
         return await handler(request)
+
+    @web.middleware
+    async def _save_traffic(self, request, handler):
+        """Count the requests sent to patchwork while handling a request
+
+        The server runs until it is stopped, so it writes the counts out as
+        it goes, rather than when it exits
+
+        Args:
+            request (web.Request): Request being handled
+            handler (callable): Next handler
+
+        Return:
+            web.Response: Response from the handler
+        """
+        try:
+            return await handler(request)
+        finally:
+            traffic.save(self.cser.db)
 
     @web.middleware
     async def _no_cache(self, request, handler):
@@ -1102,7 +1124,8 @@ class Server(jobs.JobRunner):
             web.Application: Application, ready to run
         """
         app = web.Application(
-            middlewares=[self._errors, self._auth, self._no_cache])
+            middlewares=[self._errors, self._auth, self._no_cache,
+                         self._save_traffic])
         app.router.add_get('/api/series', self._series_list)
         app.router.add_get(r'/api/series/{idnum:\d+}', self._series_detail)
         app.router.add_post(r'/api/series/{idnum:\d+}/sync',

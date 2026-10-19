@@ -5,6 +5,7 @@
 """Tests for the 'patman serve' web server"""
 
 import asyncio
+from datetime import datetime, timedelta
 import json
 import os
 import signal
@@ -27,6 +28,7 @@ from patman.database import Pcommit
 from patman import patchwork
 from patman.patchwork import Patchwork
 from patman import server
+from patman import traffic
 from patman.test_common import TestCommon
 from patman.workflow import Wtype
 
@@ -588,6 +590,28 @@ class TestWebServer(unittest.TestCase, TestCommon):
                            cwd=self.tmpdir, check=True)
         self.assertEqual(['git', 'fetch', '-q', '--multiple', 'other', 'us'],
                          srv.get_sync_cmds()[0])
+
+    def test_sync_traffic(self):
+        """The sync state shows the traffic to each patchwork server"""
+        srv = self.make_server()
+        traffic.take()
+        traffic.add('https://pw', requests=2, nbytes=500)
+
+        # The server writes out the counts after handling a request
+        self.call(srv, 'GET', '/api/version')
+        self.assertEqual({}, traffic.take())
+        _, state = self.call(srv, 'GET', '/api/sync')
+        self.assertEqual([{'url': 'https://pw', 'hour': [2, 500],
+                           'today': [2, 500], 'week': [2, 500]}],
+                         state['traffic'])
+
+        # Older counts only appear in the longer periods
+        now = datetime.now()
+        self.cser.db.traffic_add(traffic.hour_key(now - timedelta(days=2)),
+                                 {'https://pw': (10, 1000)})
+        self.assertEqual(
+            [{'url': 'https://pw', 'hour': [2, 500], 'today': [2, 500],
+              'week': [12, 1500]}], traffic.get_summary(self.cser.db, now))
 
     def test_sync(self):
         """A sync runs each command and records its output"""
@@ -1195,13 +1219,16 @@ class TestWebServer(unittest.TestCase, TestCommon):
         app = web.Application()
         app.router.add_get('/api/1.2/{tail:.*}', handler)
 
+        urls = []
+
         async def _go():
             async with TestServer(app) as tserver:
-                pwork = Patchwork(str(tserver.make_url('')).rstrip('/'),
-                                  show_progress=False)
+                urls.append(str(tserver.make_url('')).rstrip('/'))
+                pwork = Patchwork(urls[0], show_progress=False)
                 async with aiohttp.ClientSession() as client:
                     return await pwork._request(client, 'patches/1/')
 
+        traffic.take()
         loop = asyncio.new_event_loop()
         try:
             with mock.patch.object(patchwork, 'REQUEST_TIMEOUT', 0.2), \
@@ -1211,6 +1238,9 @@ class TestWebServer(unittest.TestCase, TestCommon):
         finally:
             loop.close()
         self.assertEqual(3, len(calls))
+
+        # Each try is counted, along with what came back
+        self.assertEqual({urls[0]: (3, len('{"ok": 3}'))}, traffic.take())
 
     def test_patchwork_connect_retry(self):
         """A failed connection is retried, but a name which fails is not"""

@@ -22,7 +22,7 @@ from u_boot_pylib import tout
 from patman.series import Series
 
 # Schema version (version 0 means there is no database yet)
-LATEST = 13
+LATEST = 14
 
 # Information about a review record
 # Review status values
@@ -322,6 +322,12 @@ class Database:  # pylint:disable=R0904
         """Add the headers for replying with a review to the review table"""
         self.cur.execute('ALTER TABLE review ADD COLUMN envelope')
 
+    def _migrate_to_v14(self):
+        """Add a table counting the requests sent to patchwork servers"""
+        self.cur.execute(
+            'CREATE TABLE traffic (hour TEXT, url TEXT, requests INTEGER, '
+            'bytes INTEGER, PRIMARY KEY (hour, url))')
+
     # pylint: disable=R0912
     def migrate_to(self, dest_version):
         """Migrate the database to the selected version
@@ -380,6 +386,8 @@ class Database:  # pylint:disable=R0904
                 self._migrate_to_v12()
             elif version == 13:
                 self._migrate_to_v13()
+            elif version == 14:
+                self._migrate_to_v14()
 
             # Save the new version if we have a schema_version table
             if version > 1:
@@ -422,6 +430,41 @@ class Database:  # pylint:disable=R0904
 
         """
         return self.cur.execute(query, parameters)
+
+    def traffic_add(self, hour, counts, drop_before=None):
+        """Add to the counts of requests sent to patchwork servers
+
+        Args:
+            hour (str): Hour to add to, e.g. '2026-10-19 08'
+            counts (dict): key (str): URL of the patchwork server
+                value (tuple): (number of requests, bytes received)
+            drop_before (str or None): Drop the counts for hours before this
+                one, or None to keep them all
+        """
+        for url, (requests, nbytes) in counts.items():
+            self.execute(
+                'INSERT INTO traffic (hour, url, requests, bytes) '
+                'VALUES (?, ?, ?, ?) ON CONFLICT (hour, url) DO UPDATE SET '
+                'requests = requests + excluded.requests, '
+                'bytes = bytes + excluded.bytes',
+                (hour, url, requests, nbytes))
+        if drop_before:
+            self.execute('DELETE FROM traffic WHERE hour < ?', (drop_before,))
+
+    def traffic_get(self, since):
+        """Get the requests sent to each patchwork server since an hour
+
+        Args:
+            since (str): First hour to include, e.g. '2026-10-19 08'
+
+        Return:
+            dict: key (str): URL of the patchwork server
+                value (tuple): (number of requests, bytes received)
+        """
+        res = self.execute(
+            'SELECT url, SUM(requests), SUM(bytes) FROM traffic '
+            'WHERE hour >= ? GROUP BY url', (since,))
+        return {url: (requests, nbytes) for url, requests, nbytes in res}
 
     def commit(self):
         """Commit changes to the database"""

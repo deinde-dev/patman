@@ -17,6 +17,8 @@ from collections import namedtuple
 from u_boot_pylib import terminal
 from u_boot_pylib import tout
 
+from patman import traffic
+
 # Information passed to series_get_states()
 # link (str): Patchwork link for series
 # series_id (int): Series ID in database
@@ -240,10 +242,13 @@ class Patchwork:
             # print('full_url', full_url)
             for i in range(RETRIES + 1):
                 try:
+                    traffic.add(self.url, requests=1)
                     async with client.get(
                             full_url, proxy=get_proxy(full_url),
                             timeout=aiohttp.ClientTimeout(
                                 total=REQUEST_TIMEOUT)) as response:
+                        traffic.add(self.url,
+                                    nbytes=len(await response.read()))
                         if response.status in RETRY_STATUS and i < RETRIES:
                             # The server is overloaded, so try again later
                             await asyncio.sleep(i + 1)
@@ -582,8 +587,10 @@ class Patchwork:
         self.request_count += 1
         full_url = f'{self.url}/series/{link}/mbox/'
         async with self.semaphore:
+            traffic.add(self.url, requests=1)
             async with client.get(
                     full_url, proxy=get_proxy(full_url)) as response:
+                traffic.add(self.url, nbytes=len(await response.read()))
                 if response.status != 200:
                     raise ValueError(
                         f'Failed to download mbox: HTTP {response.status}')

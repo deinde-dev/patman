@@ -28,6 +28,7 @@ from patman.database import Database, Pcommit, SerVer
 from patman import patchwork
 from patman.series import Series
 from patman import status
+from patman import traffic
 from patman.workflow import Wtype
 
 
@@ -132,6 +133,9 @@ class CseriesHelper:
         db_dir = (self.db_dir or os.environ.get('PATMAN_DB_DIR') or
                   self.topdir)
         fname = os.path.join(os.path.expanduser(db_dir), '.patman.db')
+
+        # Patchwork traffic is counted in the main database, the first opened
+        traffic.set_db(fname)
 
         # For the first instance, start it up with the expected schema
         self.db, is_new = Database.get_instance(fname)
