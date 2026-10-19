@@ -694,7 +694,7 @@ def add_review_subparser(subparsers):
     review.add_argument(
         '-i', '--index', type=str, dest='patches',
         help='Review only specific patches by index (e.g. 3 or 1,3,5 '
-        'or 2-7)')
+        'or 2-7), with 0 for the cover letter')
     review.add_argument(
         '-n', '--dry-run', action='store_true', dest='dry_run',
         default=False,

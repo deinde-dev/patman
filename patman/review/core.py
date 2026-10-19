@@ -199,15 +199,21 @@ async def review_patches(ctx):
 
     patch_sel = getattr(ctx, 'patch_selection', None)
 
-    if ctx.cover_content and ctx.patch_count > 1 and not patch_sel:
-        body = await _review_cover_letter(ctx, all_commits)
-        if body:
-            review_bodies[0] = body
     # Check which patches already have stored reviews
     existing_reviews = set()
     if hasattr(ctx, 'svid') and ctx.svid:
         for rev in ctx.cser.db.review_get_for_version(ctx.svid):
             existing_reviews.add(rev.seq)
+
+    # The cover letter is reviewed along with the whole series, or on its
+    # own when chosen as patch 0
+    if (ctx.cover_content and ctx.patch_count > 1 and
+            (not patch_sel or 0 in patch_sel) and 0 not in existing_reviews):
+        body = await _review_cover_letter(ctx, all_commits)
+        if body:
+            review_bodies[0] = body
+        elif patch_sel:
+            tout.notice('The agent has no comments on the cover letter')
 
     # Map each commit to its patchwork patch number by subject. The
     # applied branch may hold fewer commits than the series has patches
