@@ -97,6 +97,9 @@ def _handle_replies(service, ctx):
                 tout.notice(f"Review {rev.idnum}: reply {reply_id} from "
                             f"{reply['from']}, already answered")
                 continue
+            # A reply which needs a response shows the series again
+            db.series_set_hidden(db.ser_ver_get_by_id(rev.svid).series_id,
+                                 False)
             if _is_recent(reply['date'], SUGGEST_DAYS):
                 new.append(reply_id)
             tout.notice(f"Review {rev.idnum}: reply {reply_id} from "

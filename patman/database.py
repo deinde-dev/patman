@@ -22,7 +22,7 @@ from u_boot_pylib import tout
 from patman.series import Series
 
 # Schema version (version 0 means there is no database yet)
-LATEST = 15
+LATEST = 16
 
 # Information about a review record
 # Review status values
@@ -340,6 +340,10 @@ class Database:  # pylint:disable=R0904
         self.cur.execute('ALTER TABLE reply ADD COLUMN seq INTEGER')
         self.cur.execute('ALTER TABLE reply ADD COLUMN comment_id INTEGER')
 
+    def _migrate_to_v16(self):
+        """Allow reviewed series to be hidden from the list of reviews"""
+        self.cur.execute('ALTER TABLE series ADD COLUMN hidden BIT')
+
     # pylint: disable=R0912
     def migrate_to(self, dest_version):
         """Migrate the database to the selected version
@@ -402,6 +406,8 @@ class Database:  # pylint:disable=R0904
                 self._migrate_to_v14()
             elif version == 15:
                 self._migrate_to_v15()
+            elif version == 16:
+                self._migrate_to_v16()
 
             # Save the new version if we have a schema_version table
             if version > 1:
@@ -741,6 +747,25 @@ class Database:  # pylint:disable=R0904
         self.execute(
             'UPDATE series SET upstream = ? WHERE id = ?',
             (ups, series_idnum))
+
+    def series_set_hidden(self, series_idnum, hidden):
+        """Hide a reviewed series from the list of reviews, or show it again
+
+        Args:
+            series_idnum (int): ID num of the series
+            hidden (bool): True to hide it
+        """
+        self.execute('UPDATE series SET hidden = ? WHERE id = ?',
+                     (1 if hidden else 0, series_idnum))
+
+    def series_get_hidden(self):
+        """Get the series which are hidden from the list of reviews
+
+        Return:
+            set of int: ID nums of the hidden series
+        """
+        res = self.execute('SELECT id FROM series WHERE hidden = 1')
+        return {rec[0] for rec in res.fetchall()}
 
     def series_set_source(self, series_idnum, source):
         """Update the source field for a series

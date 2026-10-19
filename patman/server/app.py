@@ -1117,6 +1117,33 @@ class Server(jobs.JobRunner):
         return self._review_job(f'Send {params.parts_text(seqs)} of {what}',
                                 *args, target=target)
 
+    async def _hide(self, request):
+        """Handle 'POST /api/reviews/<id>/hide': hide a reviewed series
+
+        This hides the series from the list of reviews, or shows it again.
+        The body gives 'hidden' (bool).
+
+        Args:
+            request (web.Request): Request, with the series ID as 'idnum'
+
+        Return:
+            web.Response: Object with the series 'id' and whether it is
+                'hidden'
+
+        Raises:
+            BadRequest: 'hidden' is missing or not true or false
+            ValueError: The series does not exist
+        """
+        idnum = int(request.match_info['idnum'])
+        data = await self._read_json(request)
+        hidden = data.get('hidden')
+        if not isinstance(hidden, bool):
+            raise params.BadRequest("Please say whether it is 'hidden'")
+        self.rcser.db.series_get_info(idnum)
+        self.rcser.db.series_set_hidden(idnum, hidden)
+        self.rcser.commit()
+        return web.json_response({'id': idnum, 'hidden': hidden})
+
     async def _delete(self, request):
         """Handle 'POST /api/reviews/<id>/delete': delete reviews
 
@@ -1362,6 +1389,7 @@ class Server(jobs.JobRunner):
         app.router.add_post(r'/api/reviews/{idnum:\d+}/send', self._send)
         app.router.add_post(r'/api/reviews/{idnum:\d+}/delete',
                             self._delete)
+        app.router.add_post(r'/api/reviews/{idnum:\d+}/hide', self._hide)
         app.router.add_post(r'/api/reviews/{idnum:\d+}/respond',
                             self._respond)
         app.router.add_post(r'/api/review-items/{idnum:\d+}',

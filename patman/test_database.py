@@ -290,7 +290,7 @@ class TestDatabase(CseriesTester):
             self.assertEqual(f'Update database to v{version}',
                              out.getvalue().strip())
             self.assertEqual(version, db.get_schema_version())
-        self.assertEqual(15, database.LATEST)
+        self.assertEqual(16, database.LATEST)
 
     def test_traffic(self):
         """Requests to patchwork are counted by the hour"""
@@ -326,6 +326,21 @@ class TestDatabase(CseriesTester):
         db.open_it()
         hour = traffic.hour_key()
         self.assertEqual({'https://pw': (4, 40)}, db.traffic_get(hour))
+        db.close()
+
+    def test_series_hidden(self):
+        """Reviewed series can be hidden from the list of reviews"""
+        db = database.Database(f'{self.tmpdir}/.patman.db')
+        with terminal.capture():
+            db.start()
+        first = db.series_add('first', 'First', None)
+        second = db.series_add('second', 'Second', None)
+        self.assertEqual(set(), db.series_get_hidden())
+        db.series_set_hidden(second, True)
+        self.assertEqual({second}, db.series_get_hidden())
+        db.series_set_hidden(second, False)
+        db.series_set_hidden(first, True)
+        self.assertEqual({first}, db.series_get_hidden())
         db.close()
 
     def test_times(self):

@@ -10,6 +10,10 @@ Unreleased
 
 Added
 ~~~~~
+- Reviewed series can be hidden from the Reviews tab of the ``patman serve``
+  page, which then shows only the active ones by default, with filters for
+  hidden ones and all of them. A hidden series shows again when a new version
+  of it is reviewed or someone replies. This needs database v16.
 - ``patman review --delete -i SEQ`` deletes the stored reviews of some
   patches, or the cover letter, with their Gmail drafts, if they have not
   been sent. On the ``patman serve`` page, each unsent review has 'Delete'.

@@ -863,6 +863,17 @@ function reviewActions() {
                   'review them'));
 }
 
+// Hide a reviewed series from the list of reviews, or show it again
+async function setHidden(id, hidden) {
+  try {
+    await api(`reviews/${id}/hide`, { json: { hidden } });
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  route();
+}
+
 async function viewReviewList() {
   const list = await api('reviews');
   if (!list.length) {
@@ -872,13 +883,22 @@ async function viewReviewList() {
   setView('Reviews', 'reviews', false, reviewActions(),
           ...filteredList('reviews', list.map((r) => ({
     text: `${r.name} ${r.desc || ''}`,
-    groups: r.replies_waiting ? ['all', 'replies'] : ['all'],
+    groups: ['all', r.hidden ? 'hidden' : 'active',
+             ...(r.replies_waiting ? ['replies'] : [])],
     card: h('a', { class: 'card', href: `#/reviews/${r.id}`,
                    title: 'Show the reviews of this series' },
       h('div', { class: 'row' },
         h('div', { class: 'grow name' }, r.desc || r.name),
         r.version && h('div', { class: 'ver' }, `v${r.version}`)),
       h('div', { class: 'meta' },
+        // The card is a link to the series, so this cannot be a button
+        h('span', { class: 'chip st-other', role: 'button',
+                    title: r.hidden ? 'Show this series in the list of active reviews'
+                                    : 'Hide this series from the list of active reviews',
+                    onclick: (ev) => {
+          ev.preventDefault();
+          setHidden(r.id, !r.hidden);
+        } }, r.hidden ? 'unhide' : 'hide'),
         r.replies_waiting ? h('span', { class: 'chip st-changes-requested' },
           `${r.replies_waiting} ${r.replies_waiting === 1 ? 'reply' : 'replies'}`)
           : null,
@@ -886,8 +906,12 @@ async function viewReviewList() {
         Object.entries(r.statuses).map(([st, n]) =>
           h('span', { class: REVIEW_STATUS_CLASS[st] }, `${n} ${REVIEW_STATUS[st] || st}`)),
         r.timestamp && h('span', {}, ago(parseTime(r.timestamp))))) })),
-    [['all', 'All', 'All your reviews'],
-     ['replies', 'Needs reply', 'Reviews with replies waiting for your response']]));
+    [['active', 'Active', 'Reviews which you have not hidden'],
+     ['replies', 'Needs reply', 'Reviews with replies waiting for your response, ' +
+                                'including hidden ones'],
+     ['hidden', 'Hidden', 'Reviews which you have hidden, e.g. once you have ' +
+                          'finished with them'],
+     ['all', 'All', 'All your reviews']]));
 }
 
 // Show a job which acts on some reviews, in a strip on each of their cards,
@@ -1116,6 +1140,11 @@ async function viewReview(id, wantVer) {
                                 'Send the Gmail drafts of the reviews, first drafting again ' +
                                 'any which are out of date'),
     againBtn,
+    h('button', { class: 'btn light small', onclick: () => setHidden(id, !ser.hidden),
+                  title: ser.hidden ? 'Show this series in the list of active reviews'
+                                    : 'Hide this series from the list of active reviews, ' +
+                                      'e.g. once you have finished with it' },
+      ser.hidden ? 'Unhide' : 'Hide'),
     ser.patchwork_url && h('a', { class: 'btn light small', target: '_blank',
       rel: 'noopener', title: 'Open the series on patchwork, in a new tab',
       href: ser.project ? `${ser.patchwork_url}/project/${ser.project}/list/?series=${sv.link}`
