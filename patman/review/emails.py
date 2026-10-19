@@ -140,6 +140,21 @@ def guess_name_from_email(email):
     return ''
 
 
+def _attribution(ctx):
+    """Get the line saying who wrote the text being quoted
+
+    Args:
+        ctx (ReviewContext): Review context (uses date, author_name and
+            author_email)
+
+    Returns:
+        str: e.g. 'On 2026-10-17, Fred <fred@x.com> wrote:', leaving out the
+            date if it is not known
+    """
+    who = f'{ctx.author_name} <{ctx.author_email}>'
+    return f'On {ctx.date}, {who} wrote:' if ctx.date else f'{who} wrote:'
+
+
 def _format_approved(ctx, commit_message=None, diffstat=None):
     """Format an approved review with no comments
 
@@ -153,7 +168,7 @@ def _format_approved(ctx, commit_message=None, diffstat=None):
     Returns:
         str: Formatted email body
     """
-    lines = [f'On {ctx.date}, {ctx.author_name} <{ctx.author_email}> wrote:']
+    lines = [_attribution(ctx)]
     if commit_message:
         for cl in commit_message.strip().splitlines():
             lines.append(f'> {cl}')
@@ -233,8 +248,7 @@ def _format_with_comments(ctx, greeting, verdict, comments,
         greeting = guess_name_from_email(ctx.author_email)
     lines = [f'Hi {greeting},' if greeting else 'Hi,', '']
 
-    lines.append(
-        f'On {ctx.date}, {ctx.author_name} <{ctx.author_email}> wrote:')
+    lines.append(_attribution(ctx))
 
     # Place each commit-message comment after the message line it quotes;
     # code comments (and any quote we cannot locate) go below the quote
