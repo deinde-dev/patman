@@ -1231,6 +1231,47 @@ class TestWebServer(unittest.TestCase, TestCommon):
             control.do_patman(args)
             self.assertEqual(7, patchwork.REQUEST_TIMEOUT)
 
+    def test_patchwork_proxy(self):
+        """Patchwork requests go through the proxy given by the environment"""
+        hosts = []
+
+        async def handler(request):
+            hosts.append(request.host)
+            return web.json_response({'id': 1})
+
+        # Act as the proxy: it receives the request for the real server
+        app = web.Application()
+        app.router.add_get('/api/1.2/{tail:.*}', handler)
+
+        async def _go():
+            async with TestServer(app) as tserver:
+                proxy = str(tserver.make_url('')).rstrip('/')
+                pwork = Patchwork('http://patchwork.invalid',
+                                  show_progress=False)
+                with mock.patch.dict(os.environ, {'HTTP_PROXY': proxy,
+                                                  'NO_PROXY': ''}):
+                    async with aiohttp.ClientSession() as client:
+                        return await pwork._request(client, 'patches/1/')
+
+        loop = asyncio.new_event_loop()
+        try:
+            data = loop.run_until_complete(_go())
+        finally:
+            loop.close()
+        self.assertEqual({'id': 1}, data)
+        self.assertEqual(['patchwork.invalid'], hosts)
+
+    def test_patchwork_no_proxy(self):
+        """A proxy is used only when set, and not for hosts in NO_PROXY"""
+        url = 'https://patchwork.example.org/api/1.2/'
+        with mock.patch.dict(os.environ, clear=True):
+            self.assertIsNone(patchwork.get_proxy(url))
+        with mock.patch.dict(os.environ, {'HTTPS_PROXY': 'http://gate:8888'},
+                             clear=True):
+            self.assertEqual('http://gate:8888', patchwork.get_proxy(url))
+            os.environ['NO_PROXY'] = 'example.org'
+            self.assertIsNone(patchwork.get_proxy(url))
+
     @staticmethod
     def _no_sleep(real_sleep):
         """Make retry delays short, without affecting other sleeps"""

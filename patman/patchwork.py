@@ -8,7 +8,8 @@
 import asyncio
 import re
 import socket
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
+import urllib.request
 
 import aiohttp
 from collections import namedtuple
@@ -174,6 +175,27 @@ class Review:
         self.snippets = snippets
 
 
+def get_proxy(url):
+    """Get the proxy to use for a URL, if any
+
+    This uses the usual environment variables, such as HTTPS_PROXY, so that
+    patchwork can be reached through a tunnel when it cannot be reached
+    directly. Hosts in NO_PROXY are reached directly. Unlike the 'trust_env'
+    option of aiohttp, this does not read ~/.netrc
+
+    Args:
+        url (str): URL to be requested
+
+    Returns:
+        str: URL of the proxy, or None to connect directly
+    """
+    parsed = urlparse(url)
+    proxy = urllib.request.getproxies().get(parsed.scheme)
+    if proxy and not urllib.request.proxy_bypass(parsed.hostname):
+        return proxy
+    return None
+
+
 class Patchwork:
     """Class to handle communication with patchwork
     """
@@ -218,7 +240,8 @@ class Patchwork:
             for i in range(RETRIES + 1):
                 try:
                     async with client.get(
-                            full_url, timeout=aiohttp.ClientTimeout(
+                            full_url, proxy=get_proxy(full_url),
+                            timeout=aiohttp.ClientTimeout(
                                 total=REQUEST_TIMEOUT)) as response:
                         if response.status in RETRY_STATUS and i < RETRIES:
                             # The server is overloaded, so try again later
@@ -558,7 +581,8 @@ class Patchwork:
         self.request_count += 1
         full_url = f'{self.url}/series/{link}/mbox/'
         async with self.semaphore:
-            async with client.get(full_url) as response:
+            async with client.get(
+                    full_url, proxy=get_proxy(full_url)) as response:
                 if response.status != 200:
                     raise ValueError(
                         f'Failed to download mbox: HTTP {response.status}')
