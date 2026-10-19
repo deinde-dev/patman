@@ -414,6 +414,9 @@ def add_series_subparser(subparsers):
                      help='Re-review even if reviews are already stored')
     rev.add_argument('--spelling', type=str, default='British',
                      help='Spelling convention for review comments')
+    rev.add_argument('--em-dash', type=str, default='-', metavar='TEXT',
+                     help='Text to use in place of each em dash in review '
+                          "comments; use '\u2014' to keep them")
     rev.add_argument('-c', '--context', type=str, default=None,
                      help="Extra context for the review agent, or '@path' "
                           'to read it from a file')
@@ -754,6 +757,11 @@ def add_review_subparser(subparsers):
         '--spelling', type=str, default='British',
         help="Spelling convention for review comments (from .patman "
              "settings)")
+    review.add_argument(
+        '--em-dash', type=str, default='-', metavar='TEXT',
+        help="Text to use in place of each em dash in reviews and responses "
+             "(from .patman settings); use '\u2014' to keep them "
+             '[default: %(default)s]')
     review.add_argument(
         '--learn-voice', type=str, nargs='?', const='gmail',
         choices=['gmail', 'patchwork'],

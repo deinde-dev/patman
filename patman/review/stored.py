@@ -175,7 +175,7 @@ async def revise_reviews(ctx, reviews, note, commits, others=None,
 
     Args:
         ctx (ReviewContext): Review context (uses repo_path, reviewer_tag,
-            spelling, cover_content and comments_path)
+            spelling, em_dash, cover_content and comments_path)
         reviews (dict): Map of seq to review body text
         note (str): What the reviewer wants changed
         commits (list of str): 'hash subject' for each patch, in order
@@ -230,8 +230,11 @@ async def revise_reviews(ctx, reviews, note, commits, others=None,
         os.unlink(reviews_path)
     if not success:
         return None
-    return {seq: body for seq, body in emails.parse_refined_output(log).items()
-            if seq in reviews and body and body != reviews[seq].strip()}
+    revised = {seq: emails.fix_dashes(body, ctx.em_dash)
+               for seq, body in emails.parse_refined_output(log).items()
+               if seq in reviews and body}
+    return {seq: body for seq, body in revised.items()
+            if body != reviews[seq].strip()}
 
 
 def revise_reviews_sync(ctx, reviews, note, commits, others=None,
@@ -326,6 +329,7 @@ def _do_revise(args, pwork, cser, link):
     ctx.reviewer_name, ctx.reviewer_email = common.parse_reviewer(args)
     ctx.repo_path = gitutil.get_top_level()
     ctx.spelling = args.spelling
+    ctx.em_dash = getattr(args, 'em_dash', '-')
     ups = pwork.upstream if pwork else None
     commits = _review_commits(args, cser, link, ups)
     if pwork:

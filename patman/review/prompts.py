@@ -61,7 +61,7 @@ TASK:
       If patch also fails or has rejects (.rej files), read the .rej
       file and the target source file, then apply the changes manually
       using the Edit tool. The .rej file shows what was expected and
-      what to add/remove — find the corresponding location in the
+      what to add/remove - find the corresponding location in the
       current source and make the equivalent change.
 
       After fixing up (whether via patch or manually):
@@ -82,7 +82,7 @@ TASK:
    - The branch name: {branch_name}
 
 IMPORTANT:
-- Do NOT modify the patch content — apply it as-is, adapting only to
+- Do NOT modify the patch content - apply it as-is, adapting only to
   context changes (moved lines, renamed variables, etc.)
 - Do NOT use 'git am --abort' unless you are about to retry differently
 - If you skip a patch, continue with the remaining patches
@@ -93,7 +93,7 @@ IMPORTANT:
 # Rules for quoting and punctuation in the agent's comments, which apply to
 # both patch and cover-letter reviews
 QUOTING_RULES = """\
-- NEVER use backticks — this is plain-text email, not markdown.
+- NEVER use backticks - this is plain-text email, not markdown.
   For functions, always use parentheses with no quotes: malloc() not
   'malloc()' or `malloc`. For all other quoting (identifiers,
   filenames, string literals, misspelled words, etc.) use single
@@ -102,8 +102,8 @@ QUOTING_RULES = """\
 - These quoting and spelling conventions are for YOUR comment text
   only. In the '> ' quoted lines, reproduce the author's text exactly:
   never change double quotes to single, add or remove quotes, or
-  restyle anything — a quote of "some_key" must stay "some_key"
-- Never put a period directly after a code identifier — rephrase,
+  restyle anything - a quote of "some_key" must stay "some_key"
+- Never put a period directly after a code identifier - rephrase,
   omit the period, or use an em dash to start the next clause"""
 
 
@@ -211,7 +211,7 @@ Rules:
     > diff --git a/<path> b/<path>
     > @@ -<old>,<n> +<new>,<m> @@ <function-context>
   then the quoted code lines (with '> ' prefix), then a blank line,
-  then your comment. This is NOT optional — without the headers, the
+  then your comment. This is NOT optional - without the headers, the
   reader cannot tell which file or function the comment refers to.
   BAD:
     COMMENT:
@@ -237,18 +237,18 @@ Rules:
   including whitespace, punctuation, and backslashes. A comment that
   points at a problem in a quoted line that does not actually exist
   in the patch is worse than no comment at all.
-- Be specific and constructive, but brief — use as few words as
+- Be specific and constructive, but brief - use as few words as
   possible to make the point. Avoid restating what the code does;
 {quoting_rules}
 - If another reviewer has already made a point, do NOT repeat it,
-  rephrase it, or add to it — skip it entirely
+  rephrase it, or add to it - skip it entirely
 - Focus on what is wrong and what to do instead
 - Reference U-Boot conventions where applicable
 - Do not nitpick trivial style issues that checkpatch would catch
 - Focus on logic, correctness, and design issues
 - If unsure about something, say so rather than guessing
 - Use {spelling} spelling in your comments
-- Write each comment paragraph on a single line — do not hard-wrap the
+- Write each comment paragraph on a single line - do not hard-wrap the
   prose; the reader's mail client will wrap it. Keep the quoted '> '
   lines and any indented code exactly as they are
 - Always end with exactly one VERDICT: line (approved or changes_needed)
@@ -307,7 +307,7 @@ series. Read the file below for context.
 (see file: {ctx.comments_path})
 
 CRITICAL: If another reviewer has already raised a point, do NOT repeat
-it, rephrase it, or elaborate on it — even to add a suggestion. The
+it, rephrase it, or elaborate on it - even to add a suggestion. The
 author has already been told. Simply skip that issue entirely and focus
 on things that have NOT been said.
 '''
@@ -433,13 +433,13 @@ VERDICT: changes_needed
 
 Rules:
 {quoting_rules}
-- Do NOT quote code fragments in the cover-letter reply — code
+- Do NOT quote code fragments in the cover-letter reply - code
   belongs in the per-patch reviews. Describe series-level issues in
   prose only.
 - Use {spelling} spelling
-- Write each comment paragraph on a single line — do not hard-wrap the
+- Write each comment paragraph on a single line - do not hard-wrap the
   prose; the reader's mail client will wrap it
-- Be brief — only raise series-level concerns, not per-patch nits
+- Be brief - only raise series-level concerns, not per-patch nits
 - Do NOT repeat issues that belong on individual patches
 - VERDICT: skip means no cover letter reply will be sent
 - Always end with exactly one VERDICT: line
@@ -513,10 +513,10 @@ DRAFTS TO EDIT:
 RULES:
 - Make each review as succinct as possible. Remove filler, hedging and
   unnecessary preamble. Every sentence should earn its place.
-- Remove duplicate points — if the same issue is raised on multiple
+- Remove duplicate points - if the same issue is raised on multiple
   patches, keep it only on the most relevant one and remove it from the
   others. Also remove any comment that restates, rephrases, or
-  elaborates on a point already made by another reviewer — the author
+  elaborates on a point already made by another reviewer - the author
   has already been told.
 ''' + QUOTING_RULES + '''
 - Use {spelling} spelling.
@@ -528,7 +528,7 @@ RULES:
 - Do not hard-wrap the prose. Write each comment paragraph on a single
   line and let the reader's mail client wrap it; keep one blank line
   between paragraphs. Leave the quoted '> ' lines and any indented code
-  block exactly as they are — do not join or re-wrap those.
+  block exactly as they are - do not join or re-wrap those.
 
 OUTPUT FORMAT:
 Return each review separated by a line containing only '---SEQ N---'

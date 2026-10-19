@@ -2303,6 +2303,53 @@ VERDICT: skip"""
             "Please quote 'some_key' consistently",
             cleanup_review_text(reply))
 
+    def test_review_dashes(self):
+        """Em dashes in the agent's text are replaced, unless kept"""
+        from patman.review.emails import EM_DASH, fix_dashes
+
+        self.assertEqual('Fine - but see below',
+                         fix_dashes(f'Fine {EM_DASH} but see below'))
+        self.assertEqual('Fine - but', fix_dashes(f'Fine{EM_DASH}but'))
+        self.assertEqual('- first\nlast -',
+                         fix_dashes(f'{EM_DASH} first\nlast {EM_DASH}'))
+        self.assertEqual('a -- b', fix_dashes(f'a {EM_DASH} b', '--'))
+        self.assertEqual(f'a {EM_DASH} b', fix_dashes(f'a {EM_DASH} b',
+                                                      EM_DASH))
+
+        # The author's text, quoted, is left alone
+        self.assertEqual(f'> a {EM_DASH} b\n\nc - d',
+                         fix_dashes(f'> a {EM_DASH} b\n\nc {EM_DASH} d'))
+
+        # The setting goes to the review context
+        args = cmdline.parse_args(['review', '-s', '123'], config_fname=False)
+        self.assertEqual('-', args.em_dash)
+        args = cmdline.parse_args(
+            ['review', '-s', '123', f'--em-dash={EM_DASH}'],
+            config_fname=False)
+        self.assertEqual(EM_DASH, args.em_dash)
+
+        # Revised reviews have their dashes replaced too
+        async def mock_agent(_prompt, _options):
+            return True, f'---SEQ 1---\nHi Fred,\n\nFine {EM_DASH} thanks\n'
+
+        ctx = review.common.ReviewContext(None, None, {})
+        with mock.patch.object(review.core.claude_mod, 'run_agent_collect',
+                               side_effect=mock_agent), \
+                mock.patch.object(review.core.claude_mod, 'check_available',
+                                  return_value=True), \
+                mock.patch.object(review.common, 'ClaudeAgentOptions',
+                                  mock.MagicMock()), \
+                terminal.capture():
+            self.assertEqual(
+                {1: 'Hi Fred,\n\nFine - thanks'},
+                review.stored.revise_reviews_sync(ctx, {1: 'Hi Fred'}, 'note',
+                                                  []))
+            ctx.em_dash = EM_DASH
+            self.assertEqual(
+                {1: f'Hi Fred,\n\nFine {EM_DASH} thanks'},
+                review.stored.revise_reviews_sync(ctx, {1: 'Hi Fred'}, 'note',
+                                                  []))
+
     def test_review_greeting_fallback(self):
         """Test greeting falls back to email when name is empty"""
         from patman.review.emails import format_review_email

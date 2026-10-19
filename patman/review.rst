@@ -79,10 +79,17 @@ Add these to your ``~/.patman`` file to avoid repeating flags:
     [settings]
     signoff: Regards,\nSimon
     spelling: British
+    em_dash: -
 
 The ``signoff`` is appended to reviews that have comments (not to
 clean Reviewed-by-only replies). The ``spelling`` setting controls
 the spelling convention used in review comments.
+
+The agent tends to use em dashes (—), which are unusual in plain-text
+email, so patman replaces each one in its reviews and suggested responses
+with the ``em_dash`` setting, a hyphen by default, with a space each side.
+Quoted lines are left alone. Set ``em_dash`` to ``—`` to keep them, or use
+``--em-dash``.
 
 Reviewing a series
 ------------------
