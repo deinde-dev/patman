@@ -48,11 +48,23 @@ function h(tag, attrs, ...kids) {
     else if (k === 'class') el.className = v;
     else el.setAttribute(k, v === true ? '' : v);
   }
-  for (const kid of kids.flat()) {
+  return addKids(el, kids);
+}
+
+// Add children to an element, as h() does: arrays are flattened and null,
+// undefined and false are left out, so that 'cond && child' can be used
+function addKids(el, kids) {
+  for (const kid of kids.flat(Infinity)) {
     if (kid === null || kid === undefined || kid === false) continue;
     el.append(kid instanceof Node ? kid : String(kid));
   }
   return el;
+}
+
+// Replace the children of an element, leaving out those which h() does
+function fill(el, ...kids) {
+  el.replaceChildren();
+  return addKids(el, kids);
 }
 
 // Minutes which the server's time zone is ahead of UTC, from the last API
@@ -255,8 +267,7 @@ function setView(title, tab, back, ...content) {
     tabScreens.set(tab, location.hash);
     savePlaces('patman-tabs', tabScreens);
   }
-  main.replaceChildren(...content.flat().filter((c) => c !== null && c !== undefined && c !== false),
-                       versionEl);
+  fill(main, ...content, versionEl);
   showVersion();
 }
 
@@ -305,7 +316,7 @@ function filteredList(key, items, filters) {
     count.textContent = `${shown} of ${items.length}`;
     empty.hidden = shown > 0;
     if (chips) {
-      chips.replaceChildren(...filters.map(([id, label, tip]) => h('button', {
+      fill(chips, ...filters.map(([id, label, tip]) => h('button', {
         class: id === current ? 'on' : '', title: tip,
         onclick: () => {
           current = id;
@@ -370,13 +381,13 @@ function commentToggle(card, kind, itemId, ups) {
     try {
       const q = ups ? `?ups=${encodeURIComponent(ups)}` : '';
       const comments = await api(`comments/${kind}/${itemId}${q}`);
-      box.replaceChildren(...(comments.length ? comments.map((c) =>
+      fill(box, ...(comments.length ? comments.map((c) =>
         h('div', {},
           h('div', { class: 'who' }, c.name || c.email || 'Unknown',
             h('span', { class: 'when' }, ago(parseTime(c.date, true)))),
           renderMail(c.content))) : [h('div', { class: 'ver' }, 'No comments')]));
     } catch (err) {
-      box.replaceChildren(h('div', { class: 'error' }, err.message));
+      fill(box, h('div', { class: 'error' }, err.message));
     }
   };
 }
@@ -474,7 +485,7 @@ function seriesSync(id, version) {
     }
     btn.disabled = false;
     btn.textContent = 'Sync';
-    msg.replaceChildren('Sync failed: ', h('a', { href: `#/jobs/${jobId}`,
+    fill(msg, 'Sync failed: ', h('a', { href: `#/jobs/${jobId}`,
                                                   title: 'Show the job and its output' },
                                           'see the output'));
   };
@@ -606,7 +617,7 @@ function diffGap(file, lo, count, after, before) {
     const btn = (label, add, sub, tip) => h('button', { onclick: () => widen(add, sub),
                                                         title: tip }, label);
     const first = src ? src.first : (file.new ? lo.new : lo.old);
-    bar.replaceChildren(...[
+    fill(bar, ...[
       after && btn(`↓ ${CONTEXT_LINES} more`, CONTEXT_LINES, 0,
                    `Show ${CONTEXT_LINES} more lines below the chunk above`),
       before && btn(`↑ ${CONTEXT_LINES} more`, 0, CONTEXT_LINES,
@@ -628,7 +639,7 @@ function diffGap(file, lo, count, after, before) {
         src = { lines: b.lines, first,
                 count: count ?? Math.max(0, b.lines.length - first + 1) };
       } catch (err) {
-        bar.replaceChildren(h('span', { class: 'error' }, err.message));
+        fill(bar, h('span', { class: 'error' }, err.message));
         return;
       }
     }
@@ -680,7 +691,7 @@ function renderDiff(diff) {
     if (limit >= lines.length && gaps() && prev) {
       out.push(diffGap(file, next(), null, true, false));
     }
-    box.replaceChildren(...out.flat());
+    fill(box, ...out.flat());
   };
   show(DIFF_LINES);
   const more = lines.length > DIFF_LINES && h('div', { class: 'actions' },
@@ -757,9 +768,9 @@ async function viewMail(kind, id, ups) {
     h('div', { class: 'section' }, 'Comments'),
     comments);
   try {
-    comments.replaceChildren(...renderComments(await api(`comments/${kind}/${id}${q}`)));
+    fill(comments, ...renderComments(await api(`comments/${kind}/${id}${q}`)));
   } catch (err) {
-    comments.replaceChildren(h('div', { class: 'error' }, err.message));
+    fill(comments, h('div', { class: 'error' }, err.message));
   }
 }
 
@@ -775,17 +786,17 @@ function mailToggle(kind, id, ups) {
                             onclick: async () => {
     open = !open;
     btn.textContent = `${open ? 'Hide' : 'Show'} the ${what}`;
-    if (!open) { box.replaceChildren(); return; }
-    box.replaceChildren(h('div', { class: 'ver' }, 'Loading…'));
+    if (!open) { fill(box); return; }
+    fill(box, h('div', { class: 'ver' }, 'Loading…'));
     try {
       const q = ups ? `?ups=${encodeURIComponent(ups)}` : '';
       mail = mail || await api(`${kind}/${id}${q}`);
       if (open) {
-        box.replaceChildren(h('div', {}, renderMail(mail.content),
+        fill(box, h('div', {}, renderMail(mail.content),
                               mail.diff && renderDiff(mail.diff)));
       }
     } catch (err) {
-      if (open) box.replaceChildren(h('div', { class: 'error' }, err.message));
+      if (open) fill(box, h('div', { class: 'error' }, err.message));
     }
   } }, `Show the ${what}`);
   return [btn, box];
@@ -873,7 +884,7 @@ async function trackJob(job, verb, targets, refresh) {
                                 title: 'Show the output of the job' }, 'View output');
   const say = (t, cls, ...kids) => {
     t.strip.className = `jobstrip ${cls}`;
-    t.strip.replaceChildren(...kids.filter((kid) => kid !== null && kid !== false));
+    fill(t.strip, ...kids);
   };
   const progress = (st) => targets.forEach((t) => say(t, 'busy',
     h('span', {}, `${verb}… ${st.queued ? 'waiting' : 'running'}`), ' ', output()));
@@ -921,7 +932,7 @@ async function trackJob(job, verb, targets, refresh) {
           was.hidden = !was.hidden;
         } }, 'Show changes') : null,
         ' ', output(), ' ',
-        h('button', { class: 'link', onclick: () => t.strip.replaceChildren(),
+        h('button', { class: 'link', onclick: () => fill(t.strip),
                       title: 'Hide this message' }, 'Dismiss'), was);
     });
     return;
@@ -987,7 +998,7 @@ async function viewReview(id, wantVer) {
         r.approved ? 'Reviewed-by' : 'comments'),
       h('span', { class: 'ver' }, REVIEW_STATUS[r.status] || r.status || ''));
     const header = h('div', {}, title, strip);
-    const ask = (part) => card.replaceChildren(header, reviseForm(
+    const ask = (part) => fill(card, header, reviseForm(
       part, hasDraft(r), show,
       (note, drafts, msg) => revise([r.seq], part, note, drafts, msg)));
     const editChunk = (comment, splice, cancel) => chunkForm(
@@ -996,7 +1007,7 @@ async function viewReview(id, wantVer) {
                                     refresh));
     // A review can be changed if it has not been sent and no job is acting on it
     const free = () => unsent(r) && !(entries.get(r.id) || {}).busy;
-    const show = () => card.replaceChildren(header,
+    const show = () => fill(card, header,
       renderMail(r.body, free() ? ask : null, free() ? editChunk : null),
       (mailBtn || free()) && h('div', { class: 'actions' },
         mailBtn, commentsBtn,
@@ -1035,10 +1046,10 @@ async function viewReview(id, wantVer) {
   const anyUnsent = sv.reviews.some(unsent);
   const drafts = sv.reviews.filter(hasDraft).length;
   const reviseAll = h('div', {});
-  const askAll = () => reviseAll.replaceChildren(h('div', { class: 'card' },
+  const askAll = () => fill(reviseAll, h('div', { class: 'card' },
     h('div', { class: 'name' }, 'Revise all the reviews'),
     reviseForm(null, sv.reviews.some(hasDraft),
-               () => reviseAll.replaceChildren(),
+               () => fill(reviseAll),
                (note, drafts, msg) => revise([], null, note, drafts, msg))));
   // Start a job and show it
   const reviewAgain = async (context) => {
@@ -1102,7 +1113,7 @@ function reviewButton(label, cls, tip, start) {
                                               'this is an RFC, so ignore style' });
     const msg = h('div', { class: 'msg' });
     const close = () => {
-      box.replaceChildren();
+      fill(box);
       btn.disabled = false;
     };
     const go = h('button', { class: 'btn small', title: tip, onclick: async () => {
@@ -1116,7 +1127,7 @@ function reviewButton(label, cls, tip, start) {
         go.disabled = false;
       }
     } }, 'Start the review');
-    box.replaceChildren(h('div', { class: 'form' }, text,
+    fill(box, h('div', { class: 'form' }, text,
       h('div', { class: 'actions' }, go,
         h('button', { class: 'btn light small', onclick: close,
                       title: 'Close this without starting a review' }, 'Cancel')),
@@ -1132,7 +1143,7 @@ function reviewButton(label, cls, tip, start) {
 async function followJob(job, strip, verb) {
   const say = (cls, text) => {
     strip.className = `jobstrip ${cls}`;
-    strip.replaceChildren(h('span', {}, text), ' ',
+    fill(strip, h('span', {}, text), ' ',
       h('a', { href: `#/jobs/${job.id}`, title: 'Show the output of the job' },
         'View output'));
   };
@@ -1170,7 +1181,7 @@ function commentsToggle(ser, sv, seq, itemId) {
   const item = (c) => {
     const slot = h('div', {});
     const strip = h('div', { class: 'jobstrip' });
-    const reset = () => slot.replaceChildren(responded.has(c.id)
+    const reset = () => fill(slot, responded.has(c.id)
       ? h('div', { class: 'ver' }, 'Your response to this is below')
       : h('div', { class: 'actions' },
         h('button', { class: 'btn light small', onclick: () => ask(),
@@ -1193,13 +1204,13 @@ function commentsToggle(ser, sv, seq, itemId) {
           return;
         }
         // The note is no longer needed once the job has started
-        slot.replaceChildren();
+        fill(slot);
         const st = await followJob(job, strip, 'Suggesting a response');
         if (st && jobStatus(st)[0] === 'ok') route();
         else if (st) reset();
       }, title: 'Have the agent suggest a response, as a job, which you can then change, ' +
                 'draft or send' }, 'Suggest a response');
-      slot.replaceChildren(h('div', { class: 'form' }, note,
+      fill(slot, h('div', { class: 'form' }, note,
         h('div', { class: 'actions' }, go,
           h('button', { class: 'btn light small', onclick: reset,
                         title: 'Close this without responding' }, 'Cancel')), msg));
@@ -1217,17 +1228,17 @@ function commentsToggle(ser, sv, seq, itemId) {
                             onclick: async () => {
     open = !open;
     btn.textContent = open ? 'Hide comments' : 'Comments';
-    if (!open) { box.replaceChildren(); return; }
-    box.replaceChildren(h('div', { class: 'ver' }, 'Loading…'));
+    if (!open) { fill(box); return; }
+    fill(box, h('div', { class: 'ver' }, 'Loading…'));
     try {
       const q = ser.upstream ? `?ups=${encodeURIComponent(ser.upstream)}` : '';
       const list = await api(`comments/${kind}/${itemId}${q}`);
       if (open) {
-        box.replaceChildren(...(list.length ? list.map(item)
+        fill(box, ...(list.length ? list.map(item)
           : [h('div', { class: 'ver' }, 'No comments on patchwork')]));
       }
     } catch (err) {
-      if (open) box.replaceChildren(h('div', { class: 'error' }, err.message));
+      if (open) fill(box, h('div', { class: 'error' }, err.message));
     }
   } }, 'Comments');
   return [btn, box];
@@ -1295,7 +1306,7 @@ function replyBox(rp) {
   const show = () => {
     const [label, cls] = REPLY_STATUS[rp.status] || [rp.status, 'st-other'];
     const waiting = rp.status === 'new' || rp.status === 'suggested';
-    box.replaceChildren(
+    fill(box, 
       h('div', { class: 'who' }, `↩ ${rp.sender.replace(/\s*<.*>/, '') || rp.sender}`,
         h('span', { class: 'when' }, ago(new Date(rp.date))), ' ',
         h('span', { class: `chip ${cls}` }, label)),
@@ -1357,7 +1368,7 @@ function replyBox(rp) {
       }
       startJob(`replies/${rp.id}/send`, {}, msg);
     }, 'Save your response and send it');
-    box.replaceChildren(h('div', { class: 'who' }, `Response to ${rp.sender}`),
+    fill(box, h('div', { class: 'who' }, `Response to ${rp.sender}`),
       h('div', { class: 'form' }, text,
         h('label', { class: 'check', title: 'Also put the response in a Gmail draft' }, draft,
           rp.status === 'draft' ? 'Update the Gmail draft' : 'Create the Gmail draft'),
@@ -1459,7 +1470,7 @@ function editReview(card, r, header, show, target, refresh) {
       save.disabled = false;
     }
   }, title: 'Save the changed review' }, 'Save');
-  card.replaceChildren(header, h('div', { class: 'form' }, text,
+  fill(card, header, h('div', { class: 'form' }, text,
     h('label', { class: 'check', title: 'Also update the Gmail draft of the review' },
       box, 'Update the Gmail draft'),
     h('div', { class: 'hint' }, "Include a 'Reviewed-by:' line to approve the patch"),
@@ -1545,7 +1556,7 @@ function trackInboxJob(box, jobId) {
       return;
     }
     const [text, cls] = jobStatus(st);
-    box.replaceChildren(h('a', { class: `chip ${cls}`, href: `#/jobs/${jobId}`,
+    fill(box, h('a', { class: `chip ${cls}`, href: `#/jobs/${jobId}`,
                                  title: 'Show the review job and its output' },
                           text === 'ok' ? 'review done' : `review ${text}`));
     if (st.finished) {
