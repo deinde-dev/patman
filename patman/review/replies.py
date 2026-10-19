@@ -119,6 +119,10 @@ def _suggest_response(ctx, reply_id):
     """
     db = ctx.cser.db
     reply = db.reply_get(reply_id)
+    if reply.comment_id:
+        raise ValueError(
+            f'Reply {reply_id} is a comment on patchwork: use '
+            f'--respond-comment {reply.comment_id} with -s and -i instead')
     rev = db.review_get(reply.review_id)
     status, response = handle_reply_sync(ctx, rev.body, reply.sender,
                                          reply.body)
@@ -419,3 +423,235 @@ async def handle_reply(ctx, review_body, reply_from, reply_body):
 def handle_reply_sync(ctx, review_body, reply_from, reply_body):
     """Synchronous wrapper for handle_reply()"""
     return common.run(handle_reply(ctx, review_body, reply_from, reply_body))
+
+
+def _unfold(value):
+    """Join a mail header which is split over several lines
+
+    Args:
+        value (str or list of str or None): Header, or a list of them for one
+            which appears more than once
+
+    Return:
+        str: Header on one line, or '' if there is none
+    """
+    if isinstance(value, list):
+        value = ', '.join(value)
+    return ' '.join((value or '').split())
+
+
+def _format_comment(comment):
+    """Format a comment on patchwork for the agent to read
+
+    Args:
+        comment (dict): Comment from patchwork
+
+    Return:
+        str: Who sent it, when, and its text
+    """
+    sub = comment.get('submitter') or {}
+    return (f"From {sub.get('name') or sub.get('email')} on "
+            f"{comment.get('date')}:\n{comment.get('content') or ''}\n")
+
+
+async def handle_comment(ctx, item, comment, others):
+    """Generate a response to a comment on a patch or cover letter
+
+    Args:
+        ctx (ReviewContext): Review context (uses reviewer_name,
+            reviewer_email, repo_path, signoff, spelling, em_dash, context)
+        item (SimpleNamespace): What the comment is about, with:
+            what (str): e.g. 'patch 2' or 'the cover letter'
+            text (str): Its text, with the diff for a patch
+            review (str or None): Our review of it, if any
+        comment (dict): Comment from patchwork
+        others (list of dict): The other comments on it, for context
+
+    Returns:
+        tuple:
+            str or None: database.REPLY_SUGGESTED if there is a response,
+                database.REPLY_SKIP if no response is needed, or None if the
+                agent is not available or failed
+            str or None: Response email body, if there is one
+    """
+    if not claude_mod.check_available():
+        return None, None
+
+    sub = comment.get('submitter') or {}
+    sender = formataddr((sub.get('name') or '', sub.get('email') or ''))
+    files = {}
+    with tempfile.TemporaryDirectory(prefix='patman_comment_') as tmp:
+        def write(name, text):
+            files[name] = os.path.join(tmp, f'{name}.txt')
+            tools.write_file(files[name], text, binary=False)
+
+        write('item', item.text)
+        write('comment', comment.get('content') or '')
+        review_section = ''
+        if item.review:
+            write('review', item.review)
+            review_section = f'''
+YOUR REVIEW OF IT:
+(see file: {files['review']})
+'''
+        others_section = ''
+        if others:
+            write('others', '\n'.join(_format_comment(c) for c in others))
+            others_section = f'''
+THE OTHER COMMENTS ON IT, for context:
+(see file: {files['others']})
+'''
+        prompt = prompts.COMMENT_PROMPT.format(
+            what=item.what, what_upper=item.what.upper(),
+            item_path=files['item'], review_section=review_section,
+            comment_from=sender, comment_path=files['comment'],
+            others_section=others_section,
+            context_section=prompts.context_section(ctx),
+            spelling=ctx.spelling, voice=prompts.voice_section())
+        options = common.agent_options(
+            allowed_tools=['Bash', 'Read', 'Grep'], cwd=ctx.repo_path,
+            max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
+        success, log = await claude_mod.run_agent_collect(prompt, options)
+
+    if not success or not log.strip():
+        return None, None
+    greeting, verdict, comments = emails.parse_review_output(log)
+    if verdict == 'skip':
+        return database.REPLY_SKIP, None
+
+    # The response goes to the person who commented
+    reply_ctx = common.ReviewContext(ctx.pwork, ctx.cser, {
+        'submitter': {'name': sub.get('name') or '',
+                      'email': sub.get('email') or ''},
+        'date': comment.get('date') or ''})
+    reply_ctx.reviewer_name = ctx.reviewer_name
+    reply_ctx.reviewer_email = ctx.reviewer_email
+    reply_ctx.signoff = ctx.signoff
+    return database.REPLY_SUGGESTED, emails.fix_dashes(
+        emails.format_review_email(reply_ctx, greeting, verdict, comments),
+        ctx.em_dash)
+
+
+def handle_comment_sync(ctx, item, comment, others):
+    """Synchronous wrapper for handle_comment()"""
+    return common.run(handle_comment(ctx, item, comment, others))
+
+
+def _find_comment(pwork, link, seq, comment_id):
+    """Read a comment on a patch or cover letter from patchwork
+
+    Args:
+        pwork (Patchwork): Patchwork instance
+        link (str): Patchwork series link/ID
+        seq (int): Patch which the comment is about, 0 for the cover letter
+        comment_id (int): ID of the comment on patchwork
+
+    Return:
+        tuple:
+            SimpleNamespace: What the comment is about, with what and text
+                (see handle_comment())
+            dict: The comment
+            list of dict: The other comments on it
+
+    Raises:
+        ValueError: The patch, cover letter or comment cannot be found
+    """
+    data = common.pw_call(pwork.get_series, link) or {}
+    if seq:
+        patches = data.get('patches') or []
+        if seq > len(patches):
+            raise ValueError(f'Series {link} has no patch {seq}')
+        patch = common.pw_call(pwork.get_patch, patches[seq - 1]['id'])
+        item = SimpleNamespace(
+            what=f'patch {seq}',
+            text=f"{patch.get('content') or ''}\n{patch.get('diff') or ''}")
+        comments = common.pw_call(pwork.get_patch_comments,
+                                  patches[seq - 1]['id'])
+    else:
+        cover = data.get('cover_letter')
+        if not cover:
+            raise ValueError(f'Series {link} has no cover letter')
+        letter = common.pw_call(pwork.get_cover, cover['id'])
+        item = SimpleNamespace(what='the cover letter',
+                               text=letter.get('content') or '')
+        comments = common.pw_call(pwork.get_cover_comments, cover['id'])
+    comments = comments or []
+    comment = next((c for c in comments if c.get('id') == comment_id), None)
+    if not comment:
+        raise ValueError(f'There is no comment {comment_id} on {item.what} '
+                         f'of series {link}')
+    return item, comment, [c for c in comments if c is not comment]
+
+
+def respond_to_comment(args, pwork, cser, link):
+    """Have the agent suggest a response to a comment on patchwork
+
+    The comment may be about the cover letter or one of the patches of a
+    series which has been reviewed, and need not be a reply to one of our
+    reviews. It is recorded along with the replies to our reviews, so that
+    the response can be changed, drafted and sent in the same way.
+
+    Args:
+        args (Namespace): Command-line arguments (uses respond_comment, the
+            patch to respond about in patches, and create_drafts)
+        pwork (Patchwork): Patchwork instance
+        cser (Cseries): Open cseries instance holding the reviews
+        link (str): Patchwork series link/ID
+
+    Returns:
+        int: 0 on success, 1 on failure
+
+    Raises:
+        ValueError: The series has not been reviewed, or the comment cannot
+            be found
+    """
+    existing = cser.db.series_find_by_link(link)
+    if not existing:
+        raise ValueError(f'Series {link} has not been reviewed')
+    svid = existing[3]
+    sel = common.parse_patch_selection(args.patches)
+    if not sel or len(sel) != 1:
+        raise ValueError('Use -i to say which patch the comment is about, '
+                         'with 0 for the cover letter')
+    seq = next(iter(sel))
+    item, comment, others = _find_comment(pwork, link, seq,
+                                          args.respond_comment)
+    item.review = next((rev.body for rev in
+                        cser.db.review_get_for_version(svid)
+                        if rev.seq == seq), None)
+
+    hdrs = comment.get('headers') or {}
+    sub = comment.get('submitter') or {}
+    reply_id = cser.db.reply_add_comment(
+        svid, seq, comment['id'], comment.get('msgid'),
+        _unfold(hdrs.get('References')),
+        formataddr((sub.get('name') or '', sub.get('email') or '')),
+        _unfold(hdrs.get('To')), _unfold(hdrs.get('Cc')),
+        _unfold(comment.get('subject')),
+        _unfold(hdrs.get('Date')) or comment.get('date'),
+        comment.get('content'), datetime.now().isoformat())
+    cser.commit()
+
+    ctx = _make_reply_ctx(args, cser)
+    ctx.pwork = pwork
+    ctx.context = (common.read_context(args.context)
+                   if getattr(args, 'context', None) else None)
+    tout.notice(f"Responding to comment {comment['id']} from "
+                f"{sub.get('name') or sub.get('email')} on {item.what}")
+    status, response = handle_comment_sync(ctx, item, comment, others)
+    if not status:
+        tout.error('No response could be suggested')
+        return 1
+    cser.db.reply_set_response(reply_id, response, status)
+    cser.commit()
+    if not response:
+        tout.notice(f'Reply {reply_id}: the agent has nothing to add')
+        return 0
+    tout.notice(f'Reply {reply_id}: response suggested')
+    print(response)
+    if args.create_drafts:
+        if not gmail.check_available():
+            return 1
+        account = getattr(args, 'gmail_account', None)
+        _draft_response(gmail.get_service(account), ctx, reply_id, account)
+    return 0

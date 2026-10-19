@@ -174,6 +174,13 @@ response, or write one, then create a Gmail draft which is threaded as a reply,
 or send it. You can also tap 'Suggest a response' to have the agent suggest one
 (again), or note that no reply is needed.
 
+To respond to other comments on patchwork, tap 'Comments' under a review, or on
+the cover-letter card, to list the comments on that patch or cover letter.
+'Respond' on a comment asks the agent to suggest a response, optionally saying
+what you would like to say (``patman review --respond-comment``). The response
+then appears below the review, like a response to a reply, to change, draft or
+send.
+
 Jobs
 ----
 

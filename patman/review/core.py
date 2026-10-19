@@ -24,7 +24,6 @@ import tempfile
 from u_boot_pylib import claude as claude_mod
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
-from u_boot_pylib import tools
 from u_boot_pylib import tout
 
 from patman import coverity
@@ -47,22 +46,6 @@ from patman.review import voice
 # Reported when the Claude Agent SDK, which runs the agents, is not installed
 AGENT_MISSING = ("The review agent is not available; install the 'review' "
                  'extra (pip install patch-manager[review])')
-
-
-def _read_context(spec):
-    """Resolve a --context argument value to literal text
-
-    Args:
-        spec (str): Either a literal string, or '@path' to read from
-            a file (path is expanded for '~')
-
-    Return:
-        str: The context text to pass to the agent
-    """
-    if spec.startswith('@'):
-        path = os.path.expanduser(spec[1:])
-        return tools.read_file(path, binary=False).rstrip()
-    return spec
 
 
 async def _run_cover_review(ctx, all_commits):
@@ -343,7 +326,7 @@ def review_series(cser, series_id, svid, version, branch, series,
     ctx.svid = svid
     ctx.version = version
     ctx.spelling = spelling
-    ctx.context = _read_context(context) if context else None
+    ctx.context = common.read_context(context) if context else None
     if series.cover:
         ctx.cover_content = '\n'.join(series.cover)
     for rev in cser.db.review_get_previous(series_id, version):
@@ -791,7 +774,8 @@ def _review_link(args, pwork, cser, link):
             ctx.signoff = ctx.signoff.replace('\\n', '\n')
         ctx.spelling = args.spelling
         ctx.em_dash = getattr(args, 'em_dash', '-')
-        ctx.context = _read_context(args.context) if args.context else None
+        ctx.context = (common.read_context(args.context) if args.context
+                       else None)
         ctx.comments_path = lookup.write_comments_file(series_data, pwork)
 
         if getattr(args, 'coverity', False):
@@ -939,6 +923,9 @@ def do_review(args, pwork, cser):
     elif not link:
         link = lookup.search_series(
             pwork, args.title, getattr(args, 'version', None))
+
+    if getattr(args, 'respond_comment', None):
+        return replies.respond_to_comment(args, pwork, cser, link)
 
     if getattr(args, 'send', False) or getattr(args, 'revise', None):
         return stored.do_stored(args, pwork, cser, link)

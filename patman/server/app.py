@@ -830,6 +830,73 @@ class Server(jobs.JobRunner):
         args = ['--scan'] + (['-d'] if data.get('drafts') else [])
         return self._review_job('Scan for new versions', *args)
 
+    def _respond_job(self, idnum, version, seq, comment_id, note=None):
+        """Start a job which suggests a response to a comment on patchwork
+
+        Args:
+            idnum (int): Series ID in the review database
+            version (int or None): Version, or None for the latest
+            seq (int): Patch which the comment is about, 0 for the cover
+                letter
+            comment_id (int): ID of the comment on patchwork
+            note (str or None): What the reviewer would like to say, for the
+                agent
+
+        Return:
+            web.Response: Response giving the job state
+
+        Raises:
+            ValueError: The series or version does not exist, or has no link
+        """
+        name, desc, ups = self.rcser.db.series_get_info(idnum)
+        version = version or self.rcser.db.series_get_max_version(idnum)
+        link = self.rcser.db.ser_ver_get_link(idnum, version)
+        if not link:
+            raise ValueError(f"Series '{name}' v{version} has no link")
+        args = ['-s', str(link), '--respond-comment', str(comment_id),
+                '-i', str(seq)]
+        if ups:
+            args += ['-U', ups]
+        if note:
+            args += ['-c', note]
+        what = f'patch {seq}' if seq else 'the cover letter'
+        return self._review_job(
+            f"Respond to a comment on {what} of '{desc or name}' v{version}",
+            *args)
+
+    async def _respond(self, request):
+        """Handle 'POST /api/reviews/<id>/respond': respond to a comment
+
+        This has the agent suggest a response to a comment on patchwork
+        about the cover letter or a patch, as a job. The body gives the
+        patchwork 'comment' ID and the 'seq' of the patch it is about (0 for
+        the cover letter), and may give a 'version', which defaults to the
+        latest, and a 'note' saying what the reviewer would like to say.
+
+        Args:
+            request (web.Request): Request, with the series ID as 'idnum'
+
+        Return:
+            web.Response: Job state, with status 202
+
+        Raises:
+            BadRequest: The request is invalid
+            ValueError: The series or version does not exist, or has no link
+        """
+        idnum = int(request.match_info['idnum'])
+        data = await self._read_json(request)
+        seq = data.get('seq')
+        if isinstance(seq, bool) or not isinstance(seq, int) or seq < 0:
+            raise params.BadRequest(f"Invalid seq '{seq}'")
+        comment = params.get_int(data, 'comment')
+        if not comment:
+            raise params.BadRequest('Please give the comment to respond to')
+        note = data.get('note')
+        if note is not None and not isinstance(note, str):
+            raise params.BadRequest('Invalid note')
+        return self._respond_job(idnum, params.get_int(data, 'version'), seq,
+                                 comment, (note or '').strip() or None)
+
     async def _redraft(self, request):
         """Handle 'POST /api/reviews/<id>/redraft': recreate review drafts
 
@@ -1080,6 +1147,11 @@ class Server(jobs.JobRunner):
             ValueError: The reply does not exist
         """
         reply = self.rcser.db.reply_get(int(request.match_info['idnum']))
+        if reply.comment_id:
+            # A comment on patchwork is read again, to respond to it
+            svr = self.rcser.db.ser_ver_get_by_id(reply.svid)
+            return self._respond_job(svr.series_id, svr.version, reply.seq,
+                                     reply.comment_id)
         return self._review_job(f'Suggest a response to reply {reply.idnum}',
                                 '--suggest-reply', str(reply.idnum))
 
@@ -1154,6 +1226,8 @@ class Server(jobs.JobRunner):
         app.router.add_post(r'/api/reviews/{idnum:\d+}/revise',
                             self._revise)
         app.router.add_post(r'/api/reviews/{idnum:\d+}/send', self._send)
+        app.router.add_post(r'/api/reviews/{idnum:\d+}/respond',
+                            self._respond)
         app.router.add_post(r'/api/review-items/{idnum:\d+}',
                             self._review_item)
         app.router.add_post(r'/api/replies/{idnum:\d+}', self._reply)

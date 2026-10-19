@@ -123,7 +123,7 @@ Match this voice when writing your comments:
 '''
 
 
-def _context_section(ctx):
+def context_section(ctx):
     """Get the prompt section with the reviewer's notes for this run
 
     Args:
@@ -380,7 +380,7 @@ SERIES CONTEXT (cover letter):
         comments_section=_comments_section(ctx),
         cover_section=cover_section,
         prev_section=_previous_section(previous_review),
-        context_section=_context_section(ctx),
+        context_section=context_section(ctx),
         coverity_section=_coverity_section(ctx),
         quoting_rules=QUOTING_RULES, spelling=ctx.spelling)
 
@@ -497,7 +497,7 @@ add at the series level.
     return COVER_REVIEW_PROMPT.format(
         style=style, total=len(all_commits), series_overview=series_overview,
         cover_section=cover_section, comments_section=comments_section,
-        context_section=_context_section(ctx), prev_section=prev_section,
+        context_section=context_section(ctx), prev_section=prev_section,
         quoting_rules=QUOTING_RULES, spelling=ctx.spelling)
 
 
@@ -668,3 +668,50 @@ Rules:
 - If the author is right, concede gracefully
 - If you need to push back, explain concisely with evidence from code
 '''
+
+COMMENT_PROMPT = '''You are a U-Boot maintainer. Someone has commented on
+{what} of a patch series on the mailing list, and you have been asked to
+respond to the comment.
+
+THE {what_upper}:
+(see file: {item_path})
+{review_section}
+THE COMMENT FROM {comment_from}:
+(see file: {comment_path})
+{others_section}{context_section}
+The source tree is in the current directory, without this series applied.
+You can use 'git log', 'git show', Read and Grep to check facts.
+
+IMPORTANT:
+- Do NOT run 'git checkout' or switch branches
+- Do NOT 'cd' to another directory
+
+TASK:
+1. Read the comment carefully, along with what it is about
+2. Respond to the points in it where you have something useful to say:
+   - Answer questions put to reviewers or maintainers, researching in
+     the code where needed
+   - Give your view on suggestions: agree, say why you disagree, or add
+     information which helps decide
+   - Correct anything which is mistaken, with evidence
+   - Leave questions which only the author can answer to the author
+3. Do not repeat points already made in the discussion
+4. If there is nothing worth saying, output ONLY: VERDICT: skip
+5. Otherwise output in this format, quoting the part of the comment
+   which each response is about:
+
+GREETING: <first name of the person who commented>
+COMMENT:
+> quoted text from their comment
+
+Your response.
+
+VERDICT: changes_needed
+
+Rules:
+''' + QUOTING_RULES + '''
+- Use {spelling} spelling
+- Be brief and direct
+- Write each paragraph on a single line - do not hard-wrap the prose; the
+  reader's mail client will wrap it
+{voice}'''

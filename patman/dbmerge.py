@@ -160,7 +160,7 @@ REVIEW_COLS = ['seq', 'body', 'approved', 'timestamp', 'draft_id', 'status',
                'gmail_msg_id', 'gmail_thread_id', 'session_id']
 REPLY_COLS = ['gmail_msg_id', 'msgid', 'refs', 'sender', 'to_addrs',
               'cc_addrs', 'subject', 'date', 'body', 'response', 'status',
-              'draft_id', 'timestamp']
+              'draft_id', 'timestamp', 'seq', 'comment_id']
 
 
 def _copy_reviews(src, dst, svid, new_svid, stats):
@@ -183,6 +183,10 @@ def _copy_reviews(src, dst, svid, new_svid, stats):
         stats.reviews += 1
         stats.replies += _copy_rows(src, dst, 'reply', REPLY_COLS,
                                     'review_id', rid, dst.lastrowid())
+
+    # Comments on patchwork belong to the version rather than to a review
+    stats.replies += _copy_rows(src, dst, 'reply', REPLY_COLS, 'svid', svid,
+                                new_svid)
 
 
 def _copy_one(src, dst, sid, name, fields, stats, move):

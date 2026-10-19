@@ -115,6 +115,13 @@ class TestDatabase(CseriesTester):
         self.add_db_series(main.db, 'clash', [1], review=True)
         self.add_db_series(main.db, 'dup', [1, 2], review=True)
         self.add_db_series(main.db, 'twice', [1, 1], review=True)
+
+        # A response to a comment on patchwork belongs to its version
+        svid = main.db.ser_ver_get_for_series(
+            main.db.series_find_by_name('rev1'))[0].idnum
+        main.db.reply_add_comment(svid, 0, 77, '<c1@x>', '', 'Alex <a@x>', '',
+                                  '', 'Re: x', 'today', 'Why?', 'now')
+        main.commit()
         main.close_database()
 
         # The review database has one of your own series with the same name
@@ -157,6 +164,11 @@ class TestDatabase(CseriesTester):
              'dup': ('review', [2], 1, 1, 0),
              'rev1': ('review', [1, 2], 2, 2, 0)},
             self.db_summary(rcser.db))
+        svr = rcser.db.ser_ver_get_for_series(
+            rcser.db.series_find_by_name('rev1'))[0]
+        self.assertEqual([(0, 77, 'Why?')],
+                         [(rep.seq, rep.comment_id, rep.body)
+                          for rep in rcser.db.reply_get_comments(svr.idnum)])
         rcser.close_database()
 
         # Moving back brings 'rev1' home; 'dup' is in both so stays put
@@ -256,7 +268,7 @@ class TestDatabase(CseriesTester):
             self.assertEqual(f'Update database to v{version}',
                              out.getvalue().strip())
             self.assertEqual(version, db.get_schema_version())
-        self.assertEqual(14, database.LATEST)
+        self.assertEqual(15, database.LATEST)
 
     def test_traffic(self):
         """Requests to patchwork are counted by the hour"""
