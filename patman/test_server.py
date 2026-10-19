@@ -276,7 +276,8 @@ class TestWebServer(unittest.TestCase, TestCommon):
             {'id': ser_id, 'name': 'rev', 'desc': 'Somebody else',
              'upstream': None, 'version': 2, 'link': '200', 'num_reviews': 2,
              'approved': 1, 'statuses': {'new': 1, 'draft': 1},
-             'timestamp': '2026-10-01 10:00:00', 'replies_waiting': 0},
+             'timestamp': '2026-10-01 10:00:00', 'hidden': False,
+             'replies_waiting': 0},
             data[0])
 
         status, data = self.call(srv, 'GET', f'/api/reviews/{ser_id}')
@@ -862,6 +863,32 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(404, status)
         status, _ = self.call(srv, 'POST', '/api/jobs/1/cancel')
         self.assertEqual(409, status)
+
+    def test_hide_review(self):
+        """A reviewed series can be hidden from the list, and shown again"""
+        series_id, _ = self.add_series('rev', 'Somebody else',
+                                       {1: [('a', 'new', 5, 0)]},
+                                       source='review')
+        srv = self.make_server()
+        path = f'/api/reviews/{series_id}/hide'
+        status, data = self.call(srv, 'POST', path, json={'hidden': True})
+        self.assertEqual((200, {'id': series_id, 'hidden': True}),
+                         (status, data))
+        _, data = self.call(srv, 'GET', '/api/reviews')
+        self.assertTrue(data[0]['hidden'])
+        _, data = self.call(srv, 'GET', f'/api/reviews/{series_id}')
+        self.assertTrue(data['hidden'])
+
+        self.call(srv, 'POST', path, json={'hidden': False})
+        _, data = self.call(srv, 'GET', '/api/reviews')
+        self.assertFalse(data[0]['hidden'])
+
+        status, data = self.call(srv, 'POST', path, json={'hidden': 'yes'})
+        self.assertEqual(400, status)
+        self.assertIn("whether it is 'hidden'", data['error'])
+        status, _ = self.call(srv, 'POST', '/api/reviews/999/hide',
+                              json={'hidden': True})
+        self.assertEqual(404, status)
 
     def test_delete_review(self):
         """Reviews can be deleted from the page, as a job"""

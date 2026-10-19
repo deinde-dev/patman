@@ -113,6 +113,12 @@ once the series has been reviewed.
 Reviewing from the page
 -----------------------
 
+The Reviews tab shows the active reviews: tap 'hide' on a series once you have
+finished with it, or 'Hide' at the top of its reviews, to move it to the
+Hidden list. 'All' shows them all, and 'Needs reply' shows those with replies
+waiting, hidden or not. A hidden series becomes active again when a new
+version of it is reviewed or someone replies to a review of it.
+
 On the Reviews tab, 'Review a series' takes a patchwork series ID, the URL of a
 series or patch, or words from a cover-letter title, and runs ``patman review``
 (with ``-d`` to create Gmail drafts, if selected). 'Scan for new versions' runs

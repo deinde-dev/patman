@@ -391,6 +391,7 @@ def get_review_list(cser):
     """
     latest = _latest_versions(cser)
     waiting = cser.db.reply_count_waiting()
+    hidden = cser.db.series_get_hidden()
     out = []
     for ser in cser.db.series_get_dict(reviews_only=True).values():
         svr = latest.get(ser.idnum)
@@ -407,6 +408,7 @@ def get_review_list(cser):
             'statuses': dict(Counter(rev.status or 'new' for rev in reviews)),
             'timestamp': max((rev.timestamp for rev in reviews
                               if rev.timestamp), default=None),
+            'hidden': ser.idnum in hidden,
             'replies_waiting': waiting.get(ser.idnum, 0),
         })
     return sorted(out, key=lambda item: item['timestamp'] or '',
@@ -445,6 +447,7 @@ def get_review_detail(cser, idnum):
         versions.append(info)
     versions.sort(key=lambda item: item['version'], reverse=True)
     return {'id': idnum, 'name': name, 'desc': desc, 'upstream': ups,
+            'hidden': idnum in cser.db.series_get_hidden(),
             'versions': versions}
 
 

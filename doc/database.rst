@@ -6,7 +6,7 @@ The patman database
 Patman stores series tracking, review and workflow state in a SQLite
 database (``.patman.db``) in the top-level git directory. The schema is
 versioned and migrated automatically when patman starts; it is currently at
-v15. The :doc:`db` chapter of the manual covers where the database is
+v16. The :doc:`db` chapter of the manual covers where the database is
 kept, the separate review database and sharing it between patman runs.
 
 The database allows patman to track a patch series across multiple
@@ -66,6 +66,8 @@ desc        TEXT      Series description / cover-letter title
 archived    BIT       True if series is archived
 upstream    TEXT      Upstream name (added v5)
 source      TEXT      'review' for reviewed series (added v8)
+hidden      BIT       True if a reviewed series is hidden from the
+                      list of reviews (added v16)
 ==========  ========  ==========================================
 
 ser_ver
@@ -278,5 +280,5 @@ automatically.
 ==============  ========  ==========================================
 Column          Type      Description
 ==============  ========  ==========================================
-version         INTEGER   Current schema version (currently 15)
+version         INTEGER   Current schema version (currently 16)
 ==============  ========  ==========================================

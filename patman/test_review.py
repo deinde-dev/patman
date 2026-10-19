@@ -435,10 +435,15 @@ class TestReview(CseriesTester):
         cser = self.get_cser()
         pwork = self._review_pwork()
 
-        # Review v1 first
+        # Review v1 first, then hide the series from the list of reviews
         with self._mock_review():
             with terminal.capture() as _:
                 self.run_review('-s', str(self.REVIEW_LINK), pwork=pwork)
+        self.db_open()
+        series_id = cser.db.series_find_by_link(str(self.REVIEW_LINK))[0]
+        cser.db.series_set_hidden(series_id, True)
+        cser.commit()
+        self.db_close()
 
         # Now review v2 - should detect the previous review
         with self._mock_review():
@@ -453,6 +458,9 @@ class TestReview(CseriesTester):
         self.assertEqual(v1[0], v2[0])  # same series_id
         self.assertEqual(1, v1[2])  # version 1
         self.assertEqual(2, v2[2])  # version 2
+
+        # The new version shows the series again
+        self.assertEqual(set(), cser.db.series_get_hidden())
 
     def test_review_title_search(self):
         """Test searching for a series by title"""
@@ -911,10 +919,14 @@ class TestReview(CseriesTester):
         ctx = review.common.ReviewContext(None, cser, {})
         ctx.reviewer_name = 'Simon Glass'
         ctx.reviewer_email = 'sjg@chromium.org'
+        db.series_set_hidden(sid, True)
         with mock.patch.object(review.replies, 'handle_reply_sync',
                                return_value=('suggested', 'Because')) as ai, \
                 terminal.capture() as (out, _):
             self.assertEqual(1, review.replies._handle_replies(service, ctx))
+
+            # A reply which needs a response shows the series again
+            self.assertEqual(set(), db.series_get_hidden())
 
             # A second sync records nothing new
             self.assertEqual(0, review.replies._handle_replies(service, ctx))

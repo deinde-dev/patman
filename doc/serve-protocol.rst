@@ -333,6 +333,7 @@ reviewed first. Each is an object with:
   those with none
 - ``timestamp`` (str or null): when the latest review was written
 - ``replies_waiting`` (int): number of replies which need a response
+- ``hidden`` (bool): true if the series is hidden from the list of reviews
 
 ``GET /api/reviews/<id>``
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -399,6 +400,14 @@ patches to act on, using 0 for the cover letter; the default is all of them.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Send the Gmail drafts of a reviewed series. The body is as for ``redraft``.
+
+``POST /api/reviews/<id>/hide``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Hide a reviewed series from the list of reviews, or show it again, giving
+``hidden`` (bool) in the body. This responds with the series ``id`` and
+whether it is ``hidden``, rather than starting a job. A series is shown again
+when a new version of it is reviewed, or someone replies to a review of it.
 
 ``POST /api/reviews/<id>/delete``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
