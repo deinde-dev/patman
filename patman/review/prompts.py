@@ -103,8 +103,9 @@ QUOTING_RULES = """\
   only. In the '> ' quoted lines, reproduce the author's text exactly:
   never change double quotes to single, add or remove quotes, or
   restyle anything - a quote of "some_key" must stay "some_key"
-- Never put a period directly after a code identifier - rephrase,
-  omit the period, or use an em dash to start the next clause"""
+- Never put a period directly after a code identifier - rephrase so
+  that it does not end the sentence, or omit the period. Do not use em
+  dashes"""
 
 
 def voice_section():
