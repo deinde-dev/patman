@@ -98,6 +98,7 @@ Comment
 
 A comment on patchwork; any field may be null:
 
+- ``id`` (int): ID of the comment on patchwork
 - ``date`` (str): when it was sent
 - ``name`` (str): name of the sender
 - ``email`` (str): email address of the sender
@@ -127,7 +128,8 @@ A review of one patch, or of the cover letter:
 Reply
 ~~~~~
 
-A reply to a review which was sent:
+A reply to a review which was sent, or a comment on patchwork which we are
+responding to (see ``POST /api/reviews/<id>/respond``):
 
 - ``id`` (int): ID of the reply
 - ``sender`` (str): sender, e.g. ``Name <email>``
@@ -138,6 +140,9 @@ A reply to a review which was sent:
 - ``status`` (str): ``new``, ``suggested`` (there is a response), ``skip`` (no
   response is needed), ``draft`` (the response is in Gmail) or ``sent``
 - ``timestamp`` (str): when the reply was found
+- ``seq`` (int or null): for a comment, the patch it is about, 0 for the cover
+  letter
+- ``comment_id`` (int or null): for a comment, its ID on patchwork
 
 Job
 ~~~
@@ -330,7 +335,8 @@ A reviewed series with all its versions:
 - ``project`` (str or null): patchwork project of the upstream
 - ``versions`` (list of Version): newest first, each with ``notes`` (str or
   null; notes from handling reviews of the series), ``reviews`` (list of
-  Review, in order) and ``patches`` (list of Patch, in order)
+  Review, in order), ``patches`` (list of Patch, in order) and ``comments``
+  (list of Reply; the comments on patchwork which we are responding to)
 
 Series added for review before cover letters were recorded have no
 ``cover_id``. For versions with a review of the cover letter, the server looks
@@ -377,6 +383,16 @@ patches to act on, using 0 for the cover letter; the default is all of them.
 
 Send the Gmail drafts of a reviewed series. The body is as for ``redraft``.
 
+``POST /api/reviews/<id>/respond``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Have the agent suggest a response to a comment on patchwork about a reviewed
+series, running ``patman review --respond-comment``. The body gives the
+``comment`` (int; its ID on patchwork) and ``seq`` (int; the patch it is about,
+0 for the cover letter), and may give the ``version`` (int; default the latest)
+and a ``note`` (str) saying what the reviewer would like to say. The comment
+then appears in the version's ``comments``, with the response.
+
 ``POST /api/reviews/<id>/revise``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -420,6 +436,8 @@ giving status 409.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Have the agent suggest a response to a reply, giving status 202 and the Job.
+For a comment on patchwork, this reads the comment again, as ``respond``
+does.
 
 ``POST /api/replies/<id>/send``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

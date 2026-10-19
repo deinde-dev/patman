@@ -961,6 +961,9 @@ async function viewReview(id, wantVer) {
     const label = r.seq ? `Patch ${r.seq}` : 'Cover letter';
     const [mailBtn, mailBox] = itemId
       ? mailToggle(r.seq ? 'patch' : 'cover', itemId, ser.upstream) : [null, null];
+    const [commentsBtn, commentsBox] = itemId && sv.link
+      ? commentsToggle(ser, sv, r.seq, itemId) : [null, null];
+    const responses = commentResponses(sv, r.seq).map(replyBox);
     const title = h('div', { class: 'row' },
       h('div', { class: 'grow name' }, itemId
         ? h('a', { href: mailHref(r.seq ? 'patch' : 'cover', itemId, ser.upstream),
@@ -983,7 +986,7 @@ async function viewReview(id, wantVer) {
     const show = () => card.replaceChildren(header,
       renderMail(r.body, free() ? ask : null, free() ? editChunk : null),
       (mailBtn || free()) && h('div', { class: 'actions' },
-        mailBtn,
+        mailBtn, commentsBtn,
         free() && [
           h('button', { class: 'btn light small', title: 'Change the review yourself',
                         onclick: () => editReview(card, r, header, show,
@@ -998,8 +1001,8 @@ async function viewReview(id, wantVer) {
               ? 'Create the Gmail draft of this review again, since it has changed, ' +
                 'and send it'
               : 'Send the Gmail draft of this review')]),
-      ...(mailBox ? [mailBox] : []),
-      ...(r.replies || []).map(replyBox));
+      ...[mailBox, commentsBox].filter(Boolean),
+      ...(r.replies || []).map(replyBox), ...responses);
     entries.set(r.id, { r, strip, show, busy: false });
     show();
     return card;
@@ -1063,43 +1066,127 @@ async function viewReview(id, wantVer) {
 // A card for the cover letter of a version which has no review of it, e.g.
 // because the agent had nothing to say about the series as a whole. It shows
 // the cover letter and can ask the agent to review just that
+// Show in 'strip' how a job is getting on, until it finishes. 'verb' says
+// what it does, e.g. 'Reviewing'. Returns the job's final state, with the
+// strip showing any failure, or null if the strip has left the page
+async function followJob(job, strip, verb) {
+  const say = (cls, text) => {
+    strip.className = `jobstrip ${cls}`;
+    strip.replaceChildren(h('span', {}, text), ' ',
+      h('a', { href: `#/jobs/${job.id}`, title: 'Show the output of the job' },
+        'View output'));
+  };
+  refreshJobCount();
+  while (!job.finished) {
+    say('busy', `${verb}… ${job.queued ? 'waiting' : 'running'}`);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (!strip.isConnected) return null;
+    try {
+      job = await api(`jobs/${job.id}`);
+    } catch (err) {
+      // Try again
+    }
+  }
+  refreshJobCount();
+  const [status] = jobStatus(job);
+  if (status === 'ok') say('', `${verb}: done`);
+  else say('failed', `${verb}: ${status}`);
+  return job;
+}
+
+// Get the comments on patchwork which have responses, for a patch (0 for the
+// cover letter) of a version
+function commentResponses(sv, seq) {
+  return (sv.comments || []).filter((c) => c.seq === seq);
+}
+
+// A button showing the comments on patchwork about a patch (seq) or the cover
+// letter (seq 0) of a reviewed version, each with 'Respond' to have the agent
+// suggest a response to it. Returns the button and the box which holds them
+function commentsToggle(ser, sv, seq, itemId) {
+  const kind = seq ? 'patch' : 'cover';
+  const box = h('div', {});
+  const responded = new Set(commentResponses(sv, seq).map((c) => c.comment_id));
+  const respond = async (c, note, strip) => {
+    const job = await api(`reviews/${ser.id}/respond`,
+                          { json: { version: sv.version, seq, comment: c.id, note } });
+    const st = await followJob(job, strip, 'Suggesting a response');
+    if (st && jobStatus(st)[0] === 'ok') route();
+  };
+  const item = (c) => {
+    const slot = h('div', {});
+    const strip = h('div', { class: 'jobstrip' });
+    const reset = () => slot.replaceChildren(responded.has(c.id)
+      ? h('div', { class: 'ver' }, 'Your response to this is below')
+      : h('div', { class: 'actions' },
+        h('button', { class: 'btn light small', onclick: () => ask(),
+                      title: 'Respond to this comment, with a suggestion from the agent' },
+          'Respond')));
+    const ask = () => {
+      const note = h('textarea', { spellcheck: 'true',
+                                   placeholder: 'What would you like to say? (optional)' });
+      const msg = h('div', { class: 'msg' });
+      const go = h('button', { class: 'btn small', onclick: async () => {
+        go.disabled = true;
+        msg.textContent = '';
+        try {
+          await respond(c, note.value, strip);
+        } catch (err) {
+          msg.textContent = err.message;
+          go.disabled = false;
+        }
+      }, title: 'Have the agent suggest a response, as a job, which you can then change, ' +
+                'draft or send' }, 'Suggest a response');
+      slot.replaceChildren(h('div', { class: 'form' }, note,
+        h('div', { class: 'actions' }, go,
+          h('button', { class: 'btn light small', onclick: reset,
+                        title: 'Close this without responding' }, 'Cancel')), msg));
+      note.focus();
+    };
+    reset();
+    return h('div', { class: 'comments' },
+      h('div', { class: 'who' }, c.name || c.email,
+        h('span', { class: 'when' }, ago(parseTime(c.date, true)))),
+      renderMail(c.content || ''), strip, slot);
+  };
+  let open = false;
+  const btn = h('button', { class: 'btn light small',
+                            title: 'Show the comments on patchwork, to respond to them',
+                            onclick: async () => {
+    open = !open;
+    btn.textContent = open ? 'Hide comments' : 'Comments';
+    if (!open) { box.replaceChildren(); return; }
+    box.replaceChildren(h('div', { class: 'ver' }, 'Loading…'));
+    try {
+      const q = ser.upstream ? `?ups=${encodeURIComponent(ser.upstream)}` : '';
+      const list = await api(`comments/${kind}/${itemId}${q}`);
+      if (open) {
+        box.replaceChildren(...(list.length ? list.map(item)
+          : [h('div', { class: 'ver' }, 'No comments on patchwork')]));
+      }
+    } catch (err) {
+      if (open) box.replaceChildren(h('div', { class: 'error' }, err.message));
+    }
+  } }, 'Comments');
+  return [btn, box];
+}
+
 function unreviewedCover(ser, sv) {
   const [showBtn, mailBox] = mailToggle('cover', sv.cover_id, ser.upstream);
+  const [commentsBtn, commentsBox] = commentsToggle(ser, sv, 0, sv.cover_id);
   const strip = h('div', { class: 'jobstrip' });
-  const say = (cls, ...kids) => {
-    strip.className = `jobstrip ${cls}`;
-    strip.replaceChildren(...kids);
-  };
-  const output = (jobId) => h('a', { href: `#/jobs/${jobId}`,
-                                     title: 'Show the output of the job' }, 'View output');
   const review = async () => {
     let job;
     try {
       job = await api('review', { json: { target: String(sv.link), ups: ser.upstream,
                                           index: '0', drafts: true } });
     } catch (err) {
-      say('failed', h('span', {}, err.message));
+      strip.className = 'jobstrip failed';
+      strip.replaceChildren(h('span', {}, err.message));
       return;
     }
-    refreshJobCount();
-    for (;;) {
-      say('busy', h('span', {}, `Reviewing… ${job.queued ? 'waiting' : 'running'}`), ' ',
-          output(job.id));
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      if (!strip.isConnected) return;
-      try {
-        job = await api(`jobs/${job.id}`);
-      } catch (err) {
-        continue;
-      }
-      if (job.finished) break;
-    }
-    refreshJobCount();
-    const [status] = jobStatus(job);
-    if (status !== 'ok') {
-      say('failed', h('span', {}, `Review ${status}`), ' ', output(job.id));
-      return;
-    }
+    job = await followJob(job, strip, 'Reviewing');
+    if (!job || jobStatus(job)[0] !== 'ok') return;
     // Show the new review, if the agent wrote one
     const again = await api(`reviews/${ser.id}`);
     const ver = again.versions.find((v) => v.version === sv.version);
@@ -1107,8 +1194,7 @@ function unreviewedCover(ser, sv) {
       route();
       return;
     }
-    say('', h('span', {}, 'The agent has no comments on the cover letter'), ' ',
-        output(job.id));
+    strip.firstChild.textContent = 'The agent has no comments on the cover letter';
   };
   return h('div', { class: 'card review' },
     h('div', { class: 'row' },
@@ -1119,11 +1205,11 @@ function unreviewedCover(ser, sv) {
                                         : null)),
       h('span', { class: 'ver' }, 'not reviewed')),
     strip,
-    h('div', { class: 'actions' }, showBtn,
+    h('div', { class: 'actions' }, showBtn, commentsBtn,
       sv.link && confirmButton('Review it', 'btn light small', review,
                                'Have the agent review just the cover letter, as a job, ' +
                                'creating a Gmail draft if it has comments')),
-    mailBox);
+    mailBox, commentsBox, commentResponses(sv, 0).map(replyBox));
 }
 
 // Status of a reply to a review, as [text, chip class]

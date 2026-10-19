@@ -223,6 +223,8 @@ def reply_info(reply):
         'response': reply.response,
         'status': reply.status,
         'timestamp': reply.timestamp,
+        'seq': reply.seq,
+        'comment_id': reply.comment_id,
     }
 
 
@@ -237,6 +239,7 @@ def comment_info(comment):
     """
     submitter = comment.get('submitter') or {}
     return {
+        'id': comment.get('id'),
         'date': comment.get('date'),
         'name': submitter.get('name'),
         'email': submitter.get('email'),
@@ -436,6 +439,9 @@ def get_review_detail(cser, idnum):
             info['reviews'].append(item)
         info['patches'] = [_patch_info(pcm) for pcm in sorted(
             cser.db.pcommit_get_list(svr.idnum), key=lambda pcm: pcm.seq)]
+        # Comments on patchwork which we have been asked to respond to
+        info['comments'] = [reply_info(reply) for reply in
+                            cser.db.reply_get_comments(svr.idnum)]
         versions.append(info)
     versions.sort(key=lambda item: item['version'], reverse=True)
     return {'id': idnum, 'name': name, 'desc': desc, 'upstream': ups,

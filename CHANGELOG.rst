@@ -10,6 +10,13 @@ Unreleased
 
 Added
 ~~~~~
+- patman can respond to any comment on patchwork about a reviewed series,
+  not just replies to your reviews: ``patman review --respond-comment ID -i
+  SEQ`` has the agent suggest a response, which is then drafted and sent like
+  a response to a reply. On the ``patman serve`` page, 'Comments' under each
+  review, and on the cover-letter card, lists the comments, each with
+  'Respond'. The reply table gains the version, patch and comment ID
+  (database v15).
 - patman counts the requests it sends to each patchwork server, and the
   data it receives, by the hour, in a new ``traffic`` table (database v14).
   The sync page of ``patman serve`` shows the totals for this hour, today

@@ -98,6 +98,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.requests.append(subpath)
         if subpath == 'patches/1234/comments/':
             return [{
+                'id': 1,
                 'date': '2026-10-01T10:00:00',
                 'subject': 'Re: [PATCH 1/2] video: Add a driver',
                 'submitter': {'name': 'Tom Rini', 'email': 'trini@k.com'},
@@ -428,7 +429,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
         status, data = self.call(srv, 'GET', '/api/comments/patch/1234')
         self.assertEqual(200, status)
         self.assertEqual(
-            [{'date': '2026-10-01T10:00:00',
+            [{'id': 1, 'date': '2026-10-01T10:00:00',
               'name': 'Tom Rini', 'email': 'trini@k.com',
               'subject': 'Re: [PATCH 1/2] video: Add a driver',
               'content': '> some code\n\nReviewed-by: Tom Rini',
@@ -988,6 +989,54 @@ class TestWebServer(unittest.TestCase, TestCommon):
                           for job in srv.get_jobs()])
         self.assertEqual(series_id, db.ser_ver_get_by_id(svids[1]).series_id)
 
+    def test_respond_comment(self):
+        """The agent can be asked to respond to a comment on patchwork"""
+        series_id, svids = self.add_series(
+            'rev', 'Somebody else', {1: [('a', 'new', 5, 0)]}, ups='us',
+            source='review')
+        db = self.cser.db
+        rid = db.reply_add_comment(
+            svids[1], 0, 77, '<c1@x>', '<cover@x>', 'Alex <a@x>', 'f@x', '',
+            'Re: [PATCH 0/1] a', 'today', 'Why?', '2026-10-02 10:00:00')
+        db.commit()
+
+        srv = self.make_server()
+        srv.get_patman_cmd = lambda *args: ['echo', *args]
+        _, data = self.call(srv, 'GET', '/api/reviews')
+        self.assertEqual(1, data[0]['replies_waiting'])
+        _, data = self.call(srv, 'GET', f'/api/reviews/{series_id}')
+        self.assertEqual(
+            [(rid, 0, 77, 'Alex <a@x>', 'new')],
+            [(c['id'], c['seq'], c['comment_id'], c['sender'], c['status'])
+             for c in data['versions'][0]['comments']])
+
+        path = f'/api/reviews/{series_id}/respond'
+        res = self.run_jobs(srv, [
+            ('POST', path, {'seq': 0, 'comment': 77, 'note': ' Say X '}),
+            ('POST', path, {'seq': 1, 'comment': 78, 'version': 1}),
+            ('POST', f'/api/replies/{rid}/suggest', {}),
+            ('POST', path, {'seq': -1, 'comment': 77}),
+            ('POST', path, {'seq': True, 'comment': 77}),
+            ('POST', path, {'seq': 0}),
+            ('POST', path, {'seq': 0, 'comment': 77, 'note': 3}),
+            ('POST', '/api/reviews/999/respond', {'seq': 0, 'comment': 77}),
+        ])
+        self.assertEqual([202, 202, 202, 400, 400, 400, 400, 404],
+                         [status for status, _ in res])
+        self.assertEqual("Respond to a comment on the cover letter of "
+                         "'Somebody else' v1", res[0][1]['title'])
+        self.assertEqual("Respond to a comment on patch 1 of 'Somebody else' "
+                         'v1', res[1][1]['title'])
+        self.assertIn('Please give the comment', res[5][1]['error'])
+
+        # Asking for a new suggestion reads the comment again
+        _, jobs = self.call(srv, 'GET', '/api/jobs')
+        self.assertEqual(
+            ['review -s 100 --respond-comment 77 -i 0 -U us -c Say X',
+             'review -s 100 --respond-comment 78 -i 1 -U us',
+             'review -s 100 --respond-comment 77 -i 0 -U us'],
+            [job['results'][0]['output'].strip() for job in reversed(jobs)])
+
     def test_replies(self):
         """Replies to reviews can be seen, and responses changed and drafted"""
         series_id, svids = self.add_series(
@@ -1015,7 +1064,8 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(
             {'id': first, 'sender': 'Fred <f@x>', 'subject': 'Re: [PATCH] a',
              'date': 'today', 'body': 'Why?', 'response': None,
-             'status': 'new', 'timestamp': '2026-10-02 10:00:00'},
+             'status': 'new', 'timestamp': '2026-10-02 10:00:00',
+             'seq': None, 'comment_id': None},
             replies[0])
         self.assertEqual(('sent', 'Thanks'),
                          (replies[1]['status'], replies[1]['response']))
