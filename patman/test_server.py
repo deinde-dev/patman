@@ -1105,6 +1105,43 @@ class TestWebServer(unittest.TestCase, TestCommon):
         _, data = self.call(srv, 'GET', '/api/reviews')
         self.assertEqual(0, data[0]['replies_waiting'])
 
+    def test_parallel_reviews(self):
+        """Reviews of series run alongside each other, a few at once"""
+        flag = os.path.join(self.tmpdir, 'flag')
+
+        async def _go():
+            async with TestClient(TestServer(srv.make_app())) as client:
+                for target in ('1', '2', '3'):
+                    await client.post('/api/review', json={'target': target})
+                await client.post('/api/review/scan', json={})
+                first, second, third, scan = (srv.get_job(num)
+                                              for num in (1, 2, 3, 4))
+
+                # Two reviews run at once, along with the scan
+                while not (first.state['running'] and
+                           second.state['running'] and
+                           scan.state['running']):
+                    await asyncio.sleep(0.01)
+                waiting = third.state['queued']
+                tools.write_file(flag, b'')
+                while any(job.active for job in srv.get_jobs()):
+                    await asyncio.sleep(0.01)
+                return waiting
+
+        # The limit is read when the server is created
+        loop = asyncio.new_event_loop()
+        try:
+            with mock.patch.object(server.jobs, 'MAX_PARALLEL', 2):
+                srv = self.make_server()
+                srv.get_patman_cmd = lambda *args: [
+                    'sh', '-c', f'echo started; while [ ! -e {flag} ]; '
+                                'do sleep 0.01; done']
+                self.assertTrue(loop.run_until_complete(_go()))
+        finally:
+            loop.close()
+        self.assertEqual([True] * 4, [job.state['results'][0]['returncode'] == 0
+                                      for job in srv.get_jobs()])
+
     def test_cancel_queued_job(self):
         """A job which is waiting for another can be cancelled"""
         srv = self.make_server()
@@ -1113,8 +1150,9 @@ class TestWebServer(unittest.TestCase, TestCommon):
 
         async def _go():
             async with TestClient(TestServer(srv.make_app())) as client:
-                await client.post('/api/review', json={'target': '1'})
-                await client.post('/api/review', json={'target': '2'})
+                # Scans run one at a time, unlike reviews
+                await client.post('/api/review/scan', json={})
+                await client.post('/api/review/scan', json={})
                 first, second = srv.get_job(1), srv.get_job(2)
                 while not first.state['results'] or \
                         not first.state['results'][0]['output']:
@@ -1184,7 +1222,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(
             [{'kind': 'review', 'title': 'Review series 1',
               'cmds': [['sh', '-c', f'echo busy; [ -e {flag} ] || sleep 10']],
-              'resumed': 0, 'target': None}], read_jobs())
+              'resumed': 0, 'target': None, 'parallel': True}], read_jobs())
 
         # A new server runs the first job again
         with open(flag, 'w', encoding='utf-8'):

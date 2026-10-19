@@ -786,19 +786,20 @@ class Server(jobs.JobRunner):
             raise params.BadRequest('Request must be a JSON object')
         return data
 
-    def _review_job(self, title, *args, target=None):
+    def _review_job(self, title, *args, target=None, parallel=False):
         """Start a job which runs 'patman review'
 
         Args:
             title (str): Description of the job
             args (list of str): Arguments for 'patman review'
             target (dict or None): Reviews which the job acts on (see Job)
+            parallel (bool): True to run alongside other jobs (see Job)
 
         Return:
             web.Response: Response giving the job state
         """
         cmd = self.get_patman_cmd('review', *args, *self._review_db_args())
-        job = self.add_job('review', title, [cmd], target)
+        job = self.add_job('review', title, [cmd], target, parallel)
         return web.json_response(job.state, status=202)
 
     def _reviewing(self, link):
@@ -849,7 +850,8 @@ class Server(jobs.JobRunner):
             if busy:
                 raise jobs.JobBusyError(
                     f'Series {link} is already being reviewed, by job {busy}')
-        return self._review_job(title, *args)
+        # Each review has its own worktree, so several can run at once
+        return self._review_job(title, *args, parallel=True)
 
     async def _review_scan(self, request):
         """Handle 'POST /api/review/scan': look for new versions to review

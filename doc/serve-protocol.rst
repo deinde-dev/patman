@@ -152,7 +152,8 @@ A job runs one or more commands in the git tree, such as a sync or a review:
 - ``id`` (int): job number, starting at 1 when the server starts
 - ``kind`` (str): ``sync`` or ``review``
 - ``title`` (str): description, e.g. ``Review series 123``
-- ``queued`` (bool): true while waiting for other jobs to finish
+- ``queued`` (bool): true while waiting for other jobs to finish; a review of
+  a series waits only while five others are running
 - ``running`` (bool): true while running
 - ``cancelled`` (bool): true if it was cancelled
 - ``started`` (str or null): when it started
