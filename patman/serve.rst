@@ -195,6 +195,8 @@ again.
 
 To respond to other comments on patchwork, tap 'Comments' under a review, or on
 the cover-letter card, to list the comments on that patch or cover letter.
+Your own comments, such as the review itself, are left out, since they need no
+response.
 'Respond' on a comment asks the agent to suggest a response, optionally saying
 what you would like to say (``patman review --respond-comment``). The response
 then appears below the review, like a response to a reply, to change, draft or

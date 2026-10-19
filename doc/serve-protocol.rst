@@ -108,6 +108,8 @@ A comment on patchwork; any field may be null:
 - ``subject`` (str): subject
 - ``content`` (str): text of the comment
 - ``web_url`` (str): URL of the comment on patchwork
+- ``own`` (bool): true if it is from our own address (git ``user.email``),
+  e.g. a review we sent; never null
 
 Review
 ~~~~~~

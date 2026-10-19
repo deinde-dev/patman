@@ -1315,8 +1315,15 @@ function commentsToggle(ser, sv, seq, itemId) {
       const q = ser.upstream ? `?ups=${encodeURIComponent(ser.upstream)}` : '';
       const list = await api(`comments/${kind}/${itemId}${q}`);
       if (open) {
-        fill(box, ...(list.length ? list.map(item)
-          : [h('div', { class: 'ver' }, 'No comments on patchwork')]));
+        // Our own comments, such as the review above, need no response
+        const others = list.filter((c) => !c.own);
+        const mine = list.length - others.length;
+        fill(box, ...(others.length ? others.map(item)
+          : [h('div', { class: 'ver' }, mine ? 'No comments from others on patchwork'
+                                             : 'No comments on patchwork')]),
+          mine ? h('div', { class: 'ver', title: 'Such as the review itself' },
+                   mine === 1 ? 'Leaving out your own comment'
+                              : `Leaving out your own ${mine} comments`) : null);
       }
     } catch (err) {
       if (open) fill(box, h('div', { class: 'error' }, err.message));

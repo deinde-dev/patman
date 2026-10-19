@@ -18,6 +18,7 @@ import subprocess
 import aiohttp
 from aiohttp import web
 
+from u_boot_pylib import gitutil
 from u_boot_pylib import tout
 
 from patman import database
@@ -67,6 +68,8 @@ class Server(jobs.JobRunner):
             all upstreams, for testing
         sync_cmds_for_testing (list of list of str or None): Commands to
             run for a sync, for testing
+        own_emails (set of str or None): Our own email addresses, in lower
+            case, or None if not yet found
     """
     # pylint: disable=R0913,R0917
     def __init__(self, cser, pw_url=None, sync_interval=0, review_sync=False,
@@ -96,6 +99,7 @@ class Server(jobs.JobRunner):
         self.token = token
         self.pwork_for_testing = None
         self.sync_cmds_for_testing = None
+        self.own_emails = None
         self._pworks = {}
         self._sleep = asyncio.sleep
         self._sync_task = None
@@ -589,6 +593,9 @@ class Server(jobs.JobRunner):
             request (web.Request): Request, with 'kind' ('patch' or 'cover')
                 and the patchwork ID as 'item_id'
 
+        Each comment says whether we sent it, from our git user.email
+        address, which is how a review we sent appears on patchwork
+
         Return:
             web.Response: List of comments on the patch or cover letter
 
@@ -603,7 +610,11 @@ class Server(jobs.JobRunner):
                 comments = await pwork.get_patch_comments(client, item_id)
             else:
                 comments = await pwork.get_cover_comments(client, item_id)
-        return web.json_response([info.comment_info(c)
+        if self.own_emails is None:
+            # The address which 'patman review' sends reviews from
+            email = gitutil.get_default_user_email()
+            self.own_emails = {email.lower()} if email else set()
+        return web.json_response([info.comment_info(c, self.own_emails)
                                   for c in comments or []])
 
     async def _mail(self, request):
