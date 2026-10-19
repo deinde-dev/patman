@@ -4,6 +4,7 @@
 #
 """Tests for 'patman database' and migrating the database"""
 
+from datetime import datetime, timedelta, timezone
 import os
 from unittest import mock
 
@@ -15,6 +16,7 @@ from patman import control
 from patman import cseries
 from patman.database import Pcommit
 from patman import database
+from patman import times
 from patman import traffic
 from patman.test_common import CseriesTester
 
@@ -325,6 +327,20 @@ class TestDatabase(CseriesTester):
         hour = traffic.hour_key()
         self.assertEqual({'https://pw': (4, 40)}, db.traffic_get(hour))
         db.close()
+
+    def test_times(self):
+        """Times are written in the database's form, local to the machine"""
+        self.assertEqual('2026-10-19 08:05:03',
+                         times.to_str(datetime(2026, 10, 19, 8, 5, 3)))
+        self.assertRegex(times.now_str(), r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$')
+        zone = timezone(timedelta(hours=5, minutes=30))
+        with mock.patch.object(times, 'datetime') as fake:
+            fake.now.return_value.astimezone.return_value = datetime(
+                2026, 10, 19, tzinfo=zone)
+            self.assertEqual(330, times.utc_offset())
+            fake.now.return_value.astimezone.return_value = datetime(
+                2026, 10, 19, tzinfo=timezone(timedelta(hours=-6)))
+            self.assertEqual(-360, times.utc_offset())
 
     def test_migrate_future_version(self):
         """Test that a database newer than patman is rejected"""

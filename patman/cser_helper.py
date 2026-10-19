@@ -28,6 +28,7 @@ from patman.database import Database, Pcommit, SerVer
 from patman import patchwork
 from patman.series import Series
 from patman import status
+from patman import times
 from patman import traffic
 from patman.workflow import Wtype
 
@@ -1729,7 +1730,7 @@ class CseriesHelper:
         pad = ' ' * max(17 - len(name), 0)
         marker = ''
         ts = self.db.workflow_get(Wtype.TODO, ser.idnum)
-        if ts and ts <= self.get_now().strftime('%Y-%m-%d %H:%M:%S'):
+        if ts and ts <= times.to_str(self.get_now()):
             marker = ' [todo]'
         print(f"{state_str}{pad}  {stats.rjust(6)}  {desc}{marker}")
 
