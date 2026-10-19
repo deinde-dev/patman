@@ -167,6 +167,26 @@ class TestDatabase(CseriesTester):
                          self.db_summary(main.db)['rev1'])
         main.close_database()
 
+    def test_db_split_envelope(self):
+        """Moving a review keeps the headers for its reply"""
+        main = self.get_database()
+        self.add_db_series(main.db, 'rev1', [1], review=True)
+        rev = main.db.review_get_for_version(main.db.ser_ver_get_for_series(
+            main.db.series_find_by_name('rev1'))[0].idnum)[0]
+        main.db.review_set_envelope(rev.idnum, {'subject': 'Re: x'})
+        main.commit()
+        main.close_database()
+
+        rdir = os.path.join(self.tmpdir, 'reviews')
+        self.open_db_in(rdir).close_database()
+        self.run_db('--review-db-dir', rdir, 'split')
+        rcser = self.open_db_in(rdir)
+        rev = rcser.db.review_get_for_version(rcser.db.ser_ver_get_for_series(
+            rcser.db.series_find_by_name('rev1'))[0].idnum)[0]
+        self.assertEqual({'subject': 'Re: x'},
+                         rcser.db.review_get_envelope(rev.idnum))
+        rcser.close_database()
+
     def test_db_errors(self):
         """Problems with the review database are reported"""
         self.get_database().close_database()
