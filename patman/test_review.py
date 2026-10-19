@@ -9,6 +9,7 @@ import base64
 import contextlib
 from datetime import datetime, timedelta
 import email.utils
+import importlib.util
 import os
 import re
 import subprocess
@@ -1510,6 +1511,9 @@ class TestReview(CseriesTester):
 
     def test_gmail_send_draft(self):
         """A draft is read, then sent"""
+        # send_draft() catches the API's HttpError, so needs the API
+        if not importlib.util.find_spec('googleapiclient'):
+            self.skipTest('needs google-api-python-client')
         service = mock.MagicMock()
         drafts = service.users.return_value.drafts.return_value
         body = base64.urlsafe_b64encode(b'Hi Fred').decode()

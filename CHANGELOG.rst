@@ -101,6 +101,9 @@ Fixed
   rather than with the wrapper, which fails. ``test_help``,
   ``test_full_help``, ``test_custom_get_maintainer_script`` and
   ``test_series_send`` failed in the same way.
+- ``test_gmail_send_draft`` is skipped when the Gmail API
+  (google-api-python-client) is not installed, rather than failing, since
+  it is optional.
 
 0.4.0 - 2026-10-18
 ------------------
