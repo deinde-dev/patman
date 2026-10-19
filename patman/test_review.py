@@ -2264,6 +2264,59 @@ VERDICT: skip"""
         # beta is patchwork patch 2 and gamma is 3 -- not 1 and 2
         self.assertEqual({2: 'review-beta', 3: 'review-gamma'}, bodies)
 
+    def test_review_cover_only(self):
+        """Patch 0 picks the cover letter, to review it on its own"""
+        from patman.review.common import ReviewContext
+
+        ctx = ReviewContext(None, None, {'patches': [
+            {'name': '[1/2] alpha'}, {'name': '[2/2] beta'}]})
+        ctx.branch_name = 'b'
+        ctx.upstream_branch = 'u'
+        ctx.main_repo = self.tmpdir
+        ctx.patch_count = 2
+        ctx.cover_content = 'Cover text'
+        ctx.svid = None
+        ctx.reviewer_name = 'Test'
+        ctx.reviewer_email = 't@t.com'
+        commits = [types.SimpleNamespace(subject='alpha', hash='h1', rtags={}),
+                   types.SimpleNamespace(subject='beta', hash='h2', rtags={})]
+        series = types.SimpleNamespace(commits=commits)
+
+        async def fake_single(_ctx, cmt, _seq, _all_commits):
+            return f'review-{cmt.subject}'
+
+        def run(sel, cover):
+            ctx.patch_selection = sel
+
+            async def fake_cover(_ctx, _all_commits):
+                return cover
+
+            loop = asyncio.new_event_loop()
+            with mock.patch.object(review.core.claude_mod, 'check_available',
+                                   return_value=True), \
+                    mock.patch.object(review.core.patchstream,
+                                      'get_metadata_for_list',
+                                      return_value=series), \
+                    mock.patch.object(review.core, '_review_single_patch',
+                                      side_effect=fake_single), \
+                    mock.patch.object(review.core, '_review_cover_letter',
+                                      side_effect=fake_cover), \
+                    terminal.capture() as (out, _):
+                bodies = loop.run_until_complete(
+                    review.core.review_patches(ctx))
+            loop.close()
+            return bodies, out.getvalue()
+
+        self.assertEqual({0: 'cover', 1: 'review-alpha', 2: 'review-beta'},
+                         run(None, 'cover')[0])
+        self.assertEqual({1: 'review-alpha'}, run({1}, 'cover')[0])
+        self.assertEqual({0: 'cover'}, run({0}, 'cover')[0])
+
+        # The agent may have nothing to say about the series as a whole
+        bodies, out = run({0}, None)
+        self.assertEqual({}, bodies)
+        self.assertIn('no comments on the cover letter', out)
+
     def test_format_findings(self):
         """Test findings are formatted for storage"""
         from patman.review.emails import format_findings
