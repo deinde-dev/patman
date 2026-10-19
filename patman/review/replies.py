@@ -276,6 +276,7 @@ def _make_reply_ctx(args, cser):
     if ctx.signoff:
         ctx.signoff = ctx.signoff.replace('\\n', '\n')
     ctx.spelling = getattr(args, 'spelling', 'British')
+    ctx.em_dash = getattr(args, 'em_dash', '-')
     return ctx
 
 
@@ -352,7 +353,7 @@ async def handle_reply(ctx, review_body, reply_from, reply_body):
 
     Args:
         ctx (ReviewContext): Review context (uses reviewer_name,
-            reviewer_email, repo_path, signoff, spelling)
+            reviewer_email, repo_path, signoff, spelling, em_dash)
         review_body (str): Our original review text
         reply_from (str): Who replied (name <email>)
         reply_body (str): The reply text
@@ -410,8 +411,9 @@ async def handle_reply(ctx, review_body, reply_from, reply_body):
     reply_ctx.reviewer_name = ctx.reviewer_name
     reply_ctx.reviewer_email = ctx.reviewer_email
     reply_ctx.signoff = ctx.signoff
-    return database.REPLY_SUGGESTED, emails.format_review_email(
-        reply_ctx, greeting, verdict, comments)
+    return database.REPLY_SUGGESTED, emails.fix_dashes(
+        emails.format_review_email(reply_ctx, greeting, verdict, comments),
+        ctx.em_dash)
 
 
 def handle_reply_sync(ctx, review_body, reply_from, reply_body):

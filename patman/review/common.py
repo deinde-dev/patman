@@ -130,6 +130,8 @@ class ReviewContext:  # pylint: disable=R0902
             for apply/build/agent)
         signoff (str or None): Sign-off text for reviews with comments
         spelling (str): Spelling convention
+        em_dash (str): Text to use in place of each em dash which the agent
+            writes, or an em dash to keep them
         comments_path (str or None): Path to existing patchwork comments
         pwork (Patchwork or None): Patchwork instance
         cser (Cseries or None): Open cseries instance
@@ -155,6 +157,7 @@ class ReviewContext:  # pylint: disable=R0902
         self.repo_path = None
         self.signoff = None
         self.spelling = 'British'
+        self.em_dash = '-'
         self.comments_path = None
         self.series_id = None
         self.svid = None

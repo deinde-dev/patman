@@ -157,7 +157,7 @@ async def _review_single_patch(ctx, cmt, seq, all_commits):
     """
     result = await _run_patch_review(ctx, cmt, seq, all_commits)
     if result is None:
-        return '(Review failed — please review manually)'
+        return '(Review failed - please review manually)'
     greeting, verdict, comments, commit_msg = result
     # A non-approval with no comments has nothing to say (just a greeting
     # and the quoted commit message); drop it rather than sending an empty
@@ -289,8 +289,8 @@ def _store_finding(ctx, seq, subject, verdict, comments, timestamp):
         int: Number of comments
     """
     comments = sorted(comments, key=lambda hc: emails.is_code_comment(hc[0]))
-    body = emails.cleanup_review_text(emails.format_findings(verdict,
-                                                             comments))
+    body = emails.fix_dashes(emails.cleanup_review_text(
+        emails.format_findings(verdict, comments)), ctx.em_dash)
     rid = ctx.cser.db.review_add(ctx.svid, seq, body, verdict == 'approved',
                                  timestamp)
     ctx.cser.db.review_set_session(rid, ctx.session_ids.get(seq))
@@ -564,6 +564,8 @@ def _run_and_store_reviews(ctx, args):
     for seq in review_bodies:
         review_bodies[seq] = emails.cleanup_review_text(review_bodies[seq])
     review_bodies = emails.refine_reviews_sync(review_bodies, ctx.spelling)
+    review_bodies = {seq: emails.fix_dashes(body, ctx.em_dash)
+                     for seq, body in review_bodies.items()}
 
     timestamp = datetime.now().isoformat()
     review_ids = {}
@@ -782,6 +784,7 @@ def _review_link(args, pwork, cser, link):
         if ctx.signoff:
             ctx.signoff = ctx.signoff.replace('\\n', '\n')
         ctx.spelling = args.spelling
+        ctx.em_dash = getattr(args, 'em_dash', '-')
         ctx.context = _read_context(args.context) if args.context else None
         ctx.comments_path = lookup.write_comments_file(series_data, pwork)
 

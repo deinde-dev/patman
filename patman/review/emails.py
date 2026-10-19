@@ -311,6 +311,39 @@ def format_review_email(ctx, greeting, verdict, comments,
                                  commit_message)
 
 
+# Em dash, which the agent likes to use in its text
+EM_DASH = '\u2014'
+
+
+def fix_dashes(text, dash='-'):
+    """Replace the em dashes in review email text
+
+    Plain-text mailing lists mostly use a hyphen with a space each side,
+    rather than an em dash, so the agent's em dashes are replaced. Quoted
+    lines ('> ...') are left as they are, since they reproduce the author's
+    text.
+
+    Args:
+        text (str): Review email body
+        dash (str): Text to use in place of each em dash; an em dash leaves
+            the text unchanged
+
+    Returns:
+        str: Text with its em dashes replaced
+    """
+    if dash == EM_DASH:
+        return text
+
+    def fix_line(line):
+        # Between words, keep a space each side: 'a—b' -> 'a - b'
+        line = re.sub(rf'(?<=\S)[ \t]*{EM_DASH}[ \t]*(?=\S)', f' {dash} ',
+                      line)
+        return line.replace(EM_DASH, dash)
+
+    return '\n'.join(line if line.startswith('>') else fix_line(line)
+                     for line in text.split('\n'))
+
+
 def cleanup_review_text(text):
     """Apply mechanical fixes to review email text
 

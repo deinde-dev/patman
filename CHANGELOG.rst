@@ -23,6 +23,10 @@ Added
 
 Changed
 ~~~~~~~
+- The em dashes (—) which the review agent writes in reviews and suggested
+  responses are replaced with a hyphen, which suits plain-text email. The
+  ``em_dash`` setting, or ``--em-dash``, changes what is used, and ``—``
+  keeps them. patman's prompts no longer use em dashes either.
 - On the ``patman serve`` page, the button at the top of each file in a diff
   is called 'View whole file', as is the link between its chunks which goes
   to the same place, and looks like a button rather than part of the diff.
