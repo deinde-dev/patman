@@ -1264,6 +1264,28 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(404, status)
         self.assertIn("No patchwork project for upstream 'xx'", data['error'])
 
+        # A series being reviewed shows its job, but not a series whose
+        # reviews are being redrafted, nor one whose review has finished
+        reviewing = srv._new_job('review', 'Review series 400',
+                                 [['patman', 'review', '-s', '400', '-d']])
+        srv._new_job('review', 'Redraft', [['patman', 'review', '-s', '300',
+                                            '--redraft']])
+        done = srv._new_job('review', 'Review series 100',
+                            [['patman', 'review', '-s', '100']])
+        done.state['finished'] = '2026-10-01 10:00:00'
+        _, data = self.call(srv, 'GET', '/api/inbox')
+        self.assertEqual({300: None, 200: None, 100: None,
+                          400: reviewing.idnum},
+                         {item['id']: item['job'] for item in data['series']})
+
+        # A second review of it is refused
+        status, data = self.call(srv, 'POST', '/api/review',
+                                 json={'target': '400'})
+        self.assertEqual(409, status)
+        self.assertEqual(
+            f'Series 400 is already being reviewed, by job {reviewing.idnum}',
+            data['error'])
+
     def test_patchwork_retry(self):
         """Patchwork requests are retried when the server is slow or busy"""
         calls = []

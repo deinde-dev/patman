@@ -68,6 +68,10 @@ Changed
 
 Fixed
 ~~~~~
+- The inbox of the ``patman serve`` page shows when a series is being
+  reviewed, rather than offering 'Review' again, even after the page is
+  reloaded or when the review was started elsewhere. The server refuses to
+  start a second review of a series which is being reviewed.
 - A review which is changed after its Gmail draft is made, without
   updating the draft, is marked 'edited' ('draft out of date' on the
   ``patman serve`` page). ``patman review --send``, and Send on the page,

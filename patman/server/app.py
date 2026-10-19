@@ -40,6 +40,10 @@ JOBS_FNAME = '.patman-serve-jobs.json'
 INBOX_PAGE = 50
 
 
+# Arguments of 'patman review' which act on stored reviews rather than review
+# a series
+REVIEW_ACTIONS = {'--redraft', '--send', '--revise', '--respond-comment'}
+
 # Tag given in a review which approves the patch
 RE_REVIEWED_BY = re.compile(r'^Reviewed-by:', re.MULTILINE)
 
@@ -710,9 +714,12 @@ class Server(jobs.JobRunner):
         async with aiohttp.ClientSession() as client:
             series_list = await pwork.get_recent_series(client, proj[2], page,
                                                         INBOX_PAGE)
+        series = info.get_inbox(self.cser, self.rcser, series_list)
+        for item in series:
+            item['job'] = self._reviewing(item['id'])
         return web.json_response({
             'ups': ups, 'page': page, 'per_page': INBOX_PAGE,
-            'series': info.get_inbox(self.cser, self.rcser, series_list)})
+            'series': series})
 
     async def _job_list(self, _request):
         """Handle 'GET /api/jobs': list the jobs
@@ -794,6 +801,29 @@ class Server(jobs.JobRunner):
         job = self.add_job('review', title, [cmd], target)
         return web.json_response(job.state, status=202)
 
+    def _reviewing(self, link):
+        """Find the job reviewing a series, if one is waiting or running
+
+        Other jobs which run 'patman review' on the series, e.g. to redraft
+        or send its reviews, are not counted
+
+        Args:
+            link (int or str): Patchwork series ID
+
+        Return:
+            int or None: Job number, or None if the series is not being
+                reviewed
+        """
+        for job in self._jobs.values():
+            if not job.active or job.kind != 'review':
+                continue
+            for cmd in job.cmds:
+                if ('-s' in cmd[:-1] and
+                        cmd[cmd.index('-s') + 1] == str(link) and
+                        not REVIEW_ACTIONS & set(cmd)):
+                    return job.idnum
+        return None
+
     async def _review_post(self, request):
         """Handle 'POST /api/review': review a series
 
@@ -808,10 +838,17 @@ class Server(jobs.JobRunner):
 
         Raises:
             BadRequest: The request is invalid
+            JobBusyError: The series is already being reviewed
         """
         data = await self._read_json(request)
         args, title = params.parse_review_req(
             data, list(self.cser.db.upstream_get_dict()))
+        if '-s' in args:
+            link = args[args.index('-s') + 1]
+            busy = self._reviewing(link)
+            if busy:
+                raise jobs.JobBusyError(
+                    f'Series {link} is already being reviewed, by job {busy}')
         return self._review_job(title, *args)
 
     async def _review_scan(self, request):

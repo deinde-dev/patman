@@ -134,7 +134,9 @@ series uses what was read already, while reading a patch asks patchwork for it.
 
 'Review' on a series starts the review as a job, but the inbox stays where it
 is, so you can start reviews of other series too. Each series shows how its
-review is getting on, with a link to the job's output.
+review is getting on, with a link to the job's output, and offers 'Being
+reviewed…' rather than 'Review' until the job finishes, even if the review was
+started elsewhere. A series cannot be reviewed twice at once.
 
 Each review has 'Show the patch' (or 'Show the cover letter'), which shows the
 commit message and diff just below the review, so the two can be read together.
