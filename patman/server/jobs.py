@@ -14,7 +14,6 @@ server restarts.
 
 import asyncio
 from collections import OrderedDict
-from datetime import datetime
 import json
 import os
 import signal
@@ -23,6 +22,7 @@ import sys
 from u_boot_pylib import tout
 
 from patman import review as review_mod
+from patman import times
 
 # Maximum amount of output to keep from each command run by a job
 MAX_JOB_OUTPUT = 20000
@@ -271,7 +271,7 @@ class JobRunner:
         async with self._parallel if job.parallel else self._job_lock:
             state['queued'] = False
             state['running'] = True
-            state['started'] = _now_str()
+            state['started'] = times.now_str()
             try:
                 for cmd in job.cmds:
                     if job.cancel:
@@ -286,7 +286,7 @@ class JobRunner:
             finally:
                 state['running'] = False
                 state['cancelled'] = job.cancel
-                state['finished'] = _now_str()
+                state['finished'] = times.now_str()
                 self.save_jobs()
 
     @staticmethod
@@ -407,12 +407,3 @@ class JobRunner:
         if busy:
             raise JobBusyError('A job is already acting on this review; '
                                'wait for it to finish')
-
-
-def _now_str():
-    """Get the current time as a string
-
-    Return:
-        str: Time in the form 'YYYY-MM-DD HH:MM:SS'
-    """
-    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')

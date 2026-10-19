@@ -28,6 +28,7 @@ from patman.database import Pcommit
 from patman import patchwork
 from patman.patchwork import Patchwork
 from patman import server
+from patman import times
 from patman import traffic
 from patman.test_common import TestCommon
 from patman.workflow import Wtype
@@ -386,6 +387,33 @@ class TestWebServer(unittest.TestCase, TestCommon):
         with mock.patch.object(server.info, 'get_version', return_value=None):
             _, data = self.call(self.make_server(), 'GET', '/api/version')
         self.assertEqual({'version': None}, data)
+
+    def test_utc_offset(self):
+        """API responses say how far the server's time zone is from UTC"""
+        srv = self.make_server()
+
+        async def _go():
+            async with TestClient(TestServer(srv.make_app())) as client:
+                api = await client.get('/api/version')
+                page = await client.get('/')
+                return (api.headers.get('X-Patman-UTC-Offset'),
+                        page.headers.get('X-Patman-UTC-Offset'))
+
+        loop = asyncio.new_event_loop()
+        try:
+            api, page = loop.run_until_complete(_go())
+        finally:
+            loop.close()
+        self.assertEqual(str(times.utc_offset()), api)
+        self.assertIsNone(page)
+
+        with mock.patch.object(times, 'utc_offset', return_value=330):
+            loop = asyncio.new_event_loop()
+            try:
+                api, _ = loop.run_until_complete(_go())
+            finally:
+                loop.close()
+        self.assertEqual('330', api)
 
     def test_get_version(self):
         """The version comes from a checkout, with its commit, or the package"""

@@ -8,6 +8,8 @@
 from datetime import datetime, timedelta
 import enum
 
+from patman import times
+
 
 class Wtype(str, enum.Enum):
     """Types of workflow entry"""
@@ -52,11 +54,11 @@ def sent(cser, series_id, ser_ver_id=None):
         series_id (int): ID of the series that was sent
         ser_ver_id (int or None): ID of the ser_ver record that was sent
     """
-    ts = cser.get_now().strftime('%Y-%m-%d %H:%M:%S')
+    ts = times.to_str(cser.get_now())
     cser.db.workflow_archive(Wtype.SENT, series_id)
     cser.db.workflow_add(Wtype.SENT, series_id, ts, ser_ver_id=ser_ver_id)
     when = cser.get_now() + timedelta(days=7)
-    todo_ts = when.strftime('%Y-%m-%d %H:%M:%S')
+    todo_ts = times.to_str(when)
     cser.db.workflow_archive(Wtype.TODO, series_id)
     cser.db.workflow_add(Wtype.TODO, series_id, todo_ts)
     cser.commit()
@@ -70,11 +72,11 @@ def reviewed(cser, series_id, ser_ver_id=None):
         series_id (int): ID of the series that was reviewed
         ser_ver_id (int or None): ID of the ser_ver record
     """
-    ts = cser.get_now().strftime('%Y-%m-%d %H:%M:%S')
+    ts = times.to_str(cser.get_now())
     cser.db.workflow_archive(Wtype.REVIEWED, series_id)
     cser.db.workflow_add(Wtype.REVIEWED, series_id, ts, ser_ver_id=ser_ver_id)
     when = cser.get_now() + timedelta(days=7)
-    todo_ts = when.strftime('%Y-%m-%d %H:%M:%S')
+    todo_ts = times.to_str(when)
     cser.db.workflow_archive(Wtype.TODO, series_id)
     cser.db.workflow_add(Wtype.TODO, series_id, todo_ts)
     cser.commit()
@@ -91,7 +93,7 @@ def todo(cser, series, days):
     ser = cser._parse_series(series)
     cser.db.workflow_archive(Wtype.TODO, ser.idnum)
     when = cser.get_now() + timedelta(days=days)
-    ts = when.strftime('%Y-%m-%d %H:%M:%S')
+    ts = times.to_str(when)
     cser.db.workflow_add(Wtype.TODO, ser.idnum, ts)
     cser.commit()
     print(f"Series '{ser.name}' marked for todo on {ts}")
@@ -118,7 +120,7 @@ def todo_list(cser, show_all):
         show_all (bool): True to show all scheduled todos, not just
             those that are due
     """
-    now = cser.get_now().strftime('%Y-%m-%d %H:%M:%S')
+    now = times.to_str(cser.get_now())
     before = None if show_all else now
     entries = cser.db.workflow_get_by_type(Wtype.TODO, before=before)
     if not entries:
