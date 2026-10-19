@@ -1435,6 +1435,65 @@ class TestReview(CseriesTester):
             run('-i', '2')
         self.assertIn('No Gmail drafts to send', str(exc.exception))
 
+    def test_review_delete(self):
+        """Reviews which have not been sent can be deleted, with their drafts"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'Fred series', None)
+        db.series_set_source(sid, 'review')
+        svid = db.ser_ver_add(sid, 1, link='123')
+        ids = {}
+        for seq in (0, 1, 2, 3):
+            ids[seq] = db.review_add(svid, seq, f'Review {seq}', False,
+                                     '2026-10-01T00:00:00')
+        db.review_set_draft_id(ids[0], 'd0')
+        db.review_set_draft_id(ids[1], 'd1')
+        db.review_set_sent(ids[2], 'Review 2', 'm2', 't2')
+        db.commit()
+
+        def run(*argv):
+            args = cmdline.parse_args(['review', '-s', '123', '--delete',
+                                       *argv], config_fname=False)
+            with mock.patch.object(gmail, 'check_available',
+                                   return_value=True), \
+                    mock.patch.object(gmail, 'get_service'), \
+                    mock.patch.object(gmail, 'delete_draft') as delete, \
+                    terminal.capture() as (out, _):
+                ret = review.stored.do_stored(args, None, cser, '123')
+            return ret, [call.args[1] for call in delete.call_args_list], \
+                out.getvalue()
+
+        for argv, msg in (
+                ([], 'Use -i to say which reviews to delete'),
+                (['-i', '1,4'], 'There is no review of patch 4'),
+                (['-i', '1,2'], 'The review of patch 2 has been sent')):
+            with self.assertRaises(ValueError) as exc:
+                run(*argv)
+            self.assertIn(msg, str(exc.exception))
+
+        ret, deleted, out = run('-n', '-i', '0,1')
+        self.assertEqual((0, []), (ret, deleted))
+        self.assertIn('would delete the review of the cover letter', out)
+        self.assertEqual(4, len(db.review_get_for_version(svid)))
+
+        ret, deleted, out = run('-i', '0,1')
+        self.assertEqual((0, ['d0', 'd1']), (ret, deleted))
+        self.assertIn('Deleted the review of patch 1', out)
+        self.assertEqual([2, 3], [rev.seq for rev in
+                                  db.review_get_for_version(svid)])
+
+        # A review with no draft does not need Gmail
+        with mock.patch.object(gmail, 'check_available',
+                               return_value=False) as check, \
+                terminal.capture():
+            args = cmdline.parse_args(['review', '-s', '123', '--delete',
+                                       '-i', '3'], config_fname=False)
+            self.assertEqual(0, review.stored.do_stored(args, None, cser,
+                                                        '123'))
+        check.assert_not_called()
+        self.assertEqual([2], [rev.seq for rev in
+                               db.review_get_for_version(svid)])
+
     def test_review_send_edited(self):
         """A review edited since its draft was made is drafted again first"""
         cser = self.get_database()

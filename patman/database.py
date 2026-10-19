@@ -1628,6 +1628,15 @@ class Database:  # pylint:disable=R0904
             'UPDATE review SET draft_id = NULL, status = ? '
             'WHERE id = ?', (REVIEW_DELETED, review_id))
 
+    def review_delete(self, review_id):
+        """Delete a review record, along with any replies to it
+
+        Args:
+            review_id (int): Review record ID
+        """
+        self.execute('DELETE FROM reply WHERE review_id = ?', (review_id,))
+        self.execute('DELETE FROM review WHERE id = ?', (review_id,))
+
     def review_delete_for_version(self, svid):
         """Delete all review records for a given series version
 

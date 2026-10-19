@@ -863,6 +863,27 @@ class TestWebServer(unittest.TestCase, TestCommon):
         status, _ = self.call(srv, 'POST', '/api/jobs/1/cancel')
         self.assertEqual(409, status)
 
+    def test_delete_review(self):
+        """Reviews can be deleted from the page, as a job"""
+        series_id, svids = self.add_series(
+            'rev', 'Somebody else', {1: [('a', 'new', 5, 0)]}, ups='us',
+            source='review')
+        self.cser.db.review_add(svids[1], 1, 'Nit', False,
+                                '2026-10-01 10:00:00')
+        self.cser.db.commit()
+        srv = self.make_server()
+        srv.get_patman_cmd = lambda *args: ['echo', *args]
+        path = f'/api/reviews/{series_id}/delete'
+        res = self.run_jobs(srv, [('POST', path, {'seqs': [1]}),
+                                  ('POST', path, {})])
+        self.assertEqual([202, 400], [status for status, _ in res])
+        self.assertEqual("Delete patch 1 of 'Somebody else' v1",
+                         res[0][1]['title'])
+        self.assertIn('say which reviews to delete', res[1][1]['error'])
+        _, jobs = self.call(srv, 'GET', '/api/jobs')
+        self.assertEqual('review -s 100 --delete -i 1 -U us',
+                         jobs[0]['results'][0]['output'].strip())
+
     def test_job_series(self):
         """Jobs give the reviewed series which they act on, and its name"""
         series_id, _ = self.add_series('rev', 'Somebody else',

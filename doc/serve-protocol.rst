@@ -400,6 +400,14 @@ patches to act on, using 0 for the cover letter; the default is all of them.
 
 Send the Gmail drafts of a reviewed series. The body is as for ``redraft``.
 
+``POST /api/reviews/<id>/delete``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Delete the reviews of some patches of a reviewed series, with their Gmail
+drafts, running ``patman review --delete``. The body gives ``seqs`` (the
+patches, 0 for the cover letter), which must not be empty, and may give the
+``version``. A review which has been sent is not deleted.
+
 ``POST /api/reviews/<id>/respond``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

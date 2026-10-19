@@ -711,6 +711,11 @@ def add_review_subparser(subparsers):
         help='Send the Gmail drafts of the reviews of the series (with -i, '
              'only those patches; with -n, just show what would be sent)')
     review.add_argument(
+        '--delete', action='store_true',
+        help='Delete the stored reviews of the patches given with -i (0 for '
+             'the cover letter), with their Gmail drafts, if they have not '
+             'been sent')
+    review.add_argument(
         '--revise', type=str, metavar='NOTE',
         help='Ask the agent to change the stored reviews of the series as '
              'the note says, e.g. "Drop the comments about style" (with '
