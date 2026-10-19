@@ -364,6 +364,8 @@ Review a series, or part of one. The body has one of ``target``, ``patch`` and
 - ``ups`` (str): upstream whose patchwork server to use
 - ``drafts`` (bool): create Gmail drafts of the reviews
 - ``force`` (bool): review the series again
+- ``context`` (str): notes for the agent, e.g. ``this is an RFC``, passed with
+  ``-c``
 
 ``POST /api/review/scan``
 ~~~~~~~~~~~~~~~~~~~~~~~~~

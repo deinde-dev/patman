@@ -10,6 +10,10 @@ Unreleased
 
 Added
 ~~~~~
+- Starting a review on the ``patman serve`` page, from the inbox, the
+  cover-letter card, 'Review again' or 'Review a series', asks for context to
+  give the agent, as ``patman review -c`` does. ``POST /api/review`` takes
+  ``context``.
 - patman can respond to any comment on patchwork about a reviewed series,
   not just replies to your reviews: ``patman review --respond-comment ID -i
   SEQ`` has the agent suggest a response, which is then drafted and sent like

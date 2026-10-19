@@ -69,6 +69,7 @@ def parse_review_req(data, upstreams):
         ups (str): Upstream whose patchwork server to use
         drafts (bool): Create Gmail drafts for the reviews
         force (bool): Review again, even if already reviewed
+        context (str): Notes for the review agent, e.g. 'this is an RFC'
 
     Args:
         data (dict): Request
@@ -129,4 +130,9 @@ def parse_review_req(data, upstreams):
         args.append('-d')
     if data.get('force'):
         args.append('-f')
+    context = data.get('context')
+    if context is not None and not isinstance(context, str):
+        raise BadRequest('Invalid context')
+    if (context or '').strip():
+        args += ['-c', context.strip()]
     return args, f'Review {desc}'
