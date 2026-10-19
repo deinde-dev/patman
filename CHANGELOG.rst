@@ -8,6 +8,9 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+0.5.0 - 2026-10-19
+------------------
+
 Added
 ~~~~~
 - Reviewed series can be hidden from the Reviews tab of the ``patman serve``
@@ -51,6 +54,8 @@ Added
 - Each series on the ``patman serve`` page has a Sync button, which gathers
   the patch states and comments for just that version from patchwork.
   ``POST /api/series/<id>/sync`` does the same.
+- ``snap/snapcraft.yaml`` packages patman as a snap, with classic
+  confinement. CONTRIBUTING.rst says how to build it.
 - The guide has a page on reviewing a series from the ``patman serve`` page,
   with a picture of each step: starting the review, changing the reviews,
   responding to comments and replies, and sending them.
