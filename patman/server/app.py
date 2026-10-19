@@ -14,6 +14,7 @@ import ipaddress
 import os
 import re
 import subprocess
+import time
 
 import aiohttp
 from aiohttp import web
@@ -40,6 +41,10 @@ JOBS_FNAME = '.patman-serve-jobs.json'
 
 # Number of series in each page of the inbox
 INBOX_PAGE = 50
+
+# Seconds for which the inbox read from patchwork is kept, so that showing it
+# again does not read it again
+INBOX_KEEP = 10 * 60
 
 
 # Arguments of 'patman review' which act on stored reviews rather than review
@@ -109,6 +114,12 @@ class Server(jobs.JobRunner):
 
         # Reviewed versions which patchwork says have no cover letter
         self._no_cover = set()
+
+        # The inbox for each patchwork server and project, as read from it:
+        # a dict with 'read' (monotonic time), 'fetched' (time, as in the
+        # database) and 'pages' (dict of page number to list of series)
+        self._inbox_kept = {}
+        self._clock = time.monotonic
 
     def get_pw_url(self, ups):
         """Get the patchwork URL for an upstream
@@ -732,6 +743,11 @@ class Server(jobs.JobRunner):
         The 'ups' query parameter selects the upstream, defaulting to the
         default one, and 'page' selects the page of results.
 
+        What is read from patchwork is kept for INBOX_KEEP seconds, so that
+        showing the inbox again, from this page or another, does not read it
+        again; 'refresh=1' reads it anyway. Reading the first page again
+        drops the others, so that they follow on from it.
+
         Args:
             request (web.Request): Request
 
@@ -749,15 +765,27 @@ class Server(jobs.JobRunner):
         if not proj:
             raise ValueError(f"No patchwork project for upstream '{ups}'")
         pwork = self.get_pwork(ups)
-        async with aiohttp.ClientSession() as client:
-            series_list = await pwork.get_recent_series(client, proj[2], page,
-                                                        INBOX_PAGE)
+        key = (pwork.url, proj[2])
+        kept = self._inbox_kept.get(key)
+        if (request.query.get('refresh') == '1' or not kept or
+                (page == 1 and self._clock() - kept['read'] > INBOX_KEEP)):
+            kept = None
+        series_list = kept and kept['pages'].get(page)
+        if series_list is None:
+            async with aiohttp.ClientSession() as client:
+                series_list = await pwork.get_recent_series(
+                    client, proj[2], page, INBOX_PAGE)
+            if not kept:
+                kept = {'read': self._clock(), 'fetched': times.now_str(),
+                        'pages': {}}
+                self._inbox_kept[key] = kept
+            kept['pages'][page] = series_list
         series = info.get_inbox(self.cser, self.rcser, series_list)
         for item in series:
             item['job'] = self._reviewing(item['id'])
         return web.json_response({
             'ups': ups, 'page': page, 'per_page': INBOX_PAGE,
-            'series': series})
+            'fetched': kept['fetched'], 'series': series})
 
     def _job_state(self, job):
         """Get the state of a job, with the reviewed series it acts on

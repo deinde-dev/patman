@@ -53,7 +53,9 @@ Choosing a series
 
 The Inbox tab lists the newest series on patchwork. 'To review' shows those
 which you have not reviewed and which are not yours, and 'New versions' those
-for which you reviewed an earlier version, such as the Ethernet driver here:
+for which you reviewed an earlier version, such as the Ethernet driver here.
+The server reads the list from patchwork at most every ten minutes, unless
+you tap 'Refresh':
 
 .. image:: images/serve-inbox.png
    :width: 660px

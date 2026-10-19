@@ -101,6 +101,7 @@ nav a.active { color: var(--link); }
 a.card:active { background: var(--code-bg); }
 .row { display: flex; align-items: baseline; gap: 8px; }
 .row .grow { flex: 1; min-width: 0; }
+.row.fetched { align-items: center; margin-bottom: 8px; }
 .name { font-weight: 600; overflow-wrap: anywhere; }
 .desc { color: var(--muted); font-size: 14px; margin-top: 2px; overflow-wrap: anywhere; }
 .meta { color: var(--muted); font-size: 13px; margin-top: 6px;

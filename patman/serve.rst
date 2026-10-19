@@ -135,10 +135,13 @@ Series which you have reviewed, or which are your own, are marked, as are new
 versions of series you reviewed earlier, so it is easy to see what needs a
 review. Tap a series to see its patches and start a review.
 
-The inbox is read from patchwork each time it is shown, one request for the 50
-newest series. Nothing more is read until you tap 'Load more' at the bottom,
-which reads the next 50; the button goes once patchwork has no more. Tapping a
-series uses what was read already, while reading a patch asks patchwork for it.
+The inbox is read from patchwork with one request for the 50 newest series.
+The server keeps what it reads for ten minutes, so going back to the Inbox tab,
+or opening it on another device, does not read it again; the top of the inbox
+says when it was read, and 'Refresh' reads it again at once. Nothing more is
+read until you tap 'Load more' at the bottom, which reads the next 50; the
+button goes once patchwork has no more. Tapping a series uses what was read
+already, while reading a patch asks patchwork for it.
 
 'Review' on a series starts the review as a job, but the inbox stays where it
 is, so you can start reviews of other series too. Each series shows how its

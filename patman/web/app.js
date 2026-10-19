@@ -1766,7 +1766,9 @@ function inboxCard(s, ups, pw) {
   return { card, text: `${s.name} ${s.submitter || ''}`, groups };
 }
 
-async function viewInbox(more) {
+// Show the inbox; 'more' adds the next page, and 'refresh' has the server read
+// it from patchwork again rather than use what it read in the last few minutes
+async function viewInbox(more, refresh) {
   const upstreams = await api('upstreams').catch(() => []);
   let ups = null;
   try { ups = localStorage.getItem('patman-inbox-ups'); } catch (e) { /* ignore */ }
@@ -1777,7 +1779,9 @@ async function viewInbox(more) {
   if (!more || !inbox || inbox.ups !== ups) {
     inbox = { ups, page: 0, series: [], done: false };
   }
-  const data = await api(`inbox?ups=${encodeURIComponent(ups)}&page=${inbox.page + 1}`);
+  const data = await api(`inbox?ups=${encodeURIComponent(ups)}&page=${inbox.page + 1}` +
+                         (refresh ? '&refresh=1' : ''));
+  if (inbox.page === 0) inbox.fetched = data.fetched;
   inbox.page = data.page;
   inbox.series.push(...data.series);
   inbox.done = data.series.length < data.per_page;
@@ -1795,7 +1799,14 @@ async function viewInbox(more) {
       ev.target.disabled = true;
       viewInbox(true).catch((err) => showError(err, 'inbox'));
     } }, 'Load more'));
-  setView('Inbox', 'inbox', false, upsTabs,
+  const fetched = h('div', { class: 'row fetched' },
+    h('span', { class: 'grow ver' }, `Read from patchwork ${ago(parseTime(inbox.fetched))}`),
+    h('button', { class: 'btn light small', title: 'Read the newest series from patchwork again',
+                  onclick: (ev) => {
+      ev.target.disabled = true;
+      viewInbox(false, true).catch((err) => showError(err, 'inbox'));
+    } }, 'Refresh'));
+  setView('Inbox', 'inbox', false, upsTabs, fetched,
     ...filteredList('inbox', inbox.series.map((s) => inboxCard(s, ups, pw)),
                     [['todo', 'To review',
                       'Series which you have not reviewed and are not yours'],
