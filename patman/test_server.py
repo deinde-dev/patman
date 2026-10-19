@@ -747,6 +747,13 @@ class TestWebServer(unittest.TestCase, TestCommon):
                           "Review 'video: Fix'"),
                          parse({'title': 'video: Fix', 'version': '3'}, ups))
 
+        # Notes for the agent are passed on, unless empty
+        self.assertEqual(['-s', '1', '-i', '0', '-c', 'An RFC; ignore style'],
+                         parse({'target': '1', 'index': '0',
+                                'context': ' An RFC; ignore style\n'}, ups)[0])
+        self.assertEqual(['-s', '1'], parse({'target': '1', 'context': ' '},
+                                            ups)[0])
+
         for data, msg in (
                 ({}, 'Please give a series'),
                 ({'target': 'fred'}, 'Cannot find a series'),
@@ -754,7 +761,8 @@ class TestWebServer(unittest.TestCase, TestCommon):
                 ({'target': '1', 'index': '1;rm'}, 'Invalid patch selection'),
                 ({'target': '1', 'ups': 'zz'}, "Unknown upstream 'zz'"),
                 ({'patch': 'x'}, "Invalid patch 'x'"),
-                ({'patch': True}, "Invalid patch 'True'")):
+                ({'patch': True}, "Invalid patch 'True'"),
+                ({'target': '1', 'context': 3}, 'Invalid context')):
             with self.assertRaises(ValueError) as exc:
                 parse(data, ups)
             self.assertIn(msg, str(exc.exception))

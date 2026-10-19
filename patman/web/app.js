@@ -1027,6 +1027,17 @@ async function viewReview(id, wantVer) {
     reviseForm(null, sv.reviews.some(hasDraft),
                () => reviseAll.replaceChildren(),
                (note, drafts, msg) => revise([], null, note, drafts, msg))));
+  // Start a job and show it
+  const reviewAgain = async (context) => {
+    const job = await api('review', { json: { target: sv.link, ups: ser.upstream,
+                                              drafts: true, force: true, context } });
+    refreshJobCount();
+    location.hash = `#/jobs/${job.id}`;
+  };
+  const [againBtn, againBox] = reviewButton(
+    'Review again', 'btn light small',
+    'Have the agent review this version of the series again, replacing its reviews',
+    reviewAgain);
   const actions = sv.link && h('div', { class: 'actions' },
     anyUnsent && confirmButton('Redraft all', 'btn light small', () => redraft([]),
                                'Create the Gmail drafts of all the unsent reviews again'),
@@ -1037,9 +1048,7 @@ async function viewReview(id, wantVer) {
                                 'btn small', () => send([]),
                                 'Send the Gmail drafts of the reviews, first drafting again ' +
                                 'any which are out of date'),
-    confirmButton('Review again', 'btn light small', () => startJob('review',
-      { target: sv.link, ups: ser.upstream, drafts: true, force: true }),
-      'Have the agent review this version of the series again'),
+    againBtn,
     ser.patchwork_url && h('a', { class: 'btn light small', target: '_blank',
       rel: 'noopener', title: 'Open the series on patchwork, in a new tab',
       href: ser.project ? `${ser.patchwork_url}/project/${ser.project}/list/?series=${sv.link}`
@@ -1052,7 +1061,7 @@ async function viewReview(id, wantVer) {
         h('span', {}, `v${sv.version}`),
         ser.upstream && h('span', {}, ser.upstream),
         sv.link && h('span', {}, `series ${sv.link}`)),
-      actions),
+      actions, sv.link && againBox),
     reviseAll,
     tabs,
     sv.notes && h('div', { class: 'section' }, 'Notes'),
@@ -1066,6 +1075,43 @@ async function viewReview(id, wantVer) {
 // A card for the cover letter of a version which has no review of it, e.g.
 // because the agent had nothing to say about the series as a whole. It shows
 // the cover letter and can ask the agent to review just that
+// A button which opens a form to start a review, asking for any context to
+// give the agent, e.g. 'this is an RFC, so ignore style'. 'start(context)'
+// starts it, throwing an error to show if it cannot. Returns the button and
+// the box which holds the form, to go below the row of buttons
+function reviewButton(label, cls, tip, start) {
+  const box = h('div', {});
+  const btn = h('button', { class: cls, title: tip, onclick: () => {
+    btn.disabled = true;
+    const text = h('textarea', { class: 'note', spellcheck: 'true',
+                                 placeholder: 'Context for the agent (optional), e.g. ' +
+                                              'this is an RFC, so ignore style' });
+    const msg = h('div', { class: 'msg' });
+    const close = () => {
+      box.replaceChildren();
+      btn.disabled = false;
+    };
+    const go = h('button', { class: 'btn small', title: tip, onclick: async () => {
+      go.disabled = true;
+      msg.textContent = '';
+      try {
+        await start(text.value.trim());
+        close();
+      } catch (err) {
+        msg.textContent = err.message;
+        go.disabled = false;
+      }
+    } }, 'Start the review');
+    box.replaceChildren(h('div', { class: 'form' }, text,
+      h('div', { class: 'actions' }, go,
+        h('button', { class: 'btn light small', onclick: close,
+                      title: 'Close this without starting a review' }, 'Cancel')),
+      msg));
+    text.focus();
+  } }, label);
+  return [btn, box];
+}
+
 // Show in 'strip' how a job is getting on, until it finishes. 'verb' says
 // what it does, e.g. 'Reviewing'. Returns the job's final state, with the
 // strip showing any failure, or null if the strip has left the page
@@ -1107,12 +1153,6 @@ function commentsToggle(ser, sv, seq, itemId) {
   const kind = seq ? 'patch' : 'cover';
   const box = h('div', {});
   const responded = new Set(commentResponses(sv, seq).map((c) => c.comment_id));
-  const respond = async (c, note, strip) => {
-    const job = await api(`reviews/${ser.id}/respond`,
-                          { json: { version: sv.version, seq, comment: c.id, note } });
-    const st = await followJob(job, strip, 'Suggesting a response');
-    if (st && jobStatus(st)[0] === 'ok') route();
-  };
   const item = (c) => {
     const slot = h('div', {});
     const strip = h('div', { class: 'jobstrip' });
@@ -1123,18 +1163,26 @@ function commentsToggle(ser, sv, seq, itemId) {
                       title: 'Respond to this comment, with a suggestion from the agent' },
           'Respond')));
     const ask = () => {
-      const note = h('textarea', { spellcheck: 'true',
+      const note = h('textarea', { class: 'note', spellcheck: 'true',
                                    placeholder: 'What would you like to say? (optional)' });
       const msg = h('div', { class: 'msg' });
       const go = h('button', { class: 'btn small', onclick: async () => {
         go.disabled = true;
         msg.textContent = '';
+        let job;
         try {
-          await respond(c, note.value, strip);
+          job = await api(`reviews/${ser.id}/respond`, { json: {
+            version: sv.version, seq, comment: c.id, note: note.value } });
         } catch (err) {
           msg.textContent = err.message;
           go.disabled = false;
+          return;
         }
+        // The note is no longer needed once the job has started
+        slot.replaceChildren();
+        const st = await followJob(job, strip, 'Suggesting a response');
+        if (st && jobStatus(st)[0] === 'ok') route();
+        else if (st) reset();
       }, title: 'Have the agent suggest a response, as a job, which you can then change, ' +
                 'draft or send' }, 'Suggest a response');
       slot.replaceChildren(h('div', { class: 'form' }, note,
@@ -1175,27 +1223,26 @@ function unreviewedCover(ser, sv) {
   const [showBtn, mailBox] = mailToggle('cover', sv.cover_id, ser.upstream);
   const [commentsBtn, commentsBox] = commentsToggle(ser, sv, 0, sv.cover_id);
   const strip = h('div', { class: 'jobstrip' });
-  const review = async () => {
-    let job;
-    try {
-      job = await api('review', { json: { target: String(sv.link), ups: ser.upstream,
-                                          index: '0', drafts: true } });
-    } catch (err) {
-      strip.className = 'jobstrip failed';
-      strip.replaceChildren(h('span', {}, err.message));
-      return;
-    }
-    job = await followJob(job, strip, 'Reviewing');
-    if (!job || jobStatus(job)[0] !== 'ok') return;
-    // Show the new review, if the agent wrote one
-    const again = await api(`reviews/${ser.id}`);
-    const ver = again.versions.find((v) => v.version === sv.version);
-    if (ver && ver.reviews.some((r) => r.seq === 0)) {
-      route();
-      return;
-    }
-    strip.firstChild.textContent = 'The agent has no comments on the cover letter';
+  // Once the review has started, return so that its form closes, then follow it
+  const review = async (context) => {
+    const job = await api('review', { json: { target: String(sv.link), ups: ser.upstream,
+                                              index: '0', drafts: true, context } });
+    followJob(job, strip, 'Reviewing').then(async (st) => {
+      if (!st || jobStatus(st)[0] !== 'ok') return;
+      // Show the new review, if the agent wrote one
+      const again = await api(`reviews/${ser.id}`);
+      const ver = again.versions.find((v) => v.version === sv.version);
+      if (ver && ver.reviews.some((r) => r.seq === 0)) {
+        route();
+        return;
+      }
+      strip.firstChild.textContent = 'The agent has no comments on the cover letter';
+    });
   };
+  const [reviewBtn, reviewBox] = sv.link ? reviewButton(
+    'Review it', 'btn light small',
+    'Have the agent review just the cover letter, as a job, creating a Gmail draft ' +
+    'if it has comments', review) : [null, null];
   return h('div', { class: 'card review' },
     h('div', { class: 'row' },
       h('div', { class: 'grow name' },
@@ -1205,11 +1252,8 @@ function unreviewedCover(ser, sv) {
                                         : null)),
       h('span', { class: 'ver' }, 'not reviewed')),
     strip,
-    h('div', { class: 'actions' }, showBtn, commentsBtn,
-      sv.link && confirmButton('Review it', 'btn light small', review,
-                               'Have the agent review just the cover letter, as a job, ' +
-                               'creating a Gmail draft if it has comments')),
-    mailBox, commentsBox, commentResponses(sv, 0).map(replyBox));
+    h('div', { class: 'actions' }, showBtn, commentsBtn, reviewBtn),
+    reviewBox, mailBox, commentsBox, commentResponses(sv, 0).map(replyBox));
 }
 
 // Status of a reply to a review, as [text, chip class]
@@ -1434,6 +1478,8 @@ async function viewReviewForm() {
                                   'Review the whole series which the patch is part of');
   const [force, forceRow] = check('Review again if already reviewed', false,
                                   'Review the series even if you have reviewed it already');
+  const context = h('textarea', { class: 'note', spellcheck: 'true',
+                                  placeholder: 'e.g. this is an RFC, so ignore style' });
   const msg = h('div', { class: 'msg' });
   const submit = h('button', { class: 'btn', onclick: async () => {
     submit.disabled = true;
@@ -1441,7 +1487,7 @@ async function viewReviewForm() {
     await startJob('review', {
       target: target.value, title: title.value, version: version.value,
       index: index.value, ups: ups.value, drafts: drafts.checked,
-      whole: whole.checked, force: force.checked }, msg);
+      whole: whole.checked, force: force.checked, context: context.value }, msg);
     submit.disabled = false;
   }, title: 'Start a job in which the agent reviews the series' }, 'Start review');
   setView('New review', 'reviews', true, h('div', { class: 'card form' },
@@ -1451,6 +1497,7 @@ async function viewReviewForm() {
     field('Version (with a title)', version),
     field('Patches to review', index, 'e.g. 1,3-5'),
     upstreams.length > 1 && field('Upstream', ups),
+    field('Context for the agent (optional)', context),
     draftsRow, wholeRow, forceRow,
     h('div', { class: 'actions' }, submit), msg));
 }
@@ -1495,6 +1542,17 @@ function inboxDetails(s, ups, jobBox) {
     h('div', { class: 'grow' },
       h('a', { href: mailHref('cover', s.cover_id, ups),
                title: 'Read the cover letter and its comments' }, 'Cover letter')));
+  // Stay on the inbox, so that more reviews can be started
+  const [reviewBtn, reviewBox] = reviewButton(
+    s.reviewed ? 'Review again' : 'Review', 'btn small',
+    'Have the agent review this series, as a job; the inbox stays open',
+    async (context) => {
+      const job = await api('review', { json: { target: String(s.id), ups, drafts: true,
+                                                force: !!s.reviewed, context } });
+      inboxJobs.set(s.id, job.id);
+      refreshJobCount();
+      trackInboxJob(jobBox, job.id);
+    });
   return h('div', { class: 'comments' },
     h('div', { class: 'list' }, cover, s.patches.map((p, i) => h('div', { class: 'row' },
       h('span', { class: 'seq' }, i + 1),
@@ -1502,22 +1560,12 @@ function inboxDetails(s, ups, jobBox) {
         h('a', { href: mailHref('patch', p.id, ups),
                  title: 'Read the patch and its comments' }, p.name))))),
     h('div', { class: 'actions' },
-      confirmButton(s.reviewed ? 'Review again' : 'Review', 'btn small', async () => {
-        // Stay on the inbox, so that more reviews can be started
-        try {
-          const job = await api('review', { json: { target: String(s.id), ups,
-                                                    drafts: true, force: !!s.reviewed } });
-          inboxJobs.set(s.id, job.id);
-          refreshJobCount();
-          trackInboxJob(jobBox, job.id);
-        } catch (err) {
-          jobBox.textContent = err.message;
-        }
-      }, 'Have the agent review this series, as a job; the inbox stays open'),
+      reviewBtn,
       s.web_url && h('a', { class: 'btn light small', href: s.web_url,
                             target: '_blank', rel: 'noopener',
                             title: 'Open the series on patchwork, in a new tab' },
-        'patchwork ↗')));
+        'patchwork ↗')),
+    reviewBox);
 }
 
 function inboxCard(s, ups, pw) {

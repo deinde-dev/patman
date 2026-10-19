@@ -117,6 +117,11 @@ series or patch, or words from a cover-letter title, and runs ``patman review``
 ``patman review --scan``. Each reviewed series has buttons to recreate its
 Gmail drafts, either all of them or one patch's, and to review it again.
 
+Wherever a review is started, whether by 'Review a series', 'Review' in the
+inbox, 'Review again' or 'Review it' for a cover letter, there is a box for
+context to give the agent, such as 'this is an RFC, so ignore style', which is
+passed with ``-c``.
+
 The Inbox tab lists the most recent series on patchwork for each upstream.
 Series which you have reviewed, or which are your own, are marked, as are new
 versions of series you reviewed earlier, so it is easy to see what needs a
