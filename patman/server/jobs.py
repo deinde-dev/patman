@@ -2,11 +2,14 @@
 #
 # Copyright 2026 Simon Glass <sjg@chromium.org>
 #
-"""Run the jobs which the server starts, one at a time
+"""Run the jobs which the server starts
 
 A job runs patman commands in a child process, e.g. to sync with patchwork
-or to send a review. Jobs which have not finished are saved, so that they
-can be resumed when the server restarts.
+or to send a review. Most jobs run one at a time, in the order they are
+added, but reviews of series run alongside them and each other, a few at
+once, since each has its own worktree and mostly waits for the agent. Jobs
+which have not finished are saved, so that they can be resumed when the
+server restarts.
 """
 
 import asyncio
@@ -31,6 +34,9 @@ MAX_JOBS = 20
 # causing the server to stop
 MAX_RESUMES = 3
 
+# Maximum number of parallel jobs, i.e. reviews of series, to run at once
+MAX_PARALLEL = 5
+
 
 class JobBusyError(Exception):
     """A job is already acting on a review which a request would change"""
@@ -48,7 +54,8 @@ class Job:
         state (dict): State of the job, as provided by the API
     """
     # pylint: disable=R0913,R0917
-    def __init__(self, idnum, kind, title, cmds, resumed=0, target=None):
+    def __init__(self, idnum, kind, title, cmds, resumed=0, target=None,
+                 parallel=False):
         """Set up a new job
 
         Args:
@@ -61,10 +68,13 @@ class Job:
             target (dict or None): Reviews which the job acts on, with the
                 review series ID ('series'), its version ('version') and the
                 patches ('seqs', empty for all unsent reviews), or None
+            parallel (bool): True if the job can run alongside others, up to
+                MAX_PARALLEL of them, rather than waiting its turn
         """
         self.idnum = idnum
         self.kind = kind
         self.cmds = cmds
+        self.parallel = parallel
         self.cancel = False
         self.proc = None
         self.state = {
@@ -79,6 +89,8 @@ class Job:
             'results': [],
             'resumed': resumed,
             'target': target,
+            # Name of the series which the job acts on, if known
+            'name': None,
         }
 
     @property
@@ -116,32 +128,38 @@ class JobRunner:
         self.jobs_fname = jobs_fname
 
         # Jobs run one at a time, in the order they are added, since they
-        # may all write to the database
+        # may all write to the database. Parallel jobs are limited separately
         self._job_lock = asyncio.Lock()
+        self._parallel = asyncio.Semaphore(MAX_PARALLEL)
         self._jobs = OrderedDict()
         self._last_job = 0
 
-    def add_job(self, kind, title, cmds, target=None):
-        """Add a job and start it once the jobs before it have finished
+    # pylint: disable=R0913,R0917
+    def add_job(self, kind, title, cmds, target=None, parallel=False):
+        """Add a job and start it once it is its turn
 
         Args:
             kind (str): Kind of job
             title (str): Description of the job, for display
             cmds (list of list of str): Commands to run
             target (dict or None): Reviews which the job acts on (see Job)
+            parallel (bool): True to run the job alongside others (see Job)
 
         Return:
             Job: New job
         """
-        job = self._new_job(kind, title, cmds, target=target)
+        job = self._new_job(kind, title, cmds, target=target,
+                            parallel=parallel)
         asyncio.create_task(self.run_job(job))
         return job
 
     # pylint: disable=R0913,R0917
-    def _new_job(self, kind, title, cmds, resumed=0, target=None):
+    def _new_job(self, kind, title, cmds, resumed=0, target=None,
+                 parallel=False):
         """Create a job and remember it, dropping old jobs if needed"""
         self._last_job += 1
-        job = Job(self._last_job, kind, title, cmds, resumed, target)
+        job = Job(self._last_job, kind, title, cmds, resumed, target,
+                  parallel)
         self._jobs[job.idnum] = job
         for old in list(self._jobs.values()):
             if len(self._jobs) <= MAX_JOBS:
@@ -162,7 +180,7 @@ class JobRunner:
             return
         jobs = [{'kind': job.kind, 'title': job.state['title'],
                  'cmds': job.cmds, 'resumed': job.state['resumed'],
-                 'target': job.state['target']}
+                 'target': job.state['target'], 'parallel': job.parallel}
                 for job in self._jobs.values()
                 if job.kind != 'sync' and job.unfinished]
         tmp = f'{self.jobs_fname}.tmp'
@@ -194,7 +212,7 @@ class JobRunner:
                 continue
             tout.notice(f"Resuming job '{title}'")
             job = self._new_job(item['kind'], title, item['cmds'], resumed,
-                                item.get('target'))
+                                item.get('target'), item.get('parallel', False))
             asyncio.create_task(self.run_job(job))
             jobs.append(job)
         self.save_jobs()
@@ -228,6 +246,9 @@ class JobRunner:
     async def run_job(self, job):
         """Run a job's commands one after the other, once it is its turn
 
+        A job waits for the jobs before it to finish, unless it is a parallel
+        one, which waits only while MAX_PARALLEL others are running.
+
         Output from each command is recorded in the job's state as it
         arrives. If the job is cancelled, the command which is running is
         stopped and the rest are not run.
@@ -236,7 +257,7 @@ class JobRunner:
             job (Job): Job to run
         """
         state = job.state
-        async with self._job_lock:
+        async with self._parallel if job.parallel else self._job_lock:
             state['queued'] = False
             state['running'] = True
             state['started'] = _now_str()

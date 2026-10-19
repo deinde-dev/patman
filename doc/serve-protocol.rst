@@ -152,7 +152,8 @@ A job runs one or more commands in the git tree, such as a sync or a review:
 - ``id`` (int): job number, starting at 1 when the server starts
 - ``kind`` (str): ``sync`` or ``review``
 - ``title`` (str): description, e.g. ``Review series 123``
-- ``queued`` (bool): true while waiting for other jobs to finish
+- ``queued`` (bool): true while waiting for other jobs to finish; a review of
+  a series waits only while five others are running
 - ``running`` (bool): true while running
 - ``cancelled`` (bool): true if it was cancelled
 - ``started`` (str or null): when it started
@@ -169,6 +170,10 @@ A job runs one or more commands in the git tree, such as a sync or a review:
 
 - ``resumed`` (int): number of times the job has been run again after the
   server stopped before it finished; see `Resuming jobs`_
+- ``review`` (int or null): ID of the reviewed series which the job acts on,
+  once it is in the database
+- ``name`` (str or null): name of that series, or the ``name`` given when the
+  review was requested
 - ``target`` (object or null): the reviews which the job acts on, for jobs
   started on a reviewed series, with the series ``series`` (int), its
   ``version`` (int) and the patches ``seqs`` (list of int, empty for all the
@@ -368,6 +373,8 @@ Review a series, or part of one. The body has one of ``target``, ``patch`` and
 - ``force`` (bool): review the series again
 - ``context`` (str): notes for the agent, e.g. ``this is an RFC``, passed with
   ``-c``
+- ``name`` (str): name of the series, to show with the job until the review
+  has recorded the series
 
 A series which is already being reviewed gives status 409.
 

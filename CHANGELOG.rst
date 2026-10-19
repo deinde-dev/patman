@@ -45,6 +45,10 @@ Added
 
 Changed
 ~~~~~~~
+- Reviews of series started from the ``patman serve`` page run alongside
+  the other jobs, up to five at once, rather than one at a time.
+- The Jobs tab of the ``patman serve`` page shows the name of the series
+  which each job acts on, with a link to its reviews.
 - 'Review' in the inbox of the ``patman serve`` page leaves the inbox open,
   so that other series can be reviewed too, and shows how each review is
   getting on, rather than going to the Jobs tab.
