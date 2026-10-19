@@ -1048,7 +1048,7 @@ async function viewReview(id, wantVer) {
       ? mailToggle(r.seq ? 'patch' : 'cover', itemId, ser.upstream) : [null, null];
     const [commentsBtn, commentsBox] = itemId && sv.link
       ? commentsToggle(ser, sv, r.seq, itemId) : [null, null];
-    const responses = commentResponses(sv, r.seq).map(replyBox);
+    const responses = commentResponses(sv, r.seq).map((rp) => replyBox(rp, id));
     const title = h('div', { class: 'row' },
       h('div', { class: 'grow name' }, itemId
         ? h('a', { href: mailHref(r.seq ? 'patch' : 'cover', itemId, ser.upstream),
@@ -1092,7 +1092,7 @@ async function viewReview(id, wantVer) {
                 'and send it'
               : 'Send the Gmail draft of this review')]),
       ...[mailBox, commentsBox].filter(Boolean),
-      ...(r.replies || []).map(replyBox), ...responses);
+      ...(r.replies || []).map((rp) => replyBox(rp, id)), ...responses);
     entries.set(r.id, { r, strip, show, busy: false });
     show();
     return card;
@@ -1350,7 +1350,8 @@ function unreviewedCover(ser, sv) {
       h('span', { class: 'ver' }, 'not reviewed')),
     strip,
     h('div', { class: 'actions' }, showBtn, commentsBtn, reviewBtn),
-    reviewBox, mailBox, commentsBox, commentResponses(sv, 0).map(replyBox));
+    reviewBox, mailBox, commentsBox,
+    commentResponses(sv, 0).map((rp) => replyBox(rp, ser.id)));
 }
 
 // Status of a reply to a review, as [text, chip class]
@@ -1371,32 +1372,77 @@ function quoteReply(rp) {
   return `Hi ${first},\n\nOn ${rp.date}, ${rp.sender} wrote:\n${quoted}\n\n`;
 }
 
-// Show a reply to one of our reviews, with our response to it
-function replyBox(rp) {
+// Find a reply to a review of a series, or a comment we are responding to,
+// as the server has it now
+async function findReply(seriesId, replyId) {
+  const ser = await api(`reviews/${seriesId}`);
+  for (const ver of ser.versions) {
+    for (const rp of [...ver.reviews.flatMap((r) => r.replies || []),
+                      ...(ver.comments || [])]) {
+      if (rp.id === replyId) return rp;
+    }
+  }
+  return null;
+}
+
+// Show a reply to one of our reviews of a series, with our response to it
+function replyBox(rp, seriesId) {
   const box = h('div', { class: 'comments' });
+  const strip = h('div', { class: 'jobstrip' });
+  // True while a job is acting on the reply
+  let busy = false;
+  // Run a job on the reply, staying here, and show the reply again when it
+  // is done. If 'msg' is given, an error is shown there
+  const run = async (path, data, verb, msg) => {
+    let job;
+    try {
+      job = await api(path, { json: data });
+    } catch (err) {
+      if (msg) msg.textContent = err.message;
+      else alert(err.message);
+      return;
+    }
+    if (!job.kind) {
+      // Saved without starting a job
+      Object.assign(rp, job);
+      show();
+      return;
+    }
+    busy = true;
+    show();
+    const st = await followJob(job, strip, verb);
+    busy = false;
+    if (st && jobStatus(st)[0] === 'ok') {
+      const fresh = await findReply(seriesId, rp.id).catch(() => null);
+      if (fresh) Object.assign(rp, fresh);
+    }
+    show();
+  };
   const show = () => {
     const [label, cls] = REPLY_STATUS[rp.status] || [rp.status, 'st-other'];
     const waiting = rp.status === 'new' || rp.status === 'suggested';
-    fill(box, 
+    fill(box,
       h('div', { class: 'who' }, `↩ ${rp.sender.replace(/\s*<.*>/, '') || rp.sender}`,
         h('span', { class: 'when' }, ago(new Date(rp.date))), ' ',
         h('span', { class: `chip ${cls}` }, label)),
       renderMail(rp.body),
       rp.response && h('div', { class: 'section' }, 'Your response'),
       rp.response && h('div', { class: 'notes' }, renderMail(rp.response)),
-      rp.status !== 'sent' && h('div', { class: 'actions' },
+      strip,
+      rp.status !== 'sent' && !busy && h('div', { class: 'actions' },
         h('button', { class: 'btn light small', onclick: edit,
                       title: 'Write your response to this reply yourself' },
           rp.response ? 'Edit response' : 'Write a response'),
         rp.response && confirmButton('Send', 'btn small',
-                                     () => startJob(`replies/${rp.id}/send`, {}),
+                                     () => run(`replies/${rp.id}/send`, {}, 'Sending'),
                                      'Send your response'),
         rp.response && confirmButton(
           rp.status === 'draft' ? 'Update Gmail draft' : 'Create Gmail draft',
-          'btn light small', () => startJob(`replies/${rp.id}`, { draft: true }),
+          'btn light small',
+          () => run(`replies/${rp.id}`, { draft: true }, 'Drafting'),
           'Put your response in a Gmail draft, to check or send from Gmail'),
         confirmButton('Suggest a response', 'btn light small',
-                      () => startJob(`replies/${rp.id}/suggest`, {}),
+                      () => run(`replies/${rp.id}/suggest`, {}, 'Suggesting a response'),
                       'Have the agent suggest a response to this reply'),
         waiting && h('button', { class: 'btn light small',
                                  title: 'Mark this reply as needing no response',
@@ -1414,19 +1460,9 @@ function replyBox(rp) {
                                onclick: async () => {
       save.disabled = true;
       msg.textContent = '';
-      try {
-        const res = await api(`replies/${rp.id}`,
-                              { json: { response: text.value, draft: draft.checked } });
-        if (res.kind) {
-          location.hash = `#/jobs/${res.id}`;
-        } else {
-          Object.assign(rp, res);
-          show();
-        }
-      } catch (err) {
-        msg.textContent = err.message;
-        save.disabled = false;
-      }
+      await run(`replies/${rp.id}`, { response: text.value, draft: draft.checked },
+                'Drafting', msg);
+      save.disabled = false;
     } }, 'Save');
     // Sending creates the Gmail draft from the saved response first
     const send = confirmButton('Save and send', 'btn small', async () => {
@@ -1437,7 +1473,7 @@ function replyBox(rp) {
         msg.textContent = err.message;
         return;
       }
-      startJob(`replies/${rp.id}/send`, {}, msg);
+      run(`replies/${rp.id}/send`, {}, 'Sending', msg);
     }, 'Save your response and send it');
     fill(box, h('div', { class: 'who' }, `Response to ${rp.sender}`),
       h('div', { class: 'form' }, text,
