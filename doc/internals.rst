@@ -127,6 +127,12 @@ in tests (``terminal``) and messages at different levels (``tout``). It uses
 pygit2 to read and change the git repo directly, and aiohttp for patchwork
 and the web server.
 
+To run Python again, e.g. for ``python -m patman`` in a child process, use
+``interpreter.get_python()`` rather than ``sys.executable``. Python takes
+``sys.executable`` from the name it is started with, which a wrapper may set
+to its own: a Guix package of patman does this, so ``sys.executable`` is the
+``patman`` script rather than Python.
+
 The tests
 ---------
 

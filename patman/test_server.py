@@ -11,7 +11,6 @@ import os
 import signal
 import socket
 import subprocess
-import sys
 import unittest
 from unittest import mock
 
@@ -26,6 +25,7 @@ from patman import cmdline
 from patman import control
 from patman import cseries
 from patman import database
+from patman import interpreter
 from patman.database import Pcommit
 from patman import patchwork
 from patman.patchwork import Patchwork
@@ -589,7 +589,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
     def test_sync_cmds(self):
         """The sync never gathers tags into branches"""
         srv = server.Server(self.cser)
-        patman = [sys.executable, '-m', 'patman', '-v']
+        patman = [interpreter.get_python(), '-m', 'patman', '-v']
         self.assertEqual([patman + ['series', 'gather-all', '-G']],
                          srv.get_sync_cmds())
         self.assertEqual('patman series gather-all -G',

@@ -12,6 +12,7 @@ import os
 import pathlib
 import re
 import shutil
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -26,6 +27,7 @@ from u_boot_pylib import tools
 from patman.commit import Commit
 from patman import cmdline
 from patman import control
+from patman import interpreter
 from patman import patchstream
 from patman.patchstream import PatchStream
 from patman import patchwork
@@ -62,7 +64,8 @@ class TestFunctional(unittest.TestCase, TestCommon):
         self.repo = None
         # Run this copy of patman, however the tests are started, e.g. by
         # pytest
-        self._patman_cmd = [sys.executable, str(PATMAN_DIR / '__main__.py')]
+        self._patman_cmd = [interpreter.get_python(),
+                            str(PATMAN_DIR / '__main__.py')]
 
     def tearDown(self):
         TestCommon.tearDown(self)
@@ -490,7 +493,7 @@ Changes in v2:
             # Use this Python, since a build container may have no
             # /usr/bin/env to find one
             tools.write_file('dummy-script.sh',
-                             f'#!{sys.executable}\n'
+                             f'#!{interpreter.get_python()}\n'
                              'print("hello@there.com")\n', binary=False)
             os.chmod('dummy-script.sh', 0o755)
             tools.run('git', 'add', '.')
@@ -502,6 +505,50 @@ Changes in v2:
                 # Assert the email address is part of the dry-run
                 # output.
                 self.assertIn('hello@there.com', output)
+
+    def test_get_python(self):
+        """The Python running patman is found, even behind a wrapper"""
+        if not os.path.exists(interpreter.SELF_EXE):
+            self.skipTest(f'needs {interpreter.SELF_EXE}')
+        wrapper = os.path.join(self.tmpdir, 'patman')
+        tools.write_file(wrapper, '#!/bin/sh\n', binary=False)
+        self.addCleanup(interpreter.get_python.cache_clear)
+
+        def check(exe, expect):
+            interpreter.get_python.cache_clear()
+            with mock.patch.object(sys, 'executable', exe):
+                self.assertEqual(expect, interpreter.get_python())
+
+        # A wrapper is skipped, unless the system does not say what is
+        # running
+        real = os.readlink(interpreter.SELF_EXE)
+        check(real, real)
+        check(wrapper, real)
+        check('', '')
+        with mock.patch.object(interpreter, 'SELF_EXE', '/no/such/file'):
+            check(wrapper, wrapper)
+
+    def test_get_python_wrapped(self):
+        """patman runs Python when started as Guix's wrap-script does
+
+        This sets argv[0] to the wrapper, which Python then takes as
+        sys.executable
+        """
+        if not os.path.exists(interpreter.SELF_EXE):
+            self.skipTest(f'needs {interpreter.SELF_EXE}')
+        wrapper = os.path.join(self.tmpdir, 'patman')
+        tools.write_file(wrapper, '#!/bin/sh\n', binary=False)
+        code = ('import subprocess, sys\n'
+                'from patman import interpreter\n'
+                'print(sys.executable, flush=True)\n'
+                'subprocess.run([interpreter.get_python(), "-c", '
+                '"print(\'child\')"], check=True)\n')
+        env = dict(os.environ, PYTHONPATH=str(PATMAN_DIR.parent))
+        result = subprocess.run([wrapper, '-c', code],
+                                executable=interpreter.get_python(),
+                                env=env, capture_output=True, text=True,
+                                check=True)
+        self.assertEqual(f'{wrapper}\nchild\n', result.stdout)
 
     def test_tags(self):
         """Test collection of tags in a patchstream"""

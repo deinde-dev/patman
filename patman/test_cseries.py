@@ -6,7 +6,6 @@
 
 from datetime import datetime
 import os
-import sys
 import unittest
 from unittest import mock
 
@@ -20,6 +19,7 @@ from u_boot_pylib import tools
 from patman import cmdline
 from patman import control
 from patman import cser_helper
+from patman import interpreter
 from patman import review
 from patman import cseries
 from patman.database import Pcommit
@@ -2177,7 +2177,7 @@ class TestCseries(CseriesTester):
         # /usr/bin/env to find one
         get_maint = os.path.join(self.tmpdir, 'get_maintainer')
         tools.write_file(get_maint,
-                         f'#!{sys.executable}\n'
+                         f'#!{interpreter.get_python()}\n'
                          'import runpy\n'
                          f'runpy.run_path({stub!r}, run_name="__main__")\n',
                          binary=False)

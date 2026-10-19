@@ -14,7 +14,6 @@ import ipaddress
 import os
 import re
 import subprocess
-import sys
 
 import aiohttp
 from aiohttp import web
@@ -22,6 +21,7 @@ from aiohttp import web
 from u_boot_pylib import tout
 
 from patman import database
+from patman import interpreter
 from patman import times
 from patman import traffic
 from patman.patchwork import Patchwork
@@ -199,7 +199,7 @@ class Server(jobs.JobRunner):
         Return:
             list of str: Command to run
         """
-        return [sys.executable, '-m', 'patman', '-v', *args]
+        return [interpreter.get_python(), '-m', 'patman', '-v', *args]
 
     def _sync_job(self):
         """Get the most recent sync job
