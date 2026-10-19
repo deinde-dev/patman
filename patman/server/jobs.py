@@ -89,6 +89,8 @@ class Job:
             'results': [],
             'resumed': resumed,
             'target': target,
+            # Name of the series which the job acts on, if known
+            'name': None,
         }
 
     @property

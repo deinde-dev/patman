@@ -1030,7 +1030,8 @@ async function viewReview(id, wantVer) {
   // Start a job and show it
   const reviewAgain = async (context) => {
     const job = await api('review', { json: { target: sv.link, ups: ser.upstream,
-                                              drafts: true, force: true, context } });
+                                              drafts: true, force: true, context,
+                                              name: ser.desc || ser.name } });
     refreshJobCount();
     location.hash = `#/jobs/${job.id}`;
   };
@@ -1226,7 +1227,8 @@ function unreviewedCover(ser, sv) {
   // Once the review has started, return so that its form closes, then follow it
   const review = async (context) => {
     const job = await api('review', { json: { target: String(sv.link), ups: ser.upstream,
-                                              index: '0', drafts: true, context } });
+                                              index: '0', drafts: true, context,
+                                              name: ser.desc || ser.name } });
     followJob(job, strip, 'Reviewing').then(async (st) => {
       if (!st || jobStatus(st)[0] !== 'ok') return;
       // Show the new review, if the agent wrote one
@@ -1561,7 +1563,8 @@ function inboxDetails(s, ups, jobBox) {
     'Have the agent review this series, as a job; the inbox stays open',
     async (context) => {
       const job = await api('review', { json: { target: String(s.id), ups, drafts: true,
-                                                force: !!s.reviewed, context } });
+                                                force: !!s.reviewed, context,
+                                                name: s.name } });
       inboxJobs.set(s.id, job.id);
       refreshJobCount();
       trackInboxJob(jobBox, job.id);
@@ -1859,8 +1862,16 @@ async function viewJobs() {
         h('div', { class: 'row' },
           h('div', { class: 'grow name' }, j.title),
           h('span', { class: `chip ${cls}` }, text)),
+        j.name && h('div', { class: 'desc' }, j.name),
         h('div', { class: 'meta' },
           h('span', {}, `#${j.id}`),
+          // The card is a link to the job, so this cannot be a link too
+          j.review && h('span', { class: 'chip st-other', role: 'link',
+                                  title: 'Show the reviews of this series',
+                                  onclick: (ev) => {
+            ev.preventDefault();
+            location.hash = `#/reviews/${j.review}`;
+          } }, 'reviews'),
           j.resumed > 0 && h('span', {}, 'resumed after a restart'),
           j.started && h('span', {}, `started ${ago(parseTime(j.started))}`),
           j.finished && h('span', {}, `finished ${ago(parseTime(j.finished))}`)));
@@ -1884,7 +1895,10 @@ async function viewJob(id) {
       h('div', { class: 'row' },
         h('div', { class: 'grow name' }, st.title),
         h('span', { class: `chip ${cls}` }, text)),
+      st.name && h('div', { class: 'desc' }, st.name),
       h('div', { class: 'meta' },
+        st.review && h('a', { href: `#/reviews/${st.review}`,
+                              title: 'Show the reviews of this series' }, 'Reviews'),
         st.started && h('span', {}, `started ${ago(parseTime(st.started))}`),
         st.finished && h('span', {}, `finished ${ago(parseTime(st.finished))}`)),
       cancel && h('div', { class: 'actions' }, cancel)),

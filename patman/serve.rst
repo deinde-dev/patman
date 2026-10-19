@@ -195,8 +195,9 @@ Commands started from the page run as jobs, one at a time in the order they are
 started, along with the syncs. Reviews of series are the exception: since each
 has its own worktree and mostly waits for the agent, up to five run at once,
 alongside the other jobs. The Jobs tab shows each job with its output as it
-runs, and lets you cancel it. While jobs are waiting or running, the tab shows
-how many there are.
+runs, and lets you cancel it. A job acting on a reviewed series shows the
+series' name, with a link to its reviews. While jobs are waiting or running,
+the tab shows how many there are.
 
 Each tab remembers the screen you last looked at in it, so tapping Reviews
 goes back to the series you were reviewing; tapping it again goes to the list

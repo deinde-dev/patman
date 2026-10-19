@@ -833,6 +833,30 @@ class TestWebServer(unittest.TestCase, TestCommon):
         status, _ = self.call(srv, 'POST', '/api/jobs/1/cancel')
         self.assertEqual(409, status)
 
+    def test_job_series(self):
+        """Jobs give the reviewed series which they act on, and its name"""
+        series_id, _ = self.add_series('rev', 'Somebody else',
+                                       {1: [('a', 'new', 5, 0)]}, ups='us',
+                                       source='review')
+        srv = self.make_server()
+        srv.get_patman_cmd = lambda *args: ['echo', *args]
+        res = self.run_jobs(srv, [
+            ('POST', '/api/review', {'target': '100'}),
+            ('POST', '/api/review', {'target': '999', 'name': ' New one '}),
+            ('POST', '/api/review', {'target': '998'}),
+            ('POST', f'/api/reviews/{series_id}/redraft', {}),
+            ('POST', '/api/review/scan', {}),
+        ], each=True)
+        self.assertEqual([202] * 5, [status for status, _ in res])
+        _, jobs = self.call(srv, 'GET', '/api/jobs')
+        self.assertEqual(
+            [(series_id, 'Somebody else'), (None, 'New one'), (None, None),
+             (series_id, 'Somebody else'), (None, None)],
+            [(job['review'], job['name']) for job in reversed(jobs)])
+        _, job = self.call(srv, 'GET', '/api/jobs/1')
+        self.assertEqual((series_id, 'Somebody else'),
+                         (job['review'], job['name']))
+
     def test_send_reviews(self):
         """The drafts of one review, or all of them, can be sent"""
         series_id, _ = self.add_series('rev', 'Somebody else',

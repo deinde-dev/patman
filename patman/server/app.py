@@ -721,6 +721,35 @@ class Server(jobs.JobRunner):
             'ups': ups, 'page': page, 'per_page': INBOX_PAGE,
             'series': series})
 
+    def _job_state(self, job):
+        """Get the state of a job, with the reviewed series it acts on
+
+        Args:
+            job (Job): Job
+
+        Return:
+            dict: The job's state, with 'review' (int or None), the ID of the
+                series in the review database, and 'name' (str or None), its
+                name, once known
+        """
+        state = dict(job.state)
+        review = None
+        if job.kind == 'review':
+            target = job.state['target']
+            if target:
+                review = target['series']
+            else:
+                for cmd in job.cmds:
+                    if '-s' in cmd[:-1]:
+                        found = self.rcser.db.series_find_by_link(
+                            cmd[cmd.index('-s') + 1])
+                        review = found[0] if found else None
+        state['review'] = review
+        if review:
+            name, desc, _ = self.rcser.db.series_get_info(review)
+            state['name'] = desc or name
+        return state
+
     async def _job_list(self, _request):
         """Handle 'GET /api/jobs': list the jobs
 
@@ -730,7 +759,8 @@ class Server(jobs.JobRunner):
         Return:
             web.Response: List of job states
         """
-        return web.json_response([job.state for job in self.get_jobs()])
+        return web.json_response([self._job_state(job)
+                                  for job in self.get_jobs()])
 
     async def _job_detail(self, request):
         """Handle 'GET /api/jobs/<id>': show a job
@@ -745,7 +775,7 @@ class Server(jobs.JobRunner):
             ValueError: The job does not exist
         """
         job = self.get_job(int(request.match_info['idnum']))
-        return web.json_response(job.state)
+        return web.json_response(self._job_state(job))
 
     async def _job_cancel(self, request):
         """Handle 'POST /api/jobs/<id>/cancel': stop a job
@@ -786,7 +816,9 @@ class Server(jobs.JobRunner):
             raise params.BadRequest('Request must be a JSON object')
         return data
 
-    def _review_job(self, title, *args, target=None, parallel=False):
+    # pylint: disable=R0913
+    def _review_job(self, title, *args, target=None, parallel=False,
+                    name=None):
         """Start a job which runs 'patman review'
 
         Args:
@@ -794,12 +826,14 @@ class Server(jobs.JobRunner):
             args (list of str): Arguments for 'patman review'
             target (dict or None): Reviews which the job acts on (see Job)
             parallel (bool): True to run alongside other jobs (see Job)
+            name (str or None): Name of the series, if known
 
         Return:
             web.Response: Response giving the job state
         """
         cmd = self.get_patman_cmd('review', *args, *self._review_db_args())
         job = self.add_job('review', title, [cmd], target, parallel)
+        job.state['name'] = name or None
         return web.json_response(job.state, status=202)
 
     def _reviewing(self, link):
@@ -851,7 +885,11 @@ class Server(jobs.JobRunner):
                 raise jobs.JobBusyError(
                     f'Series {link} is already being reviewed, by job {busy}')
         # Each review has its own worktree, so several can run at once
-        return self._review_job(title, *args, parallel=True)
+        # The page may give the series' name, which is shown until the
+        # review has recorded the series
+        name = data.get('name')
+        name = name.strip() if isinstance(name, str) else None
+        return self._review_job(title, *args, parallel=True, name=name)
 
     async def _review_scan(self, request):
         """Handle 'POST /api/review/scan': look for new versions to review
