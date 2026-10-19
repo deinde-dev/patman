@@ -51,6 +51,11 @@ RETRIES = 3
 # HTTP status codes which suggest that a request may work if tried again
 RETRY_STATUS = (502, 503, 504)
 
+# Exception which aiohttp raises when a name does not resolve, if it has one.
+# With aiodns installed, the underlying error is an OSError rather than a
+# socket.gaierror, so this is the only way to tell
+DNS_ERROR = getattr(aiohttp, 'ClientConnectorDNSError', ())
+
 # Seconds to wait for a request to complete before trying again, which can be
 # changed with the 'patchwork_timeout' setting
 REQUEST_TIMEOUT = 30
@@ -264,7 +269,8 @@ class Patchwork:
                 except aiohttp.ClientConnectorError as exc:
                     # A name which does not resolve will not start working,
                     # but a busy server may fail to accept a connection
-                    if isinstance(exc.os_error, socket.gaierror) or \
+                    if isinstance(exc, DNS_ERROR) or \
+                            isinstance(exc.os_error, socket.gaierror) or \
                             i == RETRIES:
                         raise
                     await asyncio.sleep(i + 1)

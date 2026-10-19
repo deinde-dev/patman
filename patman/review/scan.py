@@ -15,13 +15,13 @@ from collections import namedtuple
 from concurrent import futures
 import os
 import subprocess
-import sys
 
 import aiohttp
 
 from u_boot_pylib import tout
 
 import patman
+from patman import interpreter
 from patman.review import common
 from patman.review import drafts
 from patman.review import lookup
@@ -97,7 +97,7 @@ def _build_review_command(args, link):
     Returns:
         list of str: Command to run
     """
-    cmd = [sys.executable, '-m', 'patman']
+    cmd = [interpreter.get_python(), '-m', 'patman']
     if getattr(args, 'project', None):
         cmd += ['-p', args.project]
     if getattr(args, 'patchwork_url', None):
@@ -134,7 +134,7 @@ def _build_review_command(args, link):
 def child_env():
     """Build the environment for a 'python -m patman' child process
 
-    The child re-invokes patman with 'sys.executable -m patman'. When
+    The child re-invokes patman with 'python -m patman'. When
     patman is run from a source checkout rather than an installed package,
     a fresh interpreter cannot import it, so put the directory that holds
     the patman package on PYTHONPATH. This is where the parent found it:

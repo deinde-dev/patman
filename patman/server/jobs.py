@@ -17,10 +17,10 @@ from collections import OrderedDict
 import json
 import os
 import signal
-import sys
 
 from u_boot_pylib import tout
 
+from patman import interpreter
 from patman import review as review_mod
 from patman import times
 
@@ -348,7 +348,7 @@ class JobRunner:
         Return:
             str: Description, e.g. 'patman series gather-all -G'
         """
-        patman = [sys.executable, '-m', 'patman']
+        patman = [interpreter.get_python(), '-m', 'patman']
         if cmd[:3] == patman:
             cmd = ['patman'] + [arg for arg in cmd[3:4] if arg != '-v'] + \
                 cmd[4:]

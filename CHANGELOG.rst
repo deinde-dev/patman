@@ -98,6 +98,17 @@ Fixed
   patman's sources, since they found another ``checkpatch.pl`` or missed
   the options in ``.checkpatch.conf``; they are now skipped when the
   sources are not present.
+- A patchwork URL whose name does not resolve fails straight away when
+  aiodns is installed, as it does without it, rather than being tried four
+  times.
+- When Python is started under another name, as a Guix wrapper does,
+  ``patman serve`` and ``patman review --scan`` run their jobs with Python
+  rather than with the wrapper, which fails. ``test_help``,
+  ``test_full_help``, ``test_custom_get_maintainer_script`` and
+  ``test_series_send`` failed in the same way.
+- ``test_gmail_send_draft`` is skipped when the Gmail API
+  (google-api-python-client) is not installed, rather than failing, since
+  it is optional.
 
 0.4.0 - 2026-10-18
 ------------------
