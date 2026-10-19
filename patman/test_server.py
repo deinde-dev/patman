@@ -1225,7 +1225,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual([], second['results'])
 
     def test_resume_jobs(self):
-        """Jobs which do not finish are run again when the server restarts"""
+        """Jobs are kept when the server restarts, and unfinished ones resumed"""
         fname = os.path.join(self.tmpdir, 'jobs.json')
         flag = os.path.join(self.tmpdir, 'flag')
         srv = self.make_server(jobs_fname=fname)
@@ -1249,7 +1249,8 @@ class TestWebServer(unittest.TestCase, TestCommon):
                 for target in '123':
                     await client.post('/api/review', json={'target': target})
                 await wait_output(srv.get_job(1))
-                saved = [job['title'] for job in read_jobs()]
+                saved = [item['state']['title']
+                         for item in read_jobs()['jobs']]
 
                 # Stop the first job as if the server were stopping, then
                 # cancel the second
@@ -1269,35 +1270,77 @@ class TestWebServer(unittest.TestCase, TestCommon):
             loop.close()
         self.assertEqual(['Review series 1', 'Review series 2',
                           'Review series 3'], saved)
+        data = read_jobs()
+        self.assertEqual(3, data['last'])
+        # The first was stopped part-way, the second cancelled and the third
+        # finished
+        first, second, third = (item['state'] for item in data['jobs'])
+        self.assertEqual((1, False), (first['id'], first['cancelled']))
+        self.assertLess(first['results'][0]['returncode'], 0)
+        self.assertEqual((2, True), (second['id'], second['cancelled']))
+        self.assertEqual((3, 0), (third['id'],
+                                  third['results'][0]['returncode']))
         self.assertEqual(
-            [{'kind': 'review', 'title': 'Review series 1',
-              'cmds': [['sh', '-c', f'echo busy; [ -e {flag} ] || sleep 10']],
-              'resumed': 0, 'target': None, 'parallel': True}], read_jobs())
+            [['sh', '-c', f'echo busy; [ -e {flag} ] || sleep 10']],
+            data['jobs'][0]['cmds'])
 
-        # A new server runs the first job again
+        # A new server keeps the jobs, running the stopped one again with
+        # its number, and carries on the numbering
         with open(flag, 'w', encoding='utf-8'):
             pass
         srv = self.make_server(jobs_fname=fname)
+        srv.get_patman_cmd = lambda *args: ['echo', 'new']
+        with terminal.capture() as (out, _):
+            res = self.run_jobs(srv, [('POST', '/api/review',
+                                       {'target': '4'})])
+        self.assertIn("Resuming job 'Review series 1'", out.getvalue())
+        self.assertNotIn('series 2', out.getvalue())
+        self.assertEqual(4, res[0][1]['id'])
+        self.assertEqual([4, 3, 2, 1], [job.idnum for job in srv.get_jobs()])
+        job = srv.get_job(1).state
+        self.assertEqual((1, 0, 'busy\n'),
+                         (job['resumed'], job['results'][0]['returncode'],
+                          job['results'][0]['output']))
+        self.assertTrue(srv.get_job(2).state['cancelled'])
+        self.assertEqual('done\n', srv.get_job(3).state['results'][0]['output'])
+        self.assertEqual(4, read_jobs()['last'])
+
+        # A job which has gone is described
+        status, data = self.call(srv, 'GET', '/api/jobs/99')
+        self.assertEqual((404, 'No job 99'), (status, data['error']))
+
+        # A file from before the jobs were kept still has its jobs resumed
+        with open(fname, 'w', encoding='utf-8') as outf:
+            json.dump([{'kind': 'review', 'title': 'Old', 'cmds': [['true']],
+                        'resumed': 0}], outf)
+        srv = self.make_server(jobs_fname=fname)
         with terminal.capture() as (out, _):
             self.run_jobs(srv, [])
-        self.assertIn("Resuming job 'Review series 1'", out.getvalue())
-        job = srv.get_jobs()[0].state
-        self.assertEqual(('Review series 1', 1, 0, 'busy\n'),
-                         (job['title'], job['resumed'],
-                          job['results'][0]['returncode'],
-                          job['results'][0]['output']))
-        self.assertEqual([], read_jobs())
+        self.assertIn("Resuming job 'Old'", out.getvalue())
+        self.assertEqual([(1, 'Old', 1)],
+                         [(job.idnum, job.state['title'], job.state['resumed'])
+                          for job in srv.get_jobs()])
 
-        # A job is not resumed too often
+        # A job is not resumed too often, and a sync is not resumed at all,
+        # though both are kept
+        unfinished = {'queued': False, 'running': True, 'cancelled': False,
+                      'started': '2026-10-19 10:00:00', 'finished': None,
+                      'results': [], 'target': None}
         with open(fname, 'w', encoding='utf-8') as outf:
-            json.dump([{'kind': 'review', 'title': 'Bad', 'cmds': [['false']],
-                        'resumed': server.jobs.MAX_RESUMES}], outf)
+            json.dump({'last': 7, 'jobs': [
+                {'cmds': [['false']], 'parallel': False,
+                 'state': dict(unfinished, id=6, kind='review', title='Bad',
+                               resumed=server.jobs.MAX_RESUMES)},
+                {'cmds': [['false']], 'parallel': False,
+                 'state': dict(unfinished, id=7, kind='sync', title='Sync',
+                               resumed=0)}]}, outf)
         srv = self.make_server(jobs_fname=fname)
-        with terminal.capture() as (_, err):
+        with terminal.capture() as (out, err):
             self.run_jobs(srv, [])
         self.assertIn("Not resuming job 'Bad' again", err.getvalue())
-        self.assertEqual([], srv.get_jobs())
-        self.assertEqual([], read_jobs())
+        self.assertNotIn('Resuming', out.getvalue())
+        self.assertEqual([(7, False), (6, False)],
+                         [(job.idnum, job.active) for job in srv.get_jobs()])
 
     def test_inbox(self):
         """The inbox lists recent series, marking those already reviewed"""

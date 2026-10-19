@@ -180,49 +180,98 @@ class JobRunner:
         return job
 
     def save_jobs(self):
-        """Write out the jobs which should run again if the server restarts
+        """Write out the jobs, so that they are kept if the server restarts
 
-        Syncs are not included, since a sync runs when the server starts
-        anyway. The file is replaced in one step, so that it is complete
-        even if the server stops while writing it.
+        Each job is written with its state and output, along with the number
+        of the last job, so that the list of jobs, and their numbers, carry on
+        when the server starts again. The file is replaced in one step, so
+        that it is complete even if the server stops while writing it.
         """
         if not self.jobs_fname:
             return
-        jobs = [{'kind': job.kind, 'title': job.state['title'],
-                 'cmds': job.cmds, 'resumed': job.state['resumed'],
-                 'target': job.state['target'], 'parallel': job.parallel}
-                for job in self._jobs.values()
-                if job.kind != 'sync' and job.unfinished]
+        data = {'last': self._last_job,
+                'jobs': [{'cmds': job.cmds, 'parallel': job.parallel,
+                          'state': job.state}
+                         for job in self._jobs.values()]}
         tmp = f'{self.jobs_fname}.tmp'
         with open(tmp, 'w', encoding='utf-8') as outf:
-            json.dump(jobs, outf, indent=1)
+            json.dump(data, outf, indent=1)
         os.replace(tmp, self.jobs_fname)
 
-    def resume_jobs(self):
-        """Start the jobs which had not finished when the server stopped
+    def _read_jobs(self):
+        """Read the jobs saved by save_jobs()
 
         Return:
-            list of Job: Jobs which were started
+            tuple:
+                int: Number of the last job
+                list of dict: Saved jobs, each with 'cmds', 'parallel' and
+                    'state'; an older file, which held only the jobs to run
+                    again, gives each one a state with no number
         """
         if not self.jobs_fname or not os.path.exists(self.jobs_fname):
-            return []
+            return 0, []
         try:
             with open(self.jobs_fname, encoding='utf-8') as inf:
                 saved = json.load(inf)
         except (OSError, ValueError) as exc:
             tout.warning(f"Cannot read jobs from '{self.jobs_fname}': {exc}")
-            return []
+            return 0, []
+        if isinstance(saved, dict):
+            return saved.get('last', 0), saved.get('jobs', [])
+        return 0, [{'cmds': item['cmds'],
+                    'parallel': item.get('parallel', False),
+                    'state': {'id': None, 'kind': item['kind'],
+                              'title': item['title'], 'finished': None,
+                              'resumed': item.get('resumed', 0),
+                              'target': item.get('target')}}
+                   for item in saved]
+
+    def resume_jobs(self):
+        """Restore the jobs from before the server stopped
+
+        Jobs which finished are kept, so that they can still be seen. Jobs
+        which had not finished, or which were stopped part-way because the
+        server stopped, are run again, keeping their numbers. A sync is not
+        run again, since one runs when the server starts anyway.
+
+        Return:
+            list of Job: Jobs which were started again
+        """
+        last, saved = self._read_jobs()
+        self._last_job = max([last] + [item['state']['id'] or 0
+                                       for item in saved])
         jobs = []
         for item in saved:
-            title = item['title']
-            resumed = item.get('resumed', 0) + 1
-            if resumed > MAX_RESUMES:
-                tout.warning(f"Not resuming job '{title}' again: it has "
-                             f'been resumed {MAX_RESUMES} times')
+            state = item['state']
+            if state['id'] is None:
+                # From an older file, which only held jobs to run again
+                job = self._new_job(state['kind'], state['title'],
+                                    item['cmds'], state['resumed'],
+                                    state['target'], item['parallel'])
+            else:
+                job = Job(state['id'], state['kind'], state['title'],
+                          item['cmds'], state['resumed'], state['target'],
+                          item['parallel'])
+                job.state.update(state)
+                job.cancel = state['cancelled']
+                self._jobs[job.idnum] = job
+            if not job.unfinished:
+                continue
+            title = state['title']
+            resumed = state['resumed'] + 1
+            if job.kind == 'sync' or resumed > MAX_RESUMES:
+                if job.kind != 'sync':
+                    tout.warning(f"Not resuming job '{title}' again: it has "
+                                 f'been resumed {MAX_RESUMES} times')
+                job.state.update({'queued': False, 'running': False,
+                                  'finished': job.state['finished'] or
+                                  times.now_str()})
                 continue
             tout.notice(f"Resuming job '{title}'")
-            job = self._new_job(item['kind'], title, item['cmds'], resumed,
-                                item.get('target'), item.get('parallel', False))
+            job.state.update({'queued': True, 'running': False,
+                              'cancelled': False, 'started': None,
+                              'finished': None, 'results': [],
+                              'resumed': resumed})
             asyncio.create_task(self.run_job(job))
             jobs.append(job)
         self.save_jobs()

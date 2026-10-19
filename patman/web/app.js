@@ -1892,7 +1892,17 @@ async function viewJobs() {
 }
 
 async function viewJob(id) {
-  const st = await api(`jobs/${id}`);
+  let st;
+  try {
+    st = await api(`jobs/${id}`);
+  } catch (err) {
+    if (!err.message.startsWith('No job')) throw err;
+    // The server only keeps the most recent jobs
+    return setView(`Job ${id}`, 'jobs', true, h('div', { class: 'empty' },
+      `Job ${id} is no longer known to the server, which keeps only the most ` +
+      'recent jobs. ', h('a', { href: '#/jobs', title: 'Show the jobs' },
+                         'Show the jobs')));
+  }
   const active = !st.finished;
   pollJobs(`#/jobs/${id}`, active);
   const [text, cls] = jobStatus(st);

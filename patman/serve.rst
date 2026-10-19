@@ -206,10 +206,13 @@ goes back to the series you were reviewing; tapping it again goes to the list
 of reviews. Each screen also keeps its scroll position, so going back to it
 finds it where you left it.
 
-Jobs which are waiting or running are recorded in ``.patman-serve-jobs.json``
-next to the database. If the server stops before a job finishes, for example
-because the service is restarted, the job is run again from the start when the
-server next starts. A job is resumed at most three times.
+Jobs are recorded in ``.patman-serve-jobs.json`` next to the database, with
+their output, so the Jobs tab, and the job numbers, carry on when the server
+restarts. The most recent 20 are kept, along with any which have not finished.
+If the server stops before a job finishes, for example because the service is
+restarted, the job is run again from the start, keeping its number, when the
+server next starts. A job is resumed at most three times. A sync is not resumed,
+since one runs when the server starts.
 
 Running it as a service
 -----------------------
