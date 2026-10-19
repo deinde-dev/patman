@@ -290,6 +290,8 @@ has ``ups``, ``page``, ``per_page`` and ``series``, a list of objects with:
 - ``earlier`` (int or null): if not, the ID of a reviewed series with the same
   title, i.e. an earlier version
 - ``mine`` (bool): true if this is one of your own series
+- ``job`` (int or null): the job reviewing the series, if one is waiting or
+  running
 
 Files
 -----
@@ -366,6 +368,8 @@ Review a series, or part of one. The body has one of ``target``, ``patch`` and
 - ``force`` (bool): review the series again
 - ``context`` (str): notes for the agent, e.g. ``this is an RFC``, passed with
   ``-c``
+
+A series which is already being reviewed gives status 409.
 
 ``POST /api/review/scan``
 ~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -1507,11 +1507,15 @@ async function viewReviewForm() {
 // Pages of the inbox read so far, so 'Load more' can add to them
 let inbox = null;
 
-// Reviews started from the inbox, so each series can show how its review is
-// getting on, even after the inbox is shown again
+// Jobs reviewing series in the inbox, so each series can show how its review
+// is getting on, even after the inbox is shown again. The server says which
+// series are being reviewed, in case the review was started elsewhere
 //   key: patchwork series ID
 //   value: job number
 const inboxJobs = new Map();
+
+// Numbers of the jobs in inboxJobs which have finished
+const inboxDone = new Set();
 
 // Show the state of a series' review job in 'box', checking every few seconds
 // until it finishes, while the box is still on the page
@@ -1529,8 +1533,12 @@ function trackInboxJob(box, jobId) {
     box.replaceChildren(h('a', { class: `chip ${cls}`, href: `#/jobs/${jobId}`,
                                  title: 'Show the review job and its output' },
                           text === 'ok' ? 'review done' : `review ${text}`));
-    if (st.finished) refreshJobCount();
-    else setTimeout(poll, 3000);
+    if (st.finished) {
+      inboxDone.add(jobId);
+      refreshJobCount();
+    } else {
+      setTimeout(poll, 3000);
+    }
   };
   // Wait until the box is on the page
   setTimeout(poll, 0);
@@ -1542,6 +1550,11 @@ function inboxDetails(s, ups, jobBox) {
     h('div', { class: 'grow' },
       h('a', { href: mailHref('cover', s.cover_id, ups),
                title: 'Read the cover letter and its comments' }, 'Cover letter')));
+  // While the series is being reviewed, link to the job instead
+  const busyLink = (jobId) => h('a', { class: 'btn light small', href: `#/jobs/${jobId}`,
+                                       title: 'Show the review job and its output' },
+                                'Being reviewed…');
+  const jobId = inboxJobs.get(s.id);
   // Stay on the inbox, so that more reviews can be started
   const [reviewBtn, reviewBox] = reviewButton(
     s.reviewed ? 'Review again' : 'Review', 'btn small',
@@ -1552,6 +1565,7 @@ function inboxDetails(s, ups, jobBox) {
       inboxJobs.set(s.id, job.id);
       refreshJobCount();
       trackInboxJob(jobBox, job.id);
+      reviewBtn.replaceWith(busyLink(job.id));
     });
   return h('div', { class: 'comments' },
     h('div', { class: 'list' }, cover, s.patches.map((p, i) => h('div', { class: 'row' },
@@ -1560,7 +1574,7 @@ function inboxDetails(s, ups, jobBox) {
         h('a', { href: mailHref('patch', p.id, ups),
                  title: 'Read the patch and its comments' }, p.name))))),
     h('div', { class: 'actions' },
-      reviewBtn,
+      jobId && !inboxDone.has(jobId) ? busyLink(jobId) : reviewBtn,
       s.web_url && h('a', { class: 'btn light small', href: s.web_url,
                             target: '_blank', rel: 'noopener',
                             title: 'Open the series on patchwork, in a new tab' },
@@ -1586,6 +1600,7 @@ function inboxCard(s, ups, pw) {
       s.mine && h('span', { class: 'chip st-other' }, 'yours'),
       !s.received_all && h('span', { class: 'chip st-changes-requested' }, 'incomplete'),
       jobBox));
+  if (s.job) inboxJobs.set(s.id, s.job);
   if (inboxJobs.has(s.id)) trackInboxJob(jobBox, inboxJobs.get(s.id));
   let box = null;
   card.addEventListener('click', (ev) => {
