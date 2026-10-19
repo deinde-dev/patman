@@ -334,6 +334,49 @@ def get_series_detail(cser, idnum):
             'versions': versions}
 
 
+def get_series_link(cser, idnum, version=None):
+    """Check that a version of a series can be synced from patchwork
+
+    Args:
+        cser (Cseries): Open cseries instance
+        idnum (int): Series ID
+        version (int or None): Version, or None for the latest
+
+    Return:
+        tuple:
+            str: Series name
+            int: Version
+
+    Raises:
+        ValueError: The series or version does not exist, or has no
+            patchwork link
+    """
+    name, _, _ = cser.db.series_get_info(idnum)
+    svrs = {svr.version: svr for svr in cser.db.ser_ver_get_for_series(idnum)}
+    if version is None and svrs:
+        version = max(svrs)
+    svr = svrs.get(version)
+    if not svr:
+        raise ValueError(f"Series '{name}' has no version {version}")
+    if not svr.link:
+        raise ValueError(f"Series '{name}' v{version} has no patchwork link")
+    return name, version
+
+
+def get_gather_count(cser):
+    """Get the number of series which 'patman series gather-all' reads
+
+    Args:
+        cser (Cseries): Open cseries instance
+
+    Return:
+        int: Number of series, i.e. the latest version of each unarchived
+            series which has a patchwork link
+    """
+    to_fetch, _ = cser._get_fetch_dict(False)  # pylint: disable=W0212
+    return len(to_fetch)
+
+
 def get_review_list(cser):
     """Get a summary of the series reviewed with 'patman review'
 

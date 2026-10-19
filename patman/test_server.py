@@ -200,6 +200,51 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(404, status)
         self.assertIn('No series found', data['error'])
 
+    def test_series_sync(self):
+        """One version of a series can be synced from patchwork as a job"""
+        ser_id, _ = self.add_series('video', 'Video improvements', {
+            1: [('video: Add a driver', 'superseded', 1000, 2)],
+            2: [('video: Add a driver', 'accepted', 1234, 1)],
+            3: [('video: Add a driver', None, None, None)],
+            })
+        self.cser.db.ser_ver_set_link(ser_id, 3, None)
+        self.cser.db.commit()
+        srv = self.make_server()
+
+        # Take a while, so that a second sync of the same version is refused
+        srv.get_patman_cmd = lambda *args: [
+            'sh', '-c', 'sleep 0.2; echo "$@"', 'sh', *args]
+        path = f'/api/series/{ser_id}/sync'
+        res = self.run_jobs(srv, [
+            ('POST', path, {'version': 2}),
+            ('POST', path, {'version': 2}),
+            ('POST', path, {'version': 1}),
+            ('POST', path, {}),
+            ('POST', path, {'version': 4}),
+            ('POST', '/api/series/999/sync', {}),
+        ])
+        self.assertEqual([202, 409, 202, 404, 404, 404],
+                         [status for status, _ in res])
+        self.assertEqual("Sync 'video' v2", res[0][1]['title'])
+        self.assertIn("'video' v2 is already being synced", res[1][1]['error'])
+        self.assertIn("'video' v3 has no patchwork link", res[3][1]['error'])
+        self.assertIn("has no version 4", res[4][1]['error'])
+        self.assertIn('No series found', res[5][1]['error'])
+
+        _, jobs = self.call(srv, 'GET', '/api/jobs')
+        self.assertEqual(
+            ['series -s video -V 2 gather -G', 'series -s video -V 1 gather -G'],
+            [job['results'][0]['output'].strip() for job in reversed(jobs)])
+        self.assertEqual({'gather'}, {job['kind'] for job in jobs})
+
+        # A full sync reads only the latest version, which has no link here
+        _, state = self.call(srv, 'GET', '/api/sync')
+        self.assertEqual(0, state['num_series'])
+        self.cser.db.ser_ver_set_link(ser_id, 3, '300')
+        self.cser.db.commit()
+        _, state = self.call(srv, 'GET', '/api/sync')
+        self.assertEqual(1, state['num_series'])
+
     def test_reviews(self):
         """Reviews written with 'patman review' can be listed and read"""
         ser_id, svids = self.add_series(

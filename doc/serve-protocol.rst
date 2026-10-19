@@ -211,6 +211,15 @@ A series with all its versions:
 - ``versions`` (list of Version): newest first, each with ``patches`` (list of
   Patch, in order) and ``states``
 
+``POST /api/series/<id>/sync``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Sync one version of a series from patchwork, by running ``patman series -s
+NAME -V VERSION gather -G`` as a job. The body may give ``version`` (int),
+which defaults to the latest. This gives status 202 and the Job, 404 if the
+series or version does not exist or the version has no patchwork link, or 409
+if that version is already being synced.
+
 Patchwork
 ---------
 
@@ -451,6 +460,8 @@ of the most recent sync, along with:
 - ``interval`` (int): minutes between syncs, or 0 if they are only run when
   asked
 - ``review_sync`` (bool): true if the sync runs ``patman review --sync``
+- ``num_series`` (int): number of series which a sync reads, i.e. the latest
+  version of each unarchived series with a patchwork link
 
 Before the first sync there is no Job, so only ``queued``, ``running``,
 ``cancelled``, ``started``, ``finished`` and ``results`` are given, along with

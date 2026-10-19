@@ -20,6 +20,9 @@ Added
   ``HTTP_PROXY`` in the environment, apart from hosts in ``NO_PROXY``, so
   patchwork can be reached through another machine when it cannot be
   reached directly.
+- Each series on the ``patman serve`` page has a Sync button, which gathers
+  the patch states and comments for just that version from patchwork.
+  ``POST /api/series/<id>/sync`` does the same.
 
 Changed
 ~~~~~~~
@@ -31,6 +34,11 @@ Changed
   review stores the headers for its reply when its first draft is created,
   so its drafts can be recreated when patchwork is slow or cannot be
   reached. The database is updated to v13 to hold them.
+- patman sends at most 4 requests to a patchwork server at once, rather
+  than 50, since a busy server may block a client which opens a lot of
+  connections.
+- When ``patman serve`` runs without ``--sync``, 'Sync now' on the page
+  needs a second tap, and the page says how many series it reads.
 
 Fixed
 ~~~~~

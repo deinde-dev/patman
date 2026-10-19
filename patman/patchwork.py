@@ -53,8 +53,9 @@ RETRY_STATUS = (502, 503, 504)
 # changed with the 'patchwork_timeout' setting
 REQUEST_TIMEOUT = 30
 
-# Max concurrent request
-MAX_CONCURRENT = 50
+# Maximum number of requests to send to patchwork at once. Busy servers may
+# block a client which opens a lot of connections, so keep this small
+MAX_CONCURRENT = 4
 
 # Patches which are part of a multi-patch series are shown with a prefix like
 # [prefix, version, sequence], for example '[RFC, v2, 3/5]'. All but the last
