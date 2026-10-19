@@ -9,12 +9,14 @@ from datetime import datetime, timedelta
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import unittest
 from unittest import mock
 
 import aiohttp
+import aiohttp.abc
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
@@ -1420,19 +1422,42 @@ class TestWebServer(unittest.TestCase, TestCommon):
         async def fake_sleep(secs):
             sleeps.append(secs)
 
-        async def _go(url):
+        class FailResolver(aiohttp.abc.AbstractResolver):
+            """Resolver which fails as the given resolver does"""
+            def __init__(self, exc):
+                self.exc = exc
+
+            async def resolve(self, host, port=0, family=socket.AF_INET):
+                raise self.exc
+
+            async def close(self):
+                pass
+
+        async def _go(url, exc):
             pwork = Patchwork(url, show_progress=False)
-            async with aiohttp.ClientSession() as client:
+            conn = aiohttp.TCPConnector(
+                resolver=FailResolver(exc) if exc else None)
+            async with aiohttp.ClientSession(connector=conn) as client:
                 return await pwork._request(client, 'patches/1/')
 
-        for url, expect in (('http://127.0.0.1:1', [1, 2, 3]),
-                            ('http://no-such-host.invalid', [])):
+        bad = 'http://no-such-host.invalid'
+        cases = [('http://127.0.0.1:1', None, [1, 2, 3]),
+
+                 # The default resolver, using getaddrinfo()
+                 (bad, socket.gaierror(socket.EAI_NONAME, 'Name not known'),
+                  [])]
+
+        # aiohttp's resolver for aiodns raises a plain OSError, which only
+        # newer versions of aiohttp report as a DNS error
+        if patchwork.DNS_ERROR:
+            cases.append((bad, OSError(None, 'Domain name not found'), []))
+        for url, exc, expect in cases:
             sleeps.clear()
             loop = asyncio.new_event_loop()
             try:
                 with mock.patch.object(patchwork.asyncio, 'sleep', fake_sleep):
                     with self.assertRaises(aiohttp.ClientConnectorError):
-                        loop.run_until_complete(_go(url))
+                        loop.run_until_complete(_go(url, exc))
             finally:
                 loop.close()
             self.assertEqual(expect, sleeps)

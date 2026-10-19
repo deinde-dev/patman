@@ -93,6 +93,9 @@ Fixed
   patman's sources, since they found another ``checkpatch.pl`` or missed
   the options in ``.checkpatch.conf``; they are now skipped when the
   sources are not present.
+- A patchwork URL whose name does not resolve fails straight away when
+  aiodns is installed, as it does without it, rather than being tried four
+  times.
 
 0.4.0 - 2026-10-18
 ------------------
