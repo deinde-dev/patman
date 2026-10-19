@@ -16,6 +16,10 @@ Added
 - The ``patman serve`` page shows the version of patman below each screen,
   with the commit when the server runs from a git checkout which is not at a
   release. ``GET /api/version`` gives it.
+- Requests to patchwork use the proxy given by ``HTTPS_PROXY`` or
+  ``HTTP_PROXY`` in the environment, apart from hosts in ``NO_PROXY``, so
+  patchwork can be reached through another machine when it cannot be
+  reached directly.
 
 Changed
 ~~~~~~~

@@ -90,6 +90,20 @@ patchwork before trying again (default 30). A busy server can stall a
 request, so patman retries a request which times out, has its connection
 reset or refused, or gets a 502, 503 or 504 status, up to three times.
 
+Requests to patchwork go through a proxy when the environment gives one, in
+the usual ``HTTPS_PROXY`` and ``HTTP_PROXY`` variables, and hosts listed in
+``NO_PROXY`` are reached directly. This helps when patchwork cannot be
+reached from your machine but can from another one. For example, with an
+HTTP proxy such as tinyproxy listening on port 8888 of a machine called
+``gate``, forward a local port to it and point patman at that::
+
+    ssh -N -L 8888:localhost:8888 gate &
+    HTTPS_PROXY=http://localhost:8888 patman status
+
+The proxy only passes the encrypted connection through, so it does not see
+what is sent to patchwork. For ``patman serve``, put the variable in the
+environment of the server.
+
 By default patman adds ``base-commit:`` and ``branch:`` trailers to the
 generated patches (or the cover letter). These record the commit that the
 series applies on top of. If you work on a local or downstream branch whose

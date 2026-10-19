@@ -150,6 +150,10 @@ opening it in a browser; if it is down, try again later. A server which is
 just slow is retried a few times, and ``patchwork_timeout`` in ``~/.patman``
 sets how long to wait (see :doc:`/configuration`).
 
+If patchwork works from another machine but not from yours, your address
+may be blocked. patman can go through a proxy on the other machine, set
+with ``HTTPS_PROXY``, as :doc:`/configuration` describes.
+
 There is nothing to review
 --------------------------
 
