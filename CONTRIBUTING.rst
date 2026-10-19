@@ -64,6 +64,13 @@ describes the database schema; update it along with any schema migration.
 is shown at https://deinde.dev/patman/. Run it again after a change to the
 output which the video shows.
 
+``doc/demo/record_serve.py`` records a video of the ``patman serve`` page:
+reviewing a series from the inbox, reading and changing a review and sending
+the reviews. It runs ``doc/demo/serve_demo.py``, which serves made-up series
+and fakes the jobs, so nothing is reviewed or sent for real; this can also be
+run on its own to try the page. Recording needs Playwright, Google Chrome,
+Xvfb and ffmpeg.
+
 Building the package
 --------------------
 
