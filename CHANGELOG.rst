@@ -37,6 +37,8 @@ Changed
 - patman sends at most 4 requests to a patchwork server at once, rather
   than 50, since a busy server may block a client which opens a lot of
   connections.
+- When ``patman serve`` runs without ``--sync``, 'Sync now' on the page
+  needs a second tap, and the page says how many series it reads.
 
 Fixed
 ~~~~~

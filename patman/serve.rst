@@ -79,6 +79,13 @@ not your own.
 Tap the sync indicator at the top of the page to follow the output of a sync as
 it runs, to start one or to cancel one.
 
+A sync reads every patch of every series, along with its comments, so with a
+lot of series it sends thousands of requests to patchwork. A busy server may
+then block your machine. To avoid this, leave out ``--sync`` and sync just the
+series you are interested in: tap 'Sync' on a series to run ``patman series
+gather -G`` for the version shown. Without ``--sync``, 'Sync now' on the sync
+page needs a second tap, since it reads all the series.
+
 Reading patches
 ---------------
 

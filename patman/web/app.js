@@ -1516,10 +1516,16 @@ function jobOutput(st) {
 function viewSync() {
   const st = syncState || { results: [] };
   const active = st.running || st.queued;
-  const btn = h('button', { class: 'btn', disabled: active,
-                            title: 'Gather the review tags for your series from patchwork now',
-                            onclick: () => { btn.disabled = true; startSync(); } },
-                st.queued ? 'Waiting…' : st.running ? 'Syncing…' : 'Sync now');
+  // Without a periodic sync, a sync is unusual, so make sure it is wanted
+  const tip = `Gather the review tags for all ${st.num_series} series ` +
+              'from patchwork now';
+  const btn = active || st.interval
+    ? h('button', { class: 'btn', disabled: active, title: tip,
+                    onclick: () => { btn.disabled = true; startSync(); } },
+        st.queued ? 'Waiting…' : st.running ? 'Syncing…' : 'Sync now')
+    : confirmButton('Sync now', 'btn', startSync,
+                    `${tip}, which sends a lot of requests; to sync one series, use ` +
+                    'the Sync button on its page');
   const cancel = active && h('button', { class: 'btn danger', title: 'Stop the sync',
       onclick: () => { cancel.disabled = true; cancelSync(); } }, 'Cancel');
   const [output, follow] = jobOutput(st);
@@ -1527,6 +1533,7 @@ function viewSync() {
     h('div', { class: 'card' },
       h('div', { class: 'meta' },
         h('span', {}, st.interval ? `Every ${st.interval} min` : 'Periodic sync off'),
+        st.num_series !== undefined && h('span', {}, `${st.num_series} series`),
         st.review_sync && h('span', {}, 'with review --sync'),
         st.started && h('span', {}, `last started ${ago(parseTime(st.started))}`),
         st.cancelled && h('span', {}, 'cancelled')),

@@ -198,6 +198,7 @@ class Server(jobs.JobRunner):
             'started': None, 'finished': None, 'results': []}
         state['interval'] = self.sync_interval
         state['review_sync'] = self.review_sync
+        state['num_series'] = info.get_gather_count(self.cser)
         return state
 
     def _start_sync(self):

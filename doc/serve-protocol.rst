@@ -460,6 +460,8 @@ of the most recent sync, along with:
 - ``interval`` (int): minutes between syncs, or 0 if they are only run when
   asked
 - ``review_sync`` (bool): true if the sync runs ``patman review --sync``
+- ``num_series`` (int): number of series which a sync reads, i.e. the latest
+  version of each unarchived series with a patchwork link
 
 Before the first sync there is no Job, so only ``queued``, ``running``,
 ``cancelled``, ``started``, ``finished`` and ``results`` are given, along with

@@ -363,6 +363,20 @@ def get_series_link(cser, idnum, version=None):
     return name, version
 
 
+def get_gather_count(cser):
+    """Get the number of series which 'patman series gather-all' reads
+
+    Args:
+        cser (Cseries): Open cseries instance
+
+    Return:
+        int: Number of series, i.e. the latest version of each unarchived
+            series which has a patchwork link
+    """
+    to_fetch, _ = cser._get_fetch_dict(False)  # pylint: disable=W0212
+    return len(to_fetch)
+
+
 def get_review_list(cser):
     """Get a summary of the series reviewed with 'patman review'
 

@@ -236,6 +236,15 @@ class TestWebServer(unittest.TestCase, TestCommon):
             ['series -s video -V 2 gather -G', 'series -s video -V 1 gather -G'],
             [job['results'][0]['output'].strip() for job in reversed(jobs)])
         self.assertEqual({'gather'}, {job['kind'] for job in jobs})
+
+        # A full sync reads only the latest version, which has no link here
+        _, state = self.call(srv, 'GET', '/api/sync')
+        self.assertEqual(0, state['num_series'])
+        self.cser.db.ser_ver_set_link(ser_id, 3, '300')
+        self.cser.db.commit()
+        _, state = self.call(srv, 'GET', '/api/sync')
+        self.assertEqual(1, state['num_series'])
+
     def test_reviews(self):
         """Reviews written with 'patman review' can be listed and read"""
         ser_id, svids = self.add_series(
