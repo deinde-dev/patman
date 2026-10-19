@@ -47,6 +47,9 @@ Added
 
 Changed
 ~~~~~~~
+- ``patman serve`` keeps its jobs, with their output, when it restarts, so
+  the Jobs tab and the job numbers carry on. A job which the server no longer
+  knows about says so, rather than showing 'No job 1'.
 - Reviews of series started from the ``patman serve`` page run alongside
   the other jobs, up to five at once, rather than one at a time.
 - The Jobs tab of the ``patman serve`` page shows the name of the series

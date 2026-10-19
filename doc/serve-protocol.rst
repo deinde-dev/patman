@@ -152,7 +152,8 @@ Job
 
 A job runs one or more commands in the git tree, such as a sync or a review:
 
-- ``id`` (int): job number, starting at 1 when the server starts
+- ``id`` (int): job number, starting at 1 and carrying on when the server
+  restarts
 - ``kind`` (str): ``sync`` or ``review``
 - ``title`` (str): description, e.g. ``Review series 123``
 - ``queued`` (bool): true while waiting for other jobs to finish; a review of
@@ -544,14 +545,20 @@ it started, giving status 202 and the Job, or 409 if it has finished.
 Resuming jobs
 ~~~~~~~~~~~~~
 
-Jobs which have not finished, other than syncs, are recorded in
-``.patman-serve-jobs.json`` next to the database, as a list of objects with
-``kind``, ``title``, ``cmds`` (the commands, each a list of arguments) and
-``resumed``. The file is replaced in one step each time a job is added or
-finishes. A job counts as unfinished if it is queued or running, or if a
+The jobs are recorded in ``.patman-serve-jobs.json`` next to the database, as
+an object with ``last``, the number of the last job, and ``jobs``, a list of
+objects with ``cmds`` (the commands, each a list of arguments), ``parallel``
+and ``state`` (the Job, with its output). The file is replaced in one step each
+time a job is added or finishes. The 20 most recent jobs are kept, along with
+any which have not finished.
+
+When the server starts, it reads the file, so that the jobs and their numbers
+carry on. A job counts as unfinished if it is queued or running, or if a
 command was stopped by the server stopping, rather than by cancelling the job.
-When the server starts, it runs each of these again as a new job, from the
-start, unless it has already been resumed three times.
+Each unfinished job is run again from the start, keeping its number, unless it
+has already been resumed three times or it is a sync, since a sync runs when
+the server starts anyway. A file from older versions, which held a list of the
+unfinished jobs only, has these run again as new jobs.
 
 The page
 --------
