@@ -71,6 +71,12 @@ and fakes the jobs, so nothing is reviewed or sent for real; this can also be
 run on its own to try the page. Recording needs Playwright, Google Chrome,
 Xvfb and ffmpeg.
 
+``doc/demo/screenshots.py`` takes the pictures of the page in the guide
+(``doc/guide/images``) in the same way. Run it again after a change to the
+page which they show, and check the pictures before committing them. It
+needs Playwright and Google Chrome, and Pillow to make the pictures
+smaller.
+
 Building the package
 --------------------
 

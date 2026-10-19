@@ -51,6 +51,9 @@ Added
 - Each series on the ``patman serve`` page has a Sync button, which gathers
   the patch states and comments for just that version from patchwork.
   ``POST /api/series/<id>/sync`` does the same.
+- The guide has a page on reviewing a series from the ``patman serve`` page,
+  with a picture of each step: starting the review, changing the reviews,
+  responding to comments and replies, and sending them.
 
 Changed
 ~~~~~~~

@@ -5,10 +5,10 @@ Following it all from a phone
 
 ``patman serve`` runs a small web server in your git tree, showing your
 series and your reviews on a page made for a phone. From the page you can
-also read the patches, change and send reviews, and start new ones.
+also read the patches, start reviews, work on them and send them.
 
-This follows on from :doc:`reviewing`, using the same review of series 155.
-The pictures are of the page, served from the tree used there.
+This page starts the server and goes through its tabs. The next,
+:doc:`serve-reviews`, reviews a series from the page.
 
 Starting the server
 -------------------
@@ -32,7 +32,9 @@ the page remembers the token. If reviews are kept in a separate database
 
 To keep the status of your series up to date, add ``-s``, which gathers it
 from patchwork every hour, or every so many minutes with ``-s 30``. ``-r``
-also syncs the Gmail drafts of your reviews and finds replies to them.
+also syncs the Gmail drafts of your reviews and finds replies to them. With
+a lot of series, a sync sends many requests to patchwork, so you may prefer
+to leave out ``-s`` and tap 'Sync' on just the series you are following.
 
 The tabs
 --------
@@ -54,50 +56,18 @@ Jobs
 Todo
     Series marked with ``patman workflow todo``, due ones first
 
-The Reviews tab lists the reviewed series, with how many reviews approve
-and whether their drafts have been created:
+Each tab remembers the screen you last looked at in it, so tapping Reviews
+goes back to the series you were reviewing; tapping it again goes to the
+list of reviews.
 
-.. image:: images/serve-reviews.png
-   :width: 320px
-   :alt: The Reviews tab, listing 'debian: Clean up qemu package targets'
+The pill at the top right shows how the last sync with patchwork went. Tap
+it to follow a sync as it runs, start one, or see how many requests patman
+has sent to each patchwork server.
 
-Reading a review
-----------------
-
-Tap a series to see its reviews, one card for each patch. Long quotes are
-folded, e.g. '11 quoted lines', and open when tapped:
-
-.. image:: images/serve-review.png
-   :width: 320px
-   :alt: The review of patch 1, with its comments
-
-Each review has 'Show the patch', which shows the commit message and diff
-just below it, so that the two can be read together. 'View whole file' shows
-the whole of a changed file, and the buttons between the chunks show more of
-the lines around them:
-
-.. image:: images/serve-patch.png
-   :width: 320px
-   :alt: The diff of patch 1, below its review
-
-Working on the reviews
-----------------------
-
-A review which has not been sent can be changed on the page:
-
-- 'Edit' under a comment changes just that comment, and 'Edit' under the
-  review changes the whole text
-- 'Revise this' under a comment, or 'Revise' under the review, asks the
-  agent to change it following a note, as ``patman review --revise`` does
-- 'Redraft' recreates its Gmail draft, and 'Send' sends it
-
-These run as jobs, but the page stays where it is: each review a job acts
-on shows how it is getting on, then the new text, with 'Show changes' to see
-what was there before. Until the job finishes, the review cannot be changed
-again, from this page or any other.
-
-'Review a series' on the Reviews tab starts a review, as ``patman review``
-does, and the Inbox tab shows recent series to choose from.
+Anything which takes a while, such as a review or sending a review, runs as
+a job. The Jobs tab lists them, with their output, and shows how many are
+waiting or running. Most of the time you need not go there, since the page
+shows how each job is getting on next to whatever it acts on.
 
 :doc:`The web server chapter </serve>` describes the page in full, and how
 to run the server as a service, so that it is always there.

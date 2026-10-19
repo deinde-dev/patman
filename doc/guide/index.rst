@@ -7,8 +7,9 @@ These pages show how to use patman, step by step, with a real U-Boot series:
 three binman documentation patches, ``binj-us``, which went to two versions
 and were merged in v2026.07. A second small series, ``align-fix``, shows
 collecting review tags, and a third, ``typos``, sending to the concept tree.
-The last pages review a series from the concept tree. All the output is from
-running patman on these branches.
+Later pages review a series from the concept tree. All the output is from
+running patman on these branches, apart from the pictures of the ``patman
+serve`` page, which use made-up series.
 
 Read them in order the first time. Each one follows on from the one before.
 
@@ -42,8 +43,11 @@ Read them in order the first time. Each one follows on from the one before.
     patch, change a review with a note, and send the reviews
 
 :doc:`serve`
-    Follow your series and reviews from a phone with ``patman serve``, and
-    work on the reviews there
+    Follow your series and reviews from a phone with ``patman serve``
+
+:doc:`serve-reviews`
+    Review a series from the page: start the review, read and change the
+    reviews, respond to comments and replies, and send them
 
 :doc:`problems`
     Messages you may see along the way, what causes them and what to do
@@ -63,4 +67,5 @@ such as syncing Gmail drafts and responding to replies to your reviews.
    upstreams
    reviewing
    serve
+   serve-reviews
    problems
