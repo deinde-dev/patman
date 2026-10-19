@@ -31,6 +31,9 @@ Changed
   review stores the headers for its reply when its first draft is created,
   so its drafts can be recreated when patchwork is slow or cannot be
   reached. The database is updated to v13 to hold them.
+- patman sends at most 4 requests to a patchwork server at once, rather
+  than 50, since a busy server may block a client which opens a lot of
+  connections.
 
 Fixed
 ~~~~~
