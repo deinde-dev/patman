@@ -14,6 +14,10 @@ Added
   data it receives, by the hour, in a new ``traffic`` table (database v14).
   The sync page of ``patman serve`` shows the totals for this hour, today
   and the last seven days, and ``GET /api/sync`` gives them.
+- On the ``patman serve`` page, a series in the inbox lists its cover letter
+  along with its patches, and a reviewed series with no review of its cover
+  letter has a card for it, to read it or have the agent review it.
+  ``patman review -i 0`` reviews just the cover letter.
 - The buttons, links and tabs on the ``patman serve`` page have tooltips
   saying what they do, shown when hovering over them or, on a phone, with a
   long press. A button which needs a second tap says so.

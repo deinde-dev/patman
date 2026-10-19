@@ -134,6 +134,12 @@ review is getting on, with a link to the job's output.
 Each review has 'Show the patch' (or 'Show the cover letter'), which shows the
 commit message and diff just below the review, so the two can be read together.
 
+The agent only reviews the cover letter when it has something to say about the
+series as a whole. When there is no review of the cover letter, a card for it
+still appears above the reviews, with 'Show the cover letter' and 'Review it',
+which asks the agent to review just the cover letter (``patman review -i 0``),
+creating a Gmail draft if it has comments.
+
 A review which has not been sent can be edited on the page. Saving it can also
 update its Gmail draft, so that the draft matches. If it does not, the review
 shows 'draft out of date', and sending it creates the draft again first, so

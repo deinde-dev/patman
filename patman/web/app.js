@@ -1005,6 +1005,8 @@ async function viewReview(id, wantVer) {
     return card;
   };
   const reviews = sv.reviews.map(reviewCard);
+  const cover = sv.cover_id && !sv.reviews.some((r) => r.seq === 0) &&
+    unreviewedCover(ser, sv);
   // Show the jobs which were already acting on reviews, e.g. after a reload
   const byJob = new Map();
   sv.reviews.filter((r) => r.job).forEach((r) => {
@@ -1053,8 +1055,75 @@ async function viewReview(id, wantVer) {
     sv.notes && h('div', { class: 'section' }, 'Notes'),
     sv.notes && h('div', { class: 'notes' }, renderMail(sv.notes)),
     h('div', { class: 'section' }, plural(reviews.length, 'review')),
+    cover && h('div', { class: 'list' }, cover),
     reviews.length ? h('div', { class: 'list' }, reviews)
                    : h('div', { class: 'empty' }, 'No reviews for this version'));
+}
+
+// A card for the cover letter of a version which has no review of it, e.g.
+// because the agent had nothing to say about the series as a whole. It shows
+// the cover letter and can ask the agent to review just that
+function unreviewedCover(ser, sv) {
+  const [showBtn, mailBox] = mailToggle('cover', sv.cover_id, ser.upstream);
+  const strip = h('div', { class: 'jobstrip' });
+  const say = (cls, ...kids) => {
+    strip.className = `jobstrip ${cls}`;
+    strip.replaceChildren(...kids);
+  };
+  const output = (jobId) => h('a', { href: `#/jobs/${jobId}`,
+                                     title: 'Show the output of the job' }, 'View output');
+  const review = async () => {
+    let job;
+    try {
+      job = await api('review', { json: { target: String(sv.link), ups: ser.upstream,
+                                          index: '0', drafts: true } });
+    } catch (err) {
+      say('failed', h('span', {}, err.message));
+      return;
+    }
+    refreshJobCount();
+    for (;;) {
+      say('busy', h('span', {}, `Reviewing… ${job.queued ? 'waiting' : 'running'}`), ' ',
+          output(job.id));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      if (!strip.isConnected) return;
+      try {
+        job = await api(`jobs/${job.id}`);
+      } catch (err) {
+        continue;
+      }
+      if (job.finished) break;
+    }
+    refreshJobCount();
+    const [status] = jobStatus(job);
+    if (status !== 'ok') {
+      say('failed', h('span', {}, `Review ${status}`), ' ', output(job.id));
+      return;
+    }
+    // Show the new review, if the agent wrote one
+    const again = await api(`reviews/${ser.id}`);
+    const ver = again.versions.find((v) => v.version === sv.version);
+    if (ver && ver.reviews.some((r) => r.seq === 0)) {
+      route();
+      return;
+    }
+    say('', h('span', {}, 'The agent has no comments on the cover letter'), ' ',
+        output(job.id));
+  };
+  return h('div', { class: 'card review' },
+    h('div', { class: 'row' },
+      h('div', { class: 'grow name' },
+        h('a', { href: mailHref('cover', sv.cover_id, ser.upstream),
+                 title: 'Read the cover letter and its comments' },
+          'Cover letter', sv.cover_name ? h('span', { class: 'desc' }, ` ${sv.cover_name}`)
+                                        : null)),
+      h('span', { class: 'ver' }, 'not reviewed')),
+    strip,
+    h('div', { class: 'actions' }, showBtn,
+      sv.link && confirmButton('Review it', 'btn light small', review,
+                               'Have the agent review just the cover letter, as a job, ' +
+                               'creating a Gmail draft if it has comments')),
+    mailBox);
 }
 
 // Status of a reply to a review, as [text, chip class]
@@ -1335,8 +1404,13 @@ function trackInboxJob(box, jobId) {
 }
 
 function inboxDetails(s, ups, jobBox) {
+  const cover = s.cover_id && h('div', { class: 'row' },
+    h('span', { class: 'seq' }, 0),
+    h('div', { class: 'grow' },
+      h('a', { href: mailHref('cover', s.cover_id, ups),
+               title: 'Read the cover letter and its comments' }, 'Cover letter')));
   return h('div', { class: 'comments' },
-    h('div', { class: 'list' }, s.patches.map((p, i) => h('div', { class: 'row' },
+    h('div', { class: 'list' }, cover, s.patches.map((p, i) => h('div', { class: 'row' },
       h('span', { class: 'seq' }, i + 1),
       h('div', { class: 'grow' },
         h('a', { href: mailHref('patch', p.id, ups),
