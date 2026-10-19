@@ -94,6 +94,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
         """
         srv = server.Server(self.cser, **kwargs)
         srv.pwork_for_testing = Patchwork.for_testing(self._fake_patchwork)
+        srv.own_emails = set()
         return srv
 
     def _fake_patchwork(self, subpath):
@@ -457,19 +458,31 @@ class TestWebServer(unittest.TestCase, TestCommon):
     def test_comments(self):
         """Comments are read from patchwork and trimmed down"""
         srv = self.make_server()
-        status, data = self.call(srv, 'GET', '/api/comments/patch/1234')
+
+        # Our own address is found the first time it is needed
+        srv.own_emails = None
+        with mock.patch.object(server.app.gitutil, 'get_default_user_email',
+                               return_value='me@k.com') as get_email:
+            status, data = self.call(srv, 'GET', '/api/comments/patch/1234')
         self.assertEqual(200, status)
         self.assertEqual(
             [{'id': 1, 'date': '2026-10-01T10:00:00',
               'name': 'Tom Rini', 'email': 'trini@k.com',
               'subject': 'Re: [PATCH 1/2] video: Add a driver',
               'content': '> some code\n\nReviewed-by: Tom Rini',
-              'web_url': 'https://pw/comment/1/'}], data)
+              'web_url': 'https://pw/comment/1/', 'own': False}], data)
+        get_email.assert_called_once()
+        self.assertEqual({'me@k.com'}, srv.own_emails)
+
+        # A comment from our own address, such as a review we sent, says so
+        srv.own_emails = {'trini@k.com'}
+        _, data = self.call(srv, 'GET', '/api/comments/patch/1234')
+        self.assertTrue(data[0]['own'])
 
         status, data = self.call(srv, 'GET', '/api/comments/cover/77')
         self.assertEqual((200, []), (status, data))
-        self.assertEqual(['patches/1234/comments/', 'covers/77/comments/'],
-                         self.requests)
+        self.assertEqual(['patches/1234/comments/', 'patches/1234/comments/',
+                          'covers/77/comments/'], self.requests)
 
         status, _ = self.call(srv, 'GET', '/api/comments/fred/77')
         self.assertEqual(404, status)

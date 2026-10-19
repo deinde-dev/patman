@@ -228,24 +228,27 @@ def reply_info(reply):
     }
 
 
-def comment_info(comment):
+def comment_info(comment, own=frozenset()):
     """Pick out the useful fields from a patchwork comment
 
     Args:
         comment (dict): Comment as returned by the patchwork API
+        own (set of str): Our own email addresses, in lower case
 
     Return:
         dict: Comment information
     """
     submitter = comment.get('submitter') or {}
+    email = submitter.get('email')
     return {
         'id': comment.get('id'),
         'date': comment.get('date'),
         'name': submitter.get('name'),
-        'email': submitter.get('email'),
+        'email': email,
         'subject': comment.get('subject'),
         'content': comment.get('content'),
         'web_url': comment.get('web_url'),
+        'own': bool(email) and email.lower() in own,
     }
 
 

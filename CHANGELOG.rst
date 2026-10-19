@@ -54,6 +54,10 @@ Added
 
 Changed
 ~~~~~~~
+- 'Comments' under a review on the ``patman serve`` page leaves out your own
+  comments on patchwork, such as the review itself, since they need no
+  response. ``GET /api/comments`` marks each comment from your git
+  ``user.email`` address as ``own``.
 - 'Suggest a response', 'Create Gmail draft' and 'Send' on a reply, on the
   ``patman serve`` page, leave the page where it is and show the job below the
   reply, rather than going to the job's page.
