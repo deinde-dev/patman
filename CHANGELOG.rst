@@ -26,6 +26,9 @@ Added
 
 Changed
 ~~~~~~~
+- 'Review' in the inbox of the ``patman serve`` page leaves the inbox open,
+  so that other series can be reviewed too, and shows how each review is
+  getting on, rather than going to the Jobs tab.
 - The em dashes (—) which the review agent writes in reviews and suggested
   responses are replaced with a hyphen, which suits plain-text email. The
   ``em_dash`` setting, or ``--em-dash``, changes what is used, and ``—``

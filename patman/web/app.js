@@ -1299,7 +1299,36 @@ async function viewReviewForm() {
 // Pages of the inbox read so far, so 'Load more' can add to them
 let inbox = null;
 
-function inboxDetails(s, ups) {
+// Reviews started from the inbox, so each series can show how its review is
+// getting on, even after the inbox is shown again
+//   key: patchwork series ID
+//   value: job number
+const inboxJobs = new Map();
+
+// Show the state of a series' review job in 'box', checking every few seconds
+// until it finishes, while the box is still on the page
+function trackInboxJob(box, jobId) {
+  const poll = async () => {
+    if (!box.isConnected) return;
+    let st;
+    try {
+      st = await api(`jobs/${jobId}`);
+    } catch (err) {
+      box.textContent = err.message;
+      return;
+    }
+    const [text, cls] = jobStatus(st);
+    box.replaceChildren(h('a', { class: `chip ${cls}`, href: `#/jobs/${jobId}`,
+                                 title: 'Show the review job and its output' },
+                          text === 'ok' ? 'review done' : `review ${text}`));
+    if (st.finished) refreshJobCount();
+    else setTimeout(poll, 3000);
+  };
+  // Wait until the box is on the page
+  setTimeout(poll, 0);
+}
+
+function inboxDetails(s, ups, jobBox) {
   return h('div', { class: 'comments' },
     h('div', { class: 'list' }, s.patches.map((p, i) => h('div', { class: 'row' },
       h('span', { class: 'seq' }, i + 1),
@@ -1307,10 +1336,18 @@ function inboxDetails(s, ups) {
         h('a', { href: mailHref('patch', p.id, ups),
                  title: 'Read the patch and its comments' }, p.name))))),
     h('div', { class: 'actions' },
-      confirmButton(s.reviewed ? 'Review again' : 'Review', 'btn small',
-        () => startJob('review', { target: String(s.id), ups, drafts: true,
-                                   force: !!s.reviewed }),
-        'Have the agent review this series'),
+      confirmButton(s.reviewed ? 'Review again' : 'Review', 'btn small', async () => {
+        // Stay on the inbox, so that more reviews can be started
+        try {
+          const job = await api('review', { json: { target: String(s.id), ups,
+                                                    drafts: true, force: !!s.reviewed } });
+          inboxJobs.set(s.id, job.id);
+          refreshJobCount();
+          trackInboxJob(jobBox, job.id);
+        } catch (err) {
+          jobBox.textContent = err.message;
+        }
+      }, 'Have the agent review this series, as a job; the inbox stays open'),
       s.web_url && h('a', { class: 'btn light small', href: s.web_url,
                             target: '_blank', rel: 'noopener',
                             title: 'Open the series on patchwork, in a new tab' },
@@ -1318,6 +1355,7 @@ function inboxDetails(s, ups) {
 }
 
 function inboxCard(s, ups, pw) {
+  const jobBox = h('span', {});
   const card = h('div', { class: 'card patch', title: 'Tap to show the patches' },
     h('div', { class: 'row' },
       h('div', { class: 'grow name' }, s.name),
@@ -1332,12 +1370,14 @@ function inboxCard(s, ups, pw) {
                             title: 'Show your reviews of an earlier version' },
                      'earlier version reviewed'),
       s.mine && h('span', { class: 'chip st-other' }, 'yours'),
-      !s.received_all && h('span', { class: 'chip st-changes-requested' }, 'incomplete')));
+      !s.received_all && h('span', { class: 'chip st-changes-requested' }, 'incomplete'),
+      jobBox));
+  if (inboxJobs.has(s.id)) trackInboxJob(jobBox, inboxJobs.get(s.id));
   let box = null;
   card.addEventListener('click', (ev) => {
     if (ev.target.closest('a, button, .comments')) return;
     if (box) { box.remove(); box = null; return; }
-    box = inboxDetails(s, ups);
+    box = inboxDetails(s, ups, jobBox);
     card.append(box);
   });
   const groups = ['all'];
