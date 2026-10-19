@@ -12,6 +12,7 @@ share.
 """
 
 import asyncio
+import os
 import re
 import shutil
 import uuid
@@ -19,6 +20,7 @@ import uuid
 import aiohttp
 
 from u_boot_pylib import gitutil
+from u_boot_pylib import tools
 
 try:
     from claude_agent_sdk import ClaudeAgentOptions
@@ -193,6 +195,22 @@ class ReviewContext:  # pylint: disable=R0902
     def date(self):
         """Get the series date string"""
         return self.series_data.get('date', '')
+
+
+def read_context(spec):
+    """Resolve a --context argument value to literal text
+
+    Args:
+        spec (str): Either a literal string, or '@path' to read from
+            a file (path is expanded for '~')
+
+    Return:
+        str: The context text to pass to the agent
+    """
+    if spec.startswith('@'):
+        path = os.path.expanduser(spec[1:])
+        return tools.read_file(path, binary=False).rstrip()
+    return spec
 
 
 def parse_patch_selection(spec):
