@@ -410,6 +410,27 @@ was sent. If the response has no draft yet, or has been changed since the
 draft was created, the draft is created first. If the draft has been deleted
 in Gmail, nothing is sent.
 
+Responding to other comments
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Someone else may comment on a series you reviewed, e.g. asking the author a
+question in reply to the cover letter, which you would like to answer. To have
+the agent suggest a response to any comment on patchwork about a reviewed
+series, give the comment's ID on patchwork (the number in its URL) and, with
+``-i``, the patch it is about, 0 for the cover letter::
+
+    patman review -s 528450 -U us --respond-comment 3773405 -i 0
+    patman review -s 528450 -U us --respond-comment 3773405 -i 0 \
+        -c 'Explain why fit,compress differs from compress'
+
+The agent sees the comment, what it is about (the cover letter, or the patch
+with its diff), your review of it, if any, and the other comments on it. Use
+``-c`` to say what you would like to say. The comment is recorded along with
+the replies to your reviews, so ``--replies``, ``--draft-reply`` and
+``--send-reply`` work for it in the same way, and ``-d`` drafts the response
+straight away. The response is threaded as a reply to the comment, to the
+person who made it, copied to everyone it went to.
+
 The response can also be edited, drafted and sent from the Reviews tab of
 ``patman serve``: tap 'Send' under it, or 'Edit response' then 'Save and
 send'. Both need a second tap to confirm.

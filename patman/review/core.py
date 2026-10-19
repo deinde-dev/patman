@@ -924,6 +924,9 @@ def do_review(args, pwork, cser):
         link = lookup.search_series(
             pwork, args.title, getattr(args, 'version', None))
 
+    if getattr(args, 'respond_comment', None):
+        return replies.respond_to_comment(args, pwork, cser, link)
+
     if getattr(args, 'send', False) or getattr(args, 'revise', None):
         return stored.do_stored(args, pwork, cser, link)
 

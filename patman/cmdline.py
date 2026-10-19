@@ -782,6 +782,11 @@ def add_review_subparser(subparsers):
         help='Create a Gmail draft of the response to a reply, threaded as a '
              'reply to it')
     review.add_argument(
+        '--respond-comment', type=int, metavar='ID',
+        help='Ask the agent to suggest a response to a comment on patchwork '
+             'about a reviewed series, given by the comment ID; use -i to '
+             'say which patch it is about, with 0 for the cover letter')
+    review.add_argument(
         '--send-reply', type=int, metavar='ID',
         help='Send the response to a reply, creating its Gmail draft first if '
              'needed')

@@ -720,6 +720,170 @@ class TestReview(CseriesTester):
             .execute.return_value = {'messages': msgs}
         return service
 
+    def test_review_respond_comment(self):
+        """The agent can respond to someone else's comment on patchwork"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'Fred series', None)
+        db.series_set_source(sid, 'review')
+        svid = db.ser_ver_add(sid, 2, link='123')
+        db.review_add(svid, 1, 'Looks good', True, datetime.now().isoformat())
+        db.commit()
+
+        comment = {
+            'id': 77, 'msgid': '<c1@x>', 'date': '2026-10-19T09:31:24',
+            'subject': 'Re: [PATCH v2 0/2] binman: Compress\n it',
+            'submitter': {'name': 'Alex Ample', 'email': 'alex@x.com'},
+            'content': "We already use 'compress' for this.",
+            'headers': {
+                'References': '\n <cover@x>', 'Message-ID': '\n <c1@x>',
+                'To': 'fred@x.com', 'Date': 'Mon, 19 Oct 2026 11:31:24 +0200',
+                'Cc': 'u-boot@lists.denx.de, Simon Glass <sjg@chromium.org>,'
+                      '\n Tom Rini <trini@k.com>'}}
+        other = {'id': 78, 'date': '2026-10-19T10:00:00',
+                 'submitter': {'name': 'Tom Rini'}, 'content': 'Agreed'}
+        requests = []
+
+        async def get_series(_client, link):
+            requests.append(f'series {link}')
+            return {'cover_letter': {'id': 5},
+                    'patches': [{'id': 11}, {'id': 12}]}
+
+        async def get_cover(_client, cover_id):
+            requests.append(f'cover {cover_id}')
+            return {'content': 'Add compression'}
+
+        async def get_cover_comments(_client, cover_id):
+            requests.append(f'cover comments {cover_id}')
+            return [comment, other]
+
+        async def get_patch(_client, patch_id):
+            requests.append(f'patch {patch_id}')
+            return {'content': 'Commit message', 'diff': '+code'}
+
+        async def get_patch_comments(_client, patch_id):
+            requests.append(f'patch comments {patch_id}')
+            return [dict(comment, id=79, content='Why?')]
+
+        pwork = types.SimpleNamespace(
+            get_series=get_series, get_cover=get_cover,
+            get_cover_comments=get_cover_comments, get_patch=get_patch,
+            get_patch_comments=get_patch_comments)
+        seen = {}
+
+        async def mock_agent(prompt, _options):
+            seen.clear()
+            seen['prompt'] = prompt
+            for name in ('item', 'comment', 'others', 'review'):
+                found = re.search(rf'(\S+/{name}\.txt)', prompt)
+                if found:
+                    seen[name] = tools.read_file(found.group(1), binary=False)
+            return True, ('GREETING: Alex\nCOMMENT:\n'
+                          "> We already use 'compress' for this.\n\n"
+                          'The FIT one is different — it sets the '
+                          'node.\n\nVERDICT: changes_needed\n')
+
+        def run(*argv):
+            args = cmdline.parse_args(
+                ['review', '-s', '123', '--reviewer',
+                 'Simon Glass <sjg@chromium.org>', *argv], config_fname=False)
+            with mock.patch.object(review.replies.claude_mod,
+                                   'run_agent_collect',
+                                   side_effect=mock_agent), \
+                    mock.patch.object(review.replies.claude_mod,
+                                      'check_available', return_value=True), \
+                    mock.patch.object(review.common, 'ClaudeAgentOptions',
+                                      mock.MagicMock()), \
+                    terminal.capture() as (out, _):
+                ret = review.replies.respond_to_comment(args, pwork, cser,
+                                                        '123')
+            return ret, out.getvalue()
+
+        ret, out = run('--respond-comment', '77', '-i', '0', '-c',
+                       'Say why it differs')
+        self.assertEqual(0, ret)
+        self.assertEqual(['series 123', 'cover 5', 'cover comments 5'],
+                         requests)
+        self.assertIn('Responding to comment 77 from Alex Ample on the '
+                      'cover letter', out)
+        self.assertIn('commented on\nthe cover letter', seen['prompt'])
+        self.assertIn('Say why it differs', seen['prompt'])
+        self.assertNotIn('YOUR REVIEW OF IT', seen['prompt'])
+        self.assertEqual('Add compression', seen['item'])
+        self.assertEqual("We already use 'compress' for this.",
+                         seen['comment'])
+        self.assertIn('From Tom Rini on 2026-10-19T10:00:00:\nAgreed',
+                      seen['others'])
+
+        rep, = db.reply_get_comments(svid)
+        self.assertEqual(
+            (None, svid, 0, 77, '<c1@x>', '<cover@x>',
+             'Alex Ample <alex@x.com>', 'fred@x.com',
+             'u-boot@lists.denx.de, Simon Glass <sjg@chromium.org>, '
+             'Tom Rini <trini@k.com>',
+             'Re: [PATCH v2 0/2] binman: Compress it',
+             'Mon, 19 Oct 2026 11:31:24 +0200', 'suggested'),
+            (rep.review_id, rep.svid, rep.seq, rep.comment_id, rep.msgid,
+             rep.refs, rep.sender, rep.to_addrs, rep.cc_addrs, rep.subject,
+             rep.date, rep.status))
+        self.assertIn('On 2026-10-19T09:31:24, Alex Ample <alex@x.com> wrote:',
+                      rep.response)
+        self.assertIn("> We already use 'compress' for this.", rep.response)
+        self.assertIn('The FIT one is different - it sets the node.',
+                      rep.response)
+        self.assertEqual({sid: 1}, db.reply_count_waiting())
+        self.assertEqual([], db.reply_get_for_review(1))
+
+        # The response goes to whoever commented, threaded under the comment
+        ctx = review.replies._make_reply_ctx(cmdline.parse_args(
+            ['review', '--reviewer', 'Simon Glass <sjg@chromium.org>'],
+            config_fname=False), cser)
+        with mock.patch.object(gmail, 'create_draft',
+                               return_value={'id': 'd1'}) as create, \
+                terminal.capture():
+            review.replies._draft_response(mock.MagicMock(), ctx, rep.idnum)
+        self.assertEqual(
+            ('Alex Ample <alex@x.com>',
+             'Re: [PATCH v2 0/2] binman: Compress it'),
+            create.call_args.args[1:3])
+        self.assertEqual(
+            {'in_reply_to': '<c1@x>', 'references': '<cover@x> <c1@x>',
+             'cc': 'fred@x.com, u-boot@lists.denx.de, Tom Rini <trini@k.com>',
+             'sender': 'Simon Glass <sjg@chromium.org>'},
+            create.call_args.kwargs)
+
+        # For a patch, the agent sees the diff and our review of it
+        requests.clear()
+        self.assertEqual(0, run('--respond-comment', '79', '-i', '1')[0])
+        self.assertEqual(['series 123', 'patch 11', 'patch comments 11'],
+                         requests)
+        self.assertEqual('Commit message\n+code', seen['item'])
+        self.assertEqual('Looks good', seen['review'])
+        self.assertNotIn('others', seen)
+        self.assertEqual([(0, 77), (1, 79)],
+                         [(r.seq, r.comment_id)
+                          for r in db.reply_get_comments(svid)])
+
+        # Asking again updates the same record
+        run('--respond-comment', '77', '-i', '0')
+        self.assertEqual(2, len(db.reply_get_comments(svid)))
+        with self.assertRaises(ValueError) as exc:
+            run('--respond-comment', '77', '-i', '1')
+        self.assertIn('There is no comment 77 on patch 1 of series 123',
+                      str(exc.exception))
+
+        with self.assertRaises(ValueError) as exc:
+            run('--respond-comment', '77')
+        self.assertIn('Use -i to say which patch', str(exc.exception))
+        with self.assertRaises(ValueError) as exc:
+            run('--respond-comment', '77', '-i', '3')
+        self.assertIn('Series 123 has no patch 3', str(exc.exception))
+
+        # Asking for a suggestion in the usual way says how to do it
+        with self.assertRaises(ValueError) as exc:
+            review.replies._suggest_response(ctx, rep.idnum)
+        self.assertIn('use --respond-comment 77', str(exc.exception))
+
     def test_review_replies(self):
         """Replies to a sent review are recorded and can be responded to"""
         cser = self.get_database()

@@ -22,7 +22,7 @@ from u_boot_pylib import tout
 from patman.series import Series
 
 # Schema version (version 0 means there is no database yet)
-LATEST = 14
+LATEST = 15
 
 # Information about a review record
 # Review status values
@@ -50,8 +50,9 @@ REPLY_WAITING = (REPLY_NEW, REPLY_SUGGESTED)
 
 # Information about a reply to one of our reviews
 #   idnum: ID of the reply record
-#   review_id: ID of the review which was replied to
-#   gmail_msg_id: Gmail message ID of the reply
+#   review_id: ID of the review which was replied to, or None for a comment
+#       on patchwork which is not a reply to one of our reviews
+#   gmail_msg_id: Gmail message ID of the reply, or None for a comment
 #   msgid: Message-ID header of the reply, for threading the response
 #   refs: References header of the reply
 #   sender: Who sent the reply ('Name <email>')
@@ -64,14 +65,18 @@ REPLY_WAITING = (REPLY_NEW, REPLY_SUGGESTED)
 #   status: REPLY_... value
 #   draft_id: Gmail draft ID of the response, or None
 #   timestamp: When the reply was recorded
+#   svid: For a comment, ID of the series version it is about, else None
+#   seq: For a comment, the patch it is about (0 for the cover letter)
+#   comment_id: For a comment, its ID on patchwork
 Reply = namedtuple(
     'REPLY',
     'idnum,review_id,gmail_msg_id,msgid,refs,sender,to_addrs,cc_addrs,'
-    'subject,date,body,response,status,draft_id,timestamp')
+    'subject,date,body,response,status,draft_id,timestamp,svid,seq,'
+    'comment_id')
 
 REPLY_COLS = ('id, review_id, gmail_msg_id, msgid, refs, sender, to_addrs, '
               'cc_addrs, subject, date, body, response, status, draft_id, '
-              'timestamp')
+              'timestamp, svid, seq, comment_id')
 
 # Information about a series/version record
 SerVer = namedtuple(
@@ -329,6 +334,12 @@ class Database:  # pylint:disable=R0904
             'CREATE TABLE traffic (hour TEXT, url TEXT, requests INTEGER, '
             'bytes INTEGER, PRIMARY KEY (hour, url))')
 
+    def _migrate_to_v15(self):
+        """Allow responses to comments on patchwork, in the reply table"""
+        self.cur.execute('ALTER TABLE reply ADD COLUMN svid INTEGER')
+        self.cur.execute('ALTER TABLE reply ADD COLUMN seq INTEGER')
+        self.cur.execute('ALTER TABLE reply ADD COLUMN comment_id INTEGER')
+
     # pylint: disable=R0912
     def migrate_to(self, dest_version):
         """Migrate the database to the selected version
@@ -389,6 +400,8 @@ class Database:  # pylint:disable=R0904
                 self._migrate_to_v13()
             elif version == 14:
                 self._migrate_to_v14()
+            elif version == 15:
+                self._migrate_to_v15()
 
             # Save the new version if we have a schema_version table
             if version > 1:
@@ -1741,6 +1754,60 @@ class Database:  # pylint:disable=R0904
              cc_addrs, subject, date, body, REPLY_NEW, timestamp))
         return self.lastrowid()
 
+    def reply_add_comment(self, svid, seq, comment_id, msgid, refs, sender,
+                          to_addrs, cc_addrs, subject, date, body, timestamp):
+        """Record a comment on patchwork which we may respond to
+
+        A comment which is already recorded is updated instead.
+
+        Args:
+            svid (int): ID of the series version which the comment is about
+            seq (int): Patch which the comment is about, 0 for the cover
+                letter
+            comment_id (int): ID of the comment on patchwork
+            msgid (str): Message-ID header of the comment
+            refs (str): References header of the comment
+            sender (str): Who sent the comment ('Name <email>')
+            to_addrs (str): To header of the comment
+            cc_addrs (str): Cc header of the comment
+            subject (str): Subject of the comment
+            date (str): When the comment was sent
+            body (str): Text of the comment
+            timestamp (str): When the comment was recorded
+
+        Return:
+            int: ID of the reply record holding the comment
+        """
+        rec = self.execute('SELECT id FROM reply WHERE comment_id = ?',
+                           (comment_id,)).fetchone()
+        fields = (msgid, refs, sender, to_addrs, cc_addrs, subject, date,
+                  body)
+        if rec:
+            self.execute(
+                'UPDATE reply SET msgid = ?, refs = ?, sender = ?, '
+                'to_addrs = ?, cc_addrs = ?, subject = ?, date = ?, body = ? '
+                'WHERE id = ?', (*fields, rec[0]))
+            return rec[0]
+        self.execute(
+            'INSERT INTO reply (svid, seq, comment_id, msgid, refs, sender, '
+            'to_addrs, cc_addrs, subject, date, body, status, timestamp) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (svid, seq, comment_id, *fields, REPLY_NEW, timestamp))
+        return self.lastrowid()
+
+    def reply_get_comments(self, svid):
+        """Get the comments on patchwork recorded for a series version
+
+        Args:
+            svid (int): ID of the series version
+
+        Return:
+            list of Reply: Comments, oldest first
+        """
+        res = self.execute(f'SELECT {REPLY_COLS} FROM reply WHERE svid = ? '
+                           'AND comment_id IS NOT NULL ORDER BY id', (svid,))
+        return [Reply(*rec) for rec in res.fetchall()]
+
     def reply_get(self, reply_id):
         """Get a reply record by its ID
 
@@ -1794,10 +1861,12 @@ class Database:  # pylint:disable=R0904
             dict: key (int): series ID, value (int): number of replies
         """
         marks = ', '.join(['?'] * len(REPLY_WAITING))
+        # A reply to a review finds its version through the review, while a
+        # comment on patchwork records it
         res = self.execute(
             'SELECT sv.series_id, COUNT(*) FROM reply rp '
-            'JOIN review r ON r.id = rp.review_id '
-            'JOIN ser_ver sv ON sv.id = r.svid '
+            'LEFT JOIN review r ON r.id = rp.review_id '
+            'JOIN ser_ver sv ON sv.id = COALESCE(r.svid, rp.svid) '
             f'WHERE rp.status IN ({marks}) GROUP BY sv.series_id',
             REPLY_WAITING)
         return dict(res.fetchall())

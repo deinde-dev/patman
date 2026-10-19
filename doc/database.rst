@@ -6,7 +6,7 @@ The patman database
 Patman stores series tracking, review and workflow state in a SQLite
 database (``.patman.db``) in the top-level git directory. The schema is
 versioned and migrated automatically when patman starts; it is currently at
-v14. The :doc:`db` chapter of the manual covers where the database is
+v15. The :doc:`db` chapter of the manual covers where the database is
 kept, the separate review database and sharing it between patman runs.
 
 The database allows patman to track a patch series across multiple
@@ -161,12 +161,18 @@ records the reply here (added v11), along with your response to it. The
 response can be suggested by the agent, edited and then turned into a Gmail
 draft which is threaded as a reply.
 
+A comment on patchwork which you respond to with ``patman review
+--respond-comment`` is recorded here too (added v15). It has no review_id or
+gmail_msg_id, but records the version and patch it is about, and its ID on
+patchwork.
+
 ================  ========  ==========================================
 Column            Type      Description
 ================  ========  ==========================================
 id                INTEGER   Primary key (auto-increment)
-review_id         INTEGER   FK -> review.id
-gmail_msg_id      TEXT      Gmail message ID of the reply (unique)
+review_id         INTEGER   FK -> review.id, or NULL for a comment
+gmail_msg_id      TEXT      Gmail message ID of the reply (unique), or
+                            NULL for a comment
 msgid             TEXT      Message-ID header, for threading a response
 refs              TEXT      References header
 sender            TEXT      From header
@@ -179,6 +185,11 @@ response          TEXT      Text of your response, if any
 status            TEXT      'new', 'suggested', 'skip', 'draft', 'sent'
 draft_id          TEXT      Gmail draft ID of the response
 timestamp         TEXT      When the reply was recorded
+svid              INTEGER   For a comment, FK -> ser_ver.id (added v15)
+seq               INTEGER   For a comment, the patch it is about, 0 for
+                            the cover letter (added v15)
+comment_id        INTEGER   For a comment, its ID on patchwork (added
+                            v15)
 ================  ========  ==========================================
 
 upstream
@@ -267,5 +278,5 @@ automatically.
 ==============  ========  ==========================================
 Column          Type      Description
 ==============  ========  ==========================================
-version         INTEGER   Current schema version (currently 14)
+version         INTEGER   Current schema version (currently 15)
 ==============  ========  ==========================================
