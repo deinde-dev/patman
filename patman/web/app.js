@@ -1044,6 +1044,15 @@ async function viewReview(id, wantVer) {
     const pat = r.seq ? (sv.patches || []).find((p) => p.seq === r.seq) : null;
     const itemId = r.seq ? pat && pat.patch_id : sv.cover_id;
     const label = r.seq ? `Patch ${r.seq}` : 'Cover letter';
+    // Whether the review approves the patch, and its status, which change
+    // when a job acts on it, so are drawn again each time the card is
+    const chips = h('span', { style: 'display: contents' });
+    const showChips = () => fill(chips,
+      h('span', { class: `chip ${r.approved ? 'st-accepted' : 'st-changes-requested'}` },
+        r.approved ? 'Reviewed-by' : 'comments'),
+      h('span', { class: `ver ${REVIEW_STATUS_CLASS[r.status] || ''}`,
+                  title: REVIEW_STATUS_TIP[r.status] },
+        REVIEW_STATUS[r.status] || r.status || ''));
     const [mailBtn, mailBox] = itemId
       ? mailToggle(r.seq ? 'patch' : 'cover', itemId, ser.upstream) : [null, null];
     const [commentsBtn, commentsBox] = itemId && sv.link
@@ -1055,11 +1064,7 @@ async function viewReview(id, wantVer) {
                    title: `Read the ${r.seq ? 'patch' : 'cover letter'} and its comments` },
             label, pat ? h('span', { class: 'desc' }, ` ${pat.subject}`) : null)
         : label),
-      h('span', { class: `chip ${r.approved ? 'st-accepted' : 'st-changes-requested'}` },
-        r.approved ? 'Reviewed-by' : 'comments'),
-      h('span', { class: `ver ${REVIEW_STATUS_CLASS[r.status] || ''}`,
-                  title: REVIEW_STATUS_TIP[r.status] },
-        REVIEW_STATUS[r.status] || r.status || ''));
+      chips);
     const header = h('div', {}, title, strip);
     const ask = (part) => fill(card, header, reviseForm(
       part, hasDraft(r), show,
@@ -1070,7 +1075,7 @@ async function viewReview(id, wantVer) {
                                     refresh));
     // A review can be changed if it has not been sent and no job is acting on it
     const free = () => unsent(r) && !(entries.get(r.id) || {}).busy;
-    const show = () => fill(card, header,
+    const drawCard = () => fill(card, header,
       renderMail(r.body, free() ? ask : null, free() ? editChunk : null),
       (mailBtn || free()) && h('div', { class: 'actions' },
         mailBtn, commentsBtn,
@@ -1096,6 +1101,11 @@ async function viewReview(id, wantVer) {
     entries.set(r.id, { r, strip, show, busy: false });
     show();
     return card;
+
+    function show() {
+      showChips();
+      drawCard();
+    }
   };
   const reviews = sv.reviews.map(reviewCard);
   const cover = sv.cover_id && !sv.reviews.some((r) => r.seq === 0) &&

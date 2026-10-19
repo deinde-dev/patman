@@ -87,6 +87,9 @@ Changed
 
 Fixed
 ~~~~~
+- On the ``patman serve`` page, the status of a review, and whether it
+  approves the patch, are updated when a job acting on it finishes, rather
+  than only when the page is shown again, so sent reviews show as sent.
 - The ``patman serve`` page no longer shows a stray 'false' below a
   response which has been sent, and the like elsewhere.
 - Times on the ``patman serve`` page, such as when a job started, are right
