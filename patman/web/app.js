@@ -1153,12 +1153,6 @@ function commentsToggle(ser, sv, seq, itemId) {
   const kind = seq ? 'patch' : 'cover';
   const box = h('div', {});
   const responded = new Set(commentResponses(sv, seq).map((c) => c.comment_id));
-  const respond = async (c, note, strip) => {
-    const job = await api(`reviews/${ser.id}/respond`,
-                          { json: { version: sv.version, seq, comment: c.id, note } });
-    const st = await followJob(job, strip, 'Suggesting a response');
-    if (st && jobStatus(st)[0] === 'ok') route();
-  };
   const item = (c) => {
     const slot = h('div', {});
     const strip = h('div', { class: 'jobstrip' });
@@ -1175,12 +1169,20 @@ function commentsToggle(ser, sv, seq, itemId) {
       const go = h('button', { class: 'btn small', onclick: async () => {
         go.disabled = true;
         msg.textContent = '';
+        let job;
         try {
-          await respond(c, note.value, strip);
+          job = await api(`reviews/${ser.id}/respond`, { json: {
+            version: sv.version, seq, comment: c.id, note: note.value } });
         } catch (err) {
           msg.textContent = err.message;
           go.disabled = false;
+          return;
         }
+        // The note is no longer needed once the job has started
+        slot.replaceChildren();
+        const st = await followJob(job, strip, 'Suggesting a response');
+        if (st && jobStatus(st)[0] === 'ok') route();
+        else if (st) reset();
       }, title: 'Have the agent suggest a response, as a job, which you can then change, ' +
                 'draft or send' }, 'Suggest a response');
       slot.replaceChildren(h('div', { class: 'form' }, note,
@@ -1221,19 +1223,21 @@ function unreviewedCover(ser, sv) {
   const [showBtn, mailBox] = mailToggle('cover', sv.cover_id, ser.upstream);
   const [commentsBtn, commentsBox] = commentsToggle(ser, sv, 0, sv.cover_id);
   const strip = h('div', { class: 'jobstrip' });
+  // Once the review has started, return so that its form closes, then follow it
   const review = async (context) => {
-    let job = await api('review', { json: { target: String(sv.link), ups: ser.upstream,
-                                            index: '0', drafts: true, context } });
-    job = await followJob(job, strip, 'Reviewing');
-    if (!job || jobStatus(job)[0] !== 'ok') return;
-    // Show the new review, if the agent wrote one
-    const again = await api(`reviews/${ser.id}`);
-    const ver = again.versions.find((v) => v.version === sv.version);
-    if (ver && ver.reviews.some((r) => r.seq === 0)) {
-      route();
-      return;
-    }
-    strip.firstChild.textContent = 'The agent has no comments on the cover letter';
+    const job = await api('review', { json: { target: String(sv.link), ups: ser.upstream,
+                                              index: '0', drafts: true, context } });
+    followJob(job, strip, 'Reviewing').then(async (st) => {
+      if (!st || jobStatus(st)[0] !== 'ok') return;
+      // Show the new review, if the agent wrote one
+      const again = await api(`reviews/${ser.id}`);
+      const ver = again.versions.find((v) => v.version === sv.version);
+      if (ver && ver.reviews.some((r) => r.seq === 0)) {
+        route();
+        return;
+      }
+      strip.firstChild.textContent = 'The agent has no comments on the cover letter';
+    });
   };
   const [reviewBtn, reviewBox] = sv.link ? reviewButton(
     'Review it', 'btn light small',
