@@ -54,6 +54,9 @@ Added
 
 Changed
 ~~~~~~~
+- 'Suggest a response', 'Create Gmail draft' and 'Send' on a reply, on the
+  ``patman serve`` page, leave the page where it is and show the job below the
+  reply, rather than going to the job's page.
 - On the ``patman serve`` page, the status of each review, and the counts in
   the list of reviews, are amber when the review is still to be sent and
   green once it has been sent, with a tooltip saying what the status means.
