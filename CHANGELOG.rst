@@ -20,6 +20,9 @@ Added
   ``HTTP_PROXY`` in the environment, apart from hosts in ``NO_PROXY``, so
   patchwork can be reached through another machine when it cannot be
   reached directly.
+- Each series on the ``patman serve`` page has a Sync button, which gathers
+  the patch states and comments for just that version from patchwork.
+  ``POST /api/series/<id>/sync`` does the same.
 
 Changed
 ~~~~~~~

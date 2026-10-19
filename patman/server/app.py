@@ -304,6 +304,20 @@ class Server(jobs.JobRunner):
         data['patchwork_url'] = self.get_pw_url(data['upstream'])
         return web.json_response(data)
 
+    async def _series_sync(self, request):
+        idnum = int(request.match_info['idnum'])
+        data = await self._read_json(request)
+        version = params.get_int(data, 'version')
+        name, version = info.get_series_link(self.cser, idnum, version)
+        cmd = self.get_patman_cmd('series', '-s', name, '-V', str(version),
+                                  'gather', '-G')
+        for job in self._jobs.values():
+            if job.active and job.cmds == [cmd]:
+                raise jobs.JobBusyError(
+                    f"'{name}' v{version} is already being synced")
+        job = self.add_job('gather', f"Sync '{name}' v{version}", [cmd])
+        return web.json_response(job.state, status=202)
+
     async def _review_list(self, _request):
         return web.json_response(info.get_review_list(self.rcser))
 
@@ -678,6 +692,8 @@ class Server(jobs.JobRunner):
             middlewares=[self._errors, self._auth, self._no_cache])
         app.router.add_get('/api/series', self._series_list)
         app.router.add_get(r'/api/series/{idnum:\d+}', self._series_detail)
+        app.router.add_post(r'/api/series/{idnum:\d+}/sync',
+                            self._series_sync)
         app.router.add_get('/api/reviews', self._review_list)
         app.router.add_get(r'/api/reviews/{idnum:\d+}', self._review_detail)
         app.router.add_get('/api/todo', self._todo_list)

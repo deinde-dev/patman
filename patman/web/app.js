@@ -425,11 +425,61 @@ async function viewSeries(id, wantVer) {
         ser.upstream && h('span', {}, ser.upstream),
         sv.link ? h('span', {}, `series ${sv.link}`) : h('span', {}, 'no link'),
         sv.archive_tag && h('span', {}, 'archived')),
-      h('div', { class: 'meta' }, stateChips(sv.states))),
+      h('div', { class: 'meta' }, stateChips(sv.states)),
+      sv.link && seriesSync(id, sv.version)),
     tabs,
     h('div', { class: 'section' },
       `${sv.patches.length} patch${sv.patches.length === 1 ? '' : 'es'}`),
     h('div', { class: 'list' }, cards));
+}
+
+// A button which syncs one version of a series from patchwork, showing the
+// series again once the sync is done
+function seriesSync(id, version) {
+  const hash = location.hash;
+  const msg = h('span', { class: 'meta' });
+  const btn = h('button', { class: 'btn light',
+                            title: 'Gather the patch states and review tags for this version ' +
+                                   'from patchwork' }, 'Sync');
+  const poll = async (jobId) => {
+    if (location.hash !== hash) return;
+    let st;
+    try {
+      st = await api(`jobs/${jobId}`);
+    } catch (err) {
+      msg.textContent = err.message;
+      return;
+    }
+    if (!st.finished) {
+      setTimeout(() => poll(jobId), 1500);
+      return;
+    }
+    refreshJobCount();
+    if (jobStatus(st)[0] === 'ok') {
+      route();
+      return;
+    }
+    btn.disabled = false;
+    btn.textContent = 'Sync';
+    msg.replaceChildren('Sync failed: ', h('a', { href: `#/jobs/${jobId}`,
+                                                  title: 'Show the job and its output' },
+                                          'see the output'));
+  };
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Syncing…';
+    msg.textContent = '';
+    try {
+      const job = await api(`series/${id}/sync`, { json: { version } });
+      refreshJobCount();
+      poll(job.id);
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Sync';
+      msg.textContent = err.message;
+    }
+  });
+  return h('div', { class: 'actions' }, btn, msg);
 }
 
 // --- Patches ---
