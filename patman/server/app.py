@@ -2,6 +2,7 @@
 #
 # Copyright 2026 Simon Glass <sjg@chromium.org>
 #
+# pylint: disable=C0302
 """The web server, which gives the page and its JSON API
 
 The API is described in doc/serve-protocol.rst
@@ -63,6 +64,20 @@ class Server(jobs.JobRunner):
     # pylint: disable=R0913,R0917
     def __init__(self, cser, pw_url=None, sync_interval=0, review_sync=False,
                  token=None, rcser=None, jobs_fname=None):
+        """Set up the server
+
+        Args:
+            cser (Cseries): Open cseries instance
+            pw_url (str or None): Patchwork URL to use when a series has no
+                upstream with its own URL
+            sync_interval (int): Minutes between syncs, 0 to disable
+            review_sync (bool): True to run 'review --sync' as part of a sync
+            token (str or None): Token which clients must provide, or None
+            rcser (Cseries or None): Open cseries instance holding the reviews,
+                or None if they are in the main database
+            jobs_fname (str or None): File which holds the jobs to run again if
+                the server restarts, or None to not keep them
+        """
         super().__init__(cser.topdir, jobs_fname)
         self.cser = cser
         self.rcser = rcser or cser
@@ -240,13 +255,21 @@ class Server(jobs.JobRunner):
             await self._sleep(self.sync_interval * 60)
 
     async def _start_background(self, _app):
-        """Resume any unfinished jobs, then start the periodic sync"""
+        """Resume any unfinished jobs, then start the periodic sync
+
+        Args:
+            _app (web.Application): Application which is starting (not used)
+        """
         self.resume_jobs()
         if self.sync_interval:
             self._sync_task = asyncio.create_task(self._sync_loop())
 
     async def _stop_background(self, _app):
-        """Stop the periodic sync, if running"""
+        """Stop the periodic sync, if running
+
+        Args:
+            _app (web.Application): Application which is stopping (not used)
+        """
         if self._sync_task:
             self._sync_task.cancel()
             try:
@@ -256,7 +279,20 @@ class Server(jobs.JobRunner):
 
     @web.middleware
     async def _auth(self, request, handler):
-        """Check that the client provided the token, if one is needed"""
+        """Check that the client provided the token, if one is needed
+
+        The token can be given in an 'Authorization: Bearer' header or in a
+        'token' query parameter. Only the API needs it, so that the page can
+        load and ask for it.
+
+        Args:
+            request (web.Request): Request to check
+            handler (callable): Next handler, to call if the request is allowed
+
+        Return:
+            web.Response: Response from the handler, or status 401 if the token
+                is missing or wrong
+        """
         if self.token and request.path.startswith('/api/'):
             given = request.headers.get('Authorization', '')
             if given.startswith('Bearer '):
@@ -274,6 +310,14 @@ class Server(jobs.JobRunner):
 
         The page is split into several files, so a browser which kept an old
         app.js after patman is updated would run it with the new page
+
+        Args:
+            request (web.Request): Request being handled
+            handler (callable): Next handler
+
+        Return:
+            web.Response: Response from the handler, with a Cache-Control
+                header for the page and its static files
         """
         resp = await handler(request)
         if request.path == '/' or request.path.startswith('/static/'):
@@ -282,7 +326,18 @@ class Server(jobs.JobRunner):
 
     @web.middleware
     async def _errors(self, request, handler):
-        """Turn errors into a JSON response"""
+        """Turn errors into a JSON response
+
+        Args:
+            request (web.Request): Request being handled
+            handler (callable): Next handler
+
+        Return:
+            web.Response: Response from the handler, or a JSON object with an
+                'error' message and a status of 409 if a job is busy, 400 for
+                a bad request, 404 if something does not exist, or 502 if
+                patchwork cannot be read
+        """
         try:
             return await handler(request)
         except jobs.JobBusyError as exc:
@@ -297,15 +352,53 @@ class Server(jobs.JobRunner):
                 status=502)
 
     async def _series_list(self, _request):
+        """Handle 'GET /api/series': list the series
+
+        Args:
+            _request (web.Request): Request (not used)
+
+        Return:
+            web.Response: List of series, with the status of each one's latest
+                version
+        """
         return web.json_response(info.get_series_list(self.cser))
 
     async def _series_detail(self, request):
+        """Handle 'GET /api/series/<id>': show a series
+
+        Args:
+            request (web.Request): Request, with the series ID as 'idnum'
+
+        Return:
+            web.Response: Series with all its versions and their patches, along
+                with the URL of its patchwork server
+
+        Raises:
+            ValueError: The series does not exist
+        """
         data = info.get_series_detail(self.cser,
                                       int(request.match_info['idnum']))
         data['patchwork_url'] = self.get_pw_url(data['upstream'])
         return web.json_response(data)
 
     async def _series_sync(self, request):
+        """Handle 'POST /api/series/<id>/sync': sync one version of a series
+
+        This runs 'patman series gather -G' for the version as a job. The body
+        may give a 'version', which defaults to the latest.
+
+        Args:
+            request (web.Request): Request, with the series ID as 'idnum'
+
+        Return:
+            web.Response: Job state, with status 202
+
+        Raises:
+            BadRequest: The version is invalid
+            ValueError: The series or version does not exist, or the version
+                has no patchwork link
+            JobBusyError: The version is already being synced
+        """
         idnum = int(request.match_info['idnum'])
         data = await self._read_json(request)
         version = params.get_int(data, 'version')
@@ -320,6 +413,14 @@ class Server(jobs.JobRunner):
         return web.json_response(job.state, status=202)
 
     async def _review_list(self, _request):
+        """Handle 'GET /api/reviews': list the reviewed series
+
+        Args:
+            _request (web.Request): Request (not used)
+
+        Return:
+            web.Response: List of reviewed series, most recent review first
+        """
         return web.json_response(info.get_review_list(self.rcser))
 
     async def _find_covers(self, data):
@@ -364,6 +465,21 @@ class Server(jobs.JobRunner):
         self.rcser.commit()
 
     async def _review_detail(self, request):
+        """Handle 'GET /api/reviews/<id>': show the reviews of a series
+
+        Each review is marked with the job acting on it, if any. Cover letters
+        which are not yet known are looked up on patchwork.
+
+        Args:
+            request (web.Request): Request, with the series ID as 'idnum'
+
+        Return:
+            web.Response: Reviewed series with its versions and their reviews,
+                along with its upstream, patchwork URL and project
+
+        Raises:
+            ValueError: The series does not exist
+        """
         idnum = int(request.match_info['idnum'])
         data = info.get_review_detail(self.rcser, idnum)
         # Mark the reviews which a job is acting on, so the page can wait
@@ -384,14 +500,48 @@ class Server(jobs.JobRunner):
         return web.json_response(data)
 
     async def _todo_list(self, _request):
+        """Handle 'GET /api/todo': list the todo items
+
+        Args:
+            _request (web.Request): Request (not used)
+
+        Return:
+            web.Response: List of todos, earliest first
+        """
         return web.json_response(info.get_todo_list(self.cser))
 
     async def _version(self, _request):
+        """Handle 'GET /api/version': give patman's version
+
+        The version is worked out on the first request and kept.
+
+        Args:
+            _request (web.Request): Request (not used)
+
+        Return:
+            web.Response: Object with the 'version', which is None if it is
+                not known
+        """
         if self._version_str is None:
             self._version_str = info.get_version() or ''
         return web.json_response({'version': self._version_str or None})
 
     async def _comments(self, request):
+        """Handle 'GET /api/comments/<kind>/<id>': read comments from patchwork
+
+        The 'ups' query parameter selects the upstream whose patchwork server
+        is used.
+
+        Args:
+            request (web.Request): Request, with 'kind' ('patch' or 'cover')
+                and the patchwork ID as 'item_id'
+
+        Return:
+            web.Response: List of comments on the patch or cover letter
+
+        Raises:
+            ValueError: No patchwork URL is known for the upstream
+        """
         kind = request.match_info['kind']
         item_id = int(request.match_info['item_id'])
         pwork = self.get_pwork(request.query.get('ups') or None)
@@ -404,6 +554,21 @@ class Server(jobs.JobRunner):
                                   for c in comments or []])
 
     async def _mail(self, request):
+        """Handle 'GET /api/patch/<id>' or 'GET /api/cover/<id>'
+
+        This reads a patch or cover letter from patchwork. The 'ups' query
+        parameter selects the upstream whose patchwork server is used.
+
+        Args:
+            request (web.Request): Request, with 'kind' ('patch' or 'cover')
+                and the patchwork ID as 'item_id'
+
+        Return:
+            web.Response: Information about the patch or cover letter
+
+        Raises:
+            ValueError: No patchwork URL is known for the upstream
+        """
         item_id = int(request.match_info['item_id'])
         pwork = self.get_pwork(request.query.get('ups') or None)
         async with aiohttp.ClientSession() as client:
@@ -414,14 +579,47 @@ class Server(jobs.JobRunner):
         return web.json_response(info.mail_info(data))
 
     async def _blob(self, request):
+        """Handle 'GET /api/blob': read a file from the git repo
+
+        Each 'hash' query parameter gives a blob to try, and the first which is
+        in the repo is used.
+
+        Args:
+            request (web.Request): Request
+
+        Return:
+            web.Response: Object with the 'hash' found and the 'text' of the
+                file
+
+        Raises:
+            ValueError: A hash is invalid, none of the blobs is in the repo or
+                the file is too large or not text
+        """
         oid, text = await info.read_blob(self.cser.topdir,
                                     request.query.getall('hash', []))
         return web.json_response({'hash': oid, 'text': text})
 
     async def _sync_get(self, _request):
+        """Handle 'GET /api/sync': give the state of the sync
+
+        Args:
+            _request (web.Request): Request (not used)
+
+        Return:
+            web.Response: Sync state, see sync_state
+        """
         return web.json_response(self.sync_state)
 
     async def _sync_post(self, _request):
+        """Handle 'POST /api/sync': start a sync of all series
+
+        Args:
+            _request (web.Request): Request (not used)
+
+        Return:
+            web.Response: Sync state, with status 202, or 409 if a sync is
+                already waiting or running
+        """
         job = self._start_sync()
         if not job:
             return web.json_response(self.sync_state, status=409)
@@ -432,11 +630,30 @@ class Server(jobs.JobRunner):
         return web.json_response(self.sync_state, status=202)
 
     async def _sync_cancel_post(self, _request):
+        """Handle 'POST /api/sync/cancel': stop the sync
+
+        Args:
+            _request (web.Request): Request (not used)
+
+        Return:
+            web.Response: Sync state, with status 202, or 409 if no sync is
+                waiting or running
+        """
         if not self.cancel_sync():
             return web.json_response(self.sync_state, status=409)
         return web.json_response(self.sync_state, status=202)
 
     async def _upstreams(self, _request):
+        """Handle 'GET /api/upstreams': list the upstreams with patchwork
+
+        Args:
+            _request (web.Request): Request (not used)
+
+        Return:
+            web.Response: List of upstreams which have a patchwork URL, each
+                with its 'name', whether it is the 'default' and its
+                'patchwork_url'
+        """
         out = []
         for name, (_, is_default, pw_url, *_) in \
                 self.cser.db.upstream_get_dict().items():
@@ -446,6 +663,22 @@ class Server(jobs.JobRunner):
         return web.json_response(out)
 
     async def _inbox(self, request):
+        """Handle 'GET /api/inbox': list recent series on patchwork
+
+        The 'ups' query parameter selects the upstream, defaulting to the
+        default one, and 'page' selects the page of results.
+
+        Args:
+            request (web.Request): Request
+
+        Return:
+            web.Response: Object with the upstream, page, page size and a list
+                of series
+
+        Raises:
+            BadRequest: The page is invalid
+            ValueError: The upstream has no patchwork project
+        """
         ups = request.query.get('ups') or self.cser.db.upstream_get_default()
         page = params.get_int(request.query, 'page') or 1
         proj = self.cser.project_get(ups)
@@ -460,13 +693,44 @@ class Server(jobs.JobRunner):
             'series': info.get_inbox(self.cser, self.rcser, series_list)})
 
     async def _job_list(self, _request):
+        """Handle 'GET /api/jobs': list the jobs
+
+        Args:
+            _request (web.Request): Request (not used)
+
+        Return:
+            web.Response: List of job states
+        """
         return web.json_response([job.state for job in self.get_jobs()])
 
     async def _job_detail(self, request):
+        """Handle 'GET /api/jobs/<id>': show a job
+
+        Args:
+            request (web.Request): Request, with the job number as 'idnum'
+
+        Return:
+            web.Response: Job state
+
+        Raises:
+            ValueError: The job does not exist
+        """
         job = self.get_job(int(request.match_info['idnum']))
         return web.json_response(job.state)
 
     async def _job_cancel(self, request):
+        """Handle 'POST /api/jobs/<id>/cancel': stop a job
+
+        Args:
+            request (web.Request): Request, with the job number as 'idnum'
+
+        Return:
+            web.Response: Job state, with status 202, or 409 if the job has
+                finished
+
+        Raises:
+            ValueError: The job does not exist
+        """
         job = self.get_job(int(request.match_info['idnum']))
         status = 202 if self.cancel_job(job) else 409
         return web.json_response(job.state, status=status)
@@ -474,11 +738,14 @@ class Server(jobs.JobRunner):
     async def _read_json(self, request):
         """Read the JSON body of a request, which may be empty
 
+        Args:
+            request (web.Request): Request to read
+
         Return:
             dict: Request data
 
         Raises:
-            ValueError: The body is not a JSON object
+            BadRequest: The body is not a JSON object
         """
         if not request.can_read_body:
             return {}
@@ -506,17 +773,59 @@ class Server(jobs.JobRunner):
         return web.json_response(job.state, status=202)
 
     async def _review_post(self, request):
+        """Handle 'POST /api/review': review a series
+
+        This runs 'patman review' as a job, with the options given in the body
+        (see params.parse_review_req()).
+
+        Args:
+            request (web.Request): Request
+
+        Return:
+            web.Response: Job state, with status 202
+
+        Raises:
+            BadRequest: The request is invalid
+        """
         data = await self._read_json(request)
         args, title = params.parse_review_req(
             data, list(self.cser.db.upstream_get_dict()))
         return self._review_job(title, *args)
 
     async def _review_scan(self, request):
+        """Handle 'POST /api/review/scan': look for new versions to review
+
+        This runs 'patman review --scan' as a job. If the body gives 'drafts',
+        Gmail drafts are created for the new reviews.
+
+        Args:
+            request (web.Request): Request
+
+        Return:
+            web.Response: Job state, with status 202
+        """
         data = await self._read_json(request)
         args = ['--scan'] + (['-d'] if data.get('drafts') else [])
         return self._review_job('Scan for new versions', *args)
 
     async def _redraft(self, request):
+        """Handle 'POST /api/reviews/<id>/redraft': recreate review drafts
+
+        The body may give a 'version', which defaults to the latest, and
+        'seqs', the patches to redraft (0 for the cover letter), which default
+        to all of them.
+
+        Args:
+            request (web.Request): Request, with the series ID as 'idnum'
+
+        Return:
+            web.Response: Job state, with status 202
+
+        Raises:
+            BadRequest: The version or seqs are invalid
+            ValueError: The series or version does not exist, or has no link
+            JobBusyError: A job is already acting on one of the reviews
+        """
         idnum = int(request.match_info['idnum'])
         data = await self._read_json(request)
         return self._redraft_job(idnum, params.get_int(data, 'version'),
@@ -590,6 +899,23 @@ class Server(jobs.JobRunner):
         return self._review_job(f'Redraft {what}', *args, target=target)
 
     async def _send(self, request):
+        """Handle 'POST /api/reviews/<id>/send': send review drafts
+
+        The body may give a 'version', which defaults to the latest, and
+        'seqs', the patches whose reviews to send (0 for the cover letter),
+        which default to all of them.
+
+        Args:
+            request (web.Request): Request, with the series ID as 'idnum'
+
+        Return:
+            web.Response: Job state, with status 202
+
+        Raises:
+            BadRequest: The version or seqs are invalid
+            ValueError: The series or version does not exist, or has no link
+            JobBusyError: A job is already acting on one of the reviews
+        """
         idnum = int(request.match_info['idnum'])
         data = await self._read_json(request)
         seqs = data.get('seqs') or []
@@ -599,6 +925,24 @@ class Server(jobs.JobRunner):
                                 *args, target=target)
 
     async def _revise(self, request):
+        """Handle 'POST /api/reviews/<id>/revise': revise reviews
+
+        This has the agent revise the reviews, as a job. The body gives a
+        'note' saying what to change, and may give the 'part' of the review
+        which it is about, a 'version' (default the latest), 'seqs' as for
+        _send() and 'drafts' to update the Gmail drafts too.
+
+        Args:
+            request (web.Request): Request, with the series ID as 'idnum'
+
+        Return:
+            web.Response: Job state, with status 202
+
+        Raises:
+            BadRequest: The note, part, version or seqs are invalid
+            ValueError: The series or version does not exist, or has no link
+            JobBusyError: A job is already acting on one of the reviews
+        """
         idnum = int(request.match_info['idnum'])
         data = await self._read_json(request)
         note = data.get('note')
@@ -620,6 +964,24 @@ class Server(jobs.JobRunner):
                                 *args, target=target)
 
     async def _review_item(self, request):
+        """Handle 'POST /api/review-items/<id>': edit a review
+
+        The body may give a new 'body' and whether the review is 'approved',
+        which otherwise depends on whether the body gives a Reviewed-by tag. If
+        it gives 'redraft', the Gmail draft is recreated afterwards.
+
+        Args:
+            request (web.Request): Request, with the review ID as 'idnum'
+
+        Return:
+            web.Response: Updated review, or the state of the redraft job with
+                status 202, or status 409 if the review has been sent
+
+        Raises:
+            BadRequest: The body is empty or invalid
+            ValueError: The review does not exist
+            JobBusyError: A job is acting on the review
+        """
         db = self.rcser.db
         rev = db.review_get(int(request.match_info['idnum']))
         data = await self._read_json(request)
@@ -642,6 +1004,22 @@ class Server(jobs.JobRunner):
         return web.json_response(info.review_info(db.review_get(rev.idnum)))
 
     async def _reply(self, request):
+        """Handle 'POST /api/replies/<id>': update the response to a reply
+
+        The body may give the 'response', 'skip' to skip the reply, and 'draft'
+        to create a Gmail draft of the response afterwards.
+
+        Args:
+            request (web.Request): Request, with the reply ID as 'idnum'
+
+        Return:
+            web.Response: Updated reply, or the state of the draft job with
+                status 202, or status 409 if the response has been sent
+
+        Raises:
+            BadRequest: The response is invalid
+            ValueError: The reply does not exist
+        """
         db = self.rcser.db
         reply = db.reply_get(int(request.match_info['idnum']))
         data = await self._read_json(request)
@@ -666,11 +1044,37 @@ class Server(jobs.JobRunner):
         return web.json_response(info.reply_info(db.reply_get(reply.idnum)))
 
     async def _reply_suggest(self, request):
+        """Handle 'POST /api/replies/<id>/suggest': suggest a response
+
+        This has the agent suggest a response to a reply, as a job.
+
+        Args:
+            request (web.Request): Request, with the reply ID as 'idnum'
+
+        Return:
+            web.Response: Job state, with status 202
+
+        Raises:
+            ValueError: The reply does not exist
+        """
         reply = self.rcser.db.reply_get(int(request.match_info['idnum']))
         return self._review_job(f'Suggest a response to reply {reply.idnum}',
                                 '--suggest-reply', str(reply.idnum))
 
     async def _reply_send(self, request):
+        """Handle 'POST /api/replies/<id>/send': send the response to a reply
+
+        Args:
+            request (web.Request): Request, with the reply ID as 'idnum'
+
+        Return:
+            web.Response: Job state, with status 202, or status 409 if the
+                response has been sent
+
+        Raises:
+            BadRequest: There is no response to send
+            ValueError: The reply does not exist
+        """
         reply = self.rcser.db.reply_get(int(request.match_info['idnum']))
         if reply.status == database.REPLY_SENT:
             return web.json_response(
@@ -681,6 +1085,14 @@ class Server(jobs.JobRunner):
                                 '--send-reply', str(reply.idnum))
 
     async def _index(self, _request):
+        """Handle 'GET /': send the page
+
+        Args:
+            _request (web.Request): Request (not used)
+
+        Return:
+            web.FileResponse: The page's HTML
+        """
         return web.FileResponse(os.path.join(WEB_DIR, 'index.html'))
 
     def make_app(self):
