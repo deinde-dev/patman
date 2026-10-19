@@ -1480,6 +1480,54 @@ class TestWebServer(unittest.TestCase, TestCommon):
             f'Series 400 is already being reviewed, by job {reviewing.idnum}',
             data['error'])
 
+    def test_inbox_keep(self):
+        """The inbox is kept for a while, rather than read each time"""
+        db = self.cser.db
+        db.upstream_add('us', 'https://us', 'https://pw.us')
+        db.upstream_set_default('us')
+        db.patchwork_update('U-Boot', 6, 'uboot', 'us')
+        db.commit()
+
+        reads = []
+        def read(subpath):
+            reads.append(subpath)
+            return [{'id': len(reads), 'name': 'video: Add a driver',
+                     'version': 1, 'patches': []}]
+
+        srv = self.make_server()
+        srv.pwork_for_testing.fake_request = read
+        now = [1000.0]
+        srv._clock = lambda: now[0]
+        query = 'series/?project=uboot&order=-date&page={}&per_page=50'
+
+        def inbox(args=''):
+            status, data = self.call(srv, 'GET', f'/api/inbox{args}')
+            self.assertEqual(200, status)
+            return data['series'][0]['id'], data['fetched']
+
+        with mock.patch.object(server.app.times, 'now_str',
+                               return_value='2026-10-19 11:00:00'):
+            self.assertEqual((1, '2026-10-19 11:00:00'), inbox())
+
+        # Showing it again, or its next page twice, reads only that page
+        now[0] += server.app.INBOX_KEEP
+        self.assertEqual((1, '2026-10-19 11:00:00'), inbox())
+        self.assertEqual(2, inbox('?page=2')[0])
+        self.assertEqual(2, inbox('?page=2')[0])
+        self.assertEqual([query.format(1), query.format(2)], reads)
+
+        # Once it is too old, it is read again, along with the next page
+        now[0] += 1
+        with mock.patch.object(server.app.times, 'now_str',
+                               return_value='2026-10-19 11:10:01'):
+            self.assertEqual((3, '2026-10-19 11:10:01'), inbox())
+        self.assertEqual(4, inbox('?page=2')[0])
+
+        # A refresh reads it at once
+        self.assertEqual(5, inbox('?refresh=1')[0])
+        self.assertEqual(5, inbox()[0])
+        self.assertEqual(5, len(reads))
+
     def test_patchwork_retry(self):
         """Patchwork requests are retried when the server is slow or busy"""
         calls = []

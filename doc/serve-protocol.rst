@@ -283,8 +283,16 @@ The upstreams which have a patchwork server, each an object with ``name``,
 The most recent series on the patchwork server of an upstream, for choosing
 what to review. The ``ups`` query parameter gives the upstream, defaulting to
 the default upstream, which must have a patchwork project. The ``page`` query
-parameter gives the page, starting at 1, with 50 series on each. The response
-has ``ups``, ``page``, ``per_page`` and ``series``, a list of objects with:
+parameter gives the page, starting at 1, with 50 series on each.
+
+The server keeps each page it reads from patchwork for ten minutes, timed
+from when it read the first page, and reading the first page again drops
+the others. With ``refresh=1``, it reads the page from patchwork whatever it
+has kept.
+
+The response has ``ups``, ``page``, ``per_page``, ``fetched`` (when the
+server read the first page from patchwork, as a local time like
+``2026-10-19 11:00:00``) and ``series``, a list of objects with:
 
 - ``id`` (int): patchwork series ID
 - ``name`` (str): name of the series
