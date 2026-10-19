@@ -34,7 +34,8 @@ MAX_JOBS = 20
 # causing the server to stop
 MAX_RESUMES = 3
 
-# Maximum number of parallel jobs, i.e. reviews of series, to run at once
+# Maximum number of parallel jobs, i.e. reviews of series, to run at once, by
+# default
 MAX_PARALLEL = 5
 
 
@@ -69,7 +70,7 @@ class Job:
                 review series ID ('series'), its version ('version') and the
                 patches ('seqs', empty for all unsent reviews), or None
             parallel (bool): True if the job can run alongside others, up to
-                MAX_PARALLEL of them, rather than waiting its turn
+                a limit (see JobRunner), rather than waiting its turn
         """
         self.idnum = idnum
         self.kind = kind
@@ -123,14 +124,23 @@ class JobRunner:
         jobs_fname (str or None): File holding the jobs which have not
             finished, or None to not keep them
     """
-    def __init__(self, topdir, jobs_fname=None):
+    def __init__(self, topdir, jobs_fname=None, max_parallel=None):
+        """Set up the job runner
+
+        Args:
+            topdir (str): Top directory of the git tree, where commands run
+            jobs_fname (str or None): File to hold the jobs which have not
+                finished, or None to not keep them
+            max_parallel (int or None): Maximum number of parallel jobs to
+                run at once, or None for MAX_PARALLEL
+        """
         self.topdir = topdir
         self.jobs_fname = jobs_fname
 
         # Jobs run one at a time, in the order they are added, since they
         # may all write to the database. Parallel jobs are limited separately
         self._job_lock = asyncio.Lock()
-        self._parallel = asyncio.Semaphore(MAX_PARALLEL)
+        self._parallel = asyncio.Semaphore(max_parallel or MAX_PARALLEL)
         self._jobs = OrderedDict()
         self._last_job = 0
 
@@ -247,7 +257,8 @@ class JobRunner:
         """Run a job's commands one after the other, once it is its turn
 
         A job waits for the jobs before it to finish, unless it is a parallel
-        one, which waits only while MAX_PARALLEL others are running.
+        one, which waits only while the most which may run at once are
+        running.
 
         Output from each command is recorded in the job's state as it
         arrives. If the job is cancelled, the command which is running is

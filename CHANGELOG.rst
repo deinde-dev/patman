@@ -10,6 +10,8 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman serve --max-reviews N``, or the ``max_reviews`` setting, sets how
+  many reviews run at once (default 5).
 - Starting a review on the ``patman serve`` page, from the inbox, the
   cover-letter card, 'Review again' or 'Review a series', asks for context to
   give the agent, as ``patman review -c`` does. ``POST /api/review`` takes

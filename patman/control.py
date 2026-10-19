@@ -710,7 +710,8 @@ def do_serve(args, test_db=None):
             rcser = cseries.Cseries(cser.topdir, db_dir=args.review_db_dir)
             rcser.open_database()
         server.serve(cser, args.host, args.port, args.patchwork_url,
-                     args.sync_interval, args.review_sync, args.token, rcser)
+                     args.sync_interval, args.review_sync, args.token, rcser,
+                     args.max_reviews)
     finally:
         if rcser:
             rcser.close_database()

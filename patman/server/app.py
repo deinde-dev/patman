@@ -68,7 +68,7 @@ class Server(jobs.JobRunner):
     """
     # pylint: disable=R0913,R0917
     def __init__(self, cser, pw_url=None, sync_interval=0, review_sync=False,
-                 token=None, rcser=None, jobs_fname=None):
+                 token=None, rcser=None, jobs_fname=None, max_parallel=None):
         """Set up the server
 
         Args:
@@ -82,8 +82,10 @@ class Server(jobs.JobRunner):
                 or None if they are in the main database
             jobs_fname (str or None): File which holds the jobs to run again if
                 the server restarts, or None to not keep them
+            max_parallel (int or None): Maximum number of reviews to run at
+                once, or None for the default
         """
-        super().__init__(cser.topdir, jobs_fname)
+        super().__init__(cser.topdir, jobs_fname, max_parallel)
         self.cser = cser
         self.rcser = rcser or cser
         self.pw_url = pw_url
@@ -1338,7 +1340,7 @@ def is_loopback(host):
 
 # pylint: disable=R0913,R0917
 def serve(cser, host, port, pw_url, sync_interval, review_sync, token,
-          rcser=None):
+          rcser=None, max_reviews=None):
     """Run the web server until interrupted
 
     Args:
@@ -1351,13 +1353,20 @@ def serve(cser, host, port, pw_url, sync_interval, review_sync, token,
         token (str or None): Token which clients must provide, or None
         rcser (Cseries or None): Open cseries instance holding the reviews,
             or None if they are in the main database
+        max_reviews (int or None): Maximum number of reviews to run at
+            once, or None for the default
+
+    Raises:
+        ValueError: max_reviews is less than 1
     """
+    if max_reviews is not None and max_reviews < 1:
+        raise ValueError('--max-reviews must be at least 1')
     if not token and not is_loopback(host):
         tout.warning(f'Listening on {host} with no --token: anyone who can '
                      'reach this port can read your series and reviews')
     jobs_fname = os.path.join(os.path.dirname(cser.db.db_path), JOBS_FNAME)
     server = Server(cser, pw_url, sync_interval, review_sync, token, rcser,
-                    jobs_fname)
+                    jobs_fname, max_reviews)
     query = f'?token={token}' if token else ''
     tout.notice(f'Serving on http://{host}:{port}/{query}')
     if sync_interval:
