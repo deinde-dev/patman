@@ -74,6 +74,8 @@ Changed
 
 Fixed
 ~~~~~
+- The ``patman serve`` page no longer shows a stray 'false' below a
+  response which has been sent, and the like elsewhere.
 - Times on the ``patman serve`` page, such as when a job started, are right
   when the browser is in a different time zone from the server. Before, they
   were out by the difference.
