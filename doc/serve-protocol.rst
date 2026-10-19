@@ -29,8 +29,11 @@ the review database. ``/api/review-items/<id>`` takes the ID of a review, and
 ``/api/replies/<id>`` the ID of a reply, as given in the reviews. IDs from
 patchwork, such as a patch or cover-letter ID, are named as such.
 
-Times are local, in the form ``YYYY-MM-DD HH:MM:SS``, except where they come
-from patchwork or email, which give their own form.
+Times are local to the server, in the form ``YYYY-MM-DD HH:MM:SS``, except
+where they come from patchwork (UTC) or email, which give their own form. Since
+the client may be in a different time zone, each response under ``/api/`` has
+an ``X-Patman-UTC-Offset`` header giving the server's offset from UTC in
+minutes, e.g. ``-360`` for UTC-6.
 
 Access
 ------

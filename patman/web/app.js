@@ -29,6 +29,8 @@ async function api(path, opts = {}) {
     delete opts.json;
   }
   const resp = await fetch('api/' + path, { ...opts, headers });
+  const offset = resp.headers.get('X-Patman-UTC-Offset');
+  if (offset !== null && offset !== '') serverOffset = Number(offset);
   if (resp.status === 401) throw new AuthError('Token needed');
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok && resp.status !== 409) {
@@ -53,12 +55,23 @@ function h(tag, attrs, ...kids) {
   return el;
 }
 
-// Parse a database time (local, 'YYYY-MM-DD HH:MM:SS') or a patchwork
-// time (UTC, 'YYYY-MM-DDTHH:MM:SS')
+// Minutes which the server's time zone is ahead of UTC, from the last API
+// response, or null if not known
+let serverOffset = null;
+
+// Parse a database time (local to the server, 'YYYY-MM-DD HH:MM:SS') or a
+// patchwork time (UTC, 'YYYY-MM-DDTHH:MM:SS'). The browser may be in a
+// different time zone from the server, so the server's offset is used
 function parseTime(str, utc) {
   if (!str) return null;
   const iso = str.replace(' ', 'T');
-  return new Date(utc && !/[zZ+]/.test(iso.slice(10)) ? iso + 'Z' : iso);
+  if (/([zZ]|[+-]\d\d:?\d\d)$/.test(iso)) return new Date(iso);
+  if (utc) return new Date(`${iso}Z`);
+  if (serverOffset === null) return new Date(iso);
+  const mins = Math.abs(serverOffset);
+  const pad = (n) => String(n).padStart(2, '0');
+  return new Date(`${iso}${serverOffset < 0 ? '-' : '+'}${pad(Math.floor(mins / 60))}:` +
+                  pad(mins % 60));
 }
 
 function ago(date) {

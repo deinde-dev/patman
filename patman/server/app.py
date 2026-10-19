@@ -22,6 +22,7 @@ from aiohttp import web
 from u_boot_pylib import tout
 
 from patman import database
+from patman import times
 from patman import traffic
 from patman.patchwork import Patchwork
 from patman.server import info
@@ -310,6 +311,29 @@ class Server(jobs.JobRunner):
                 return web.json_response({'error': 'Unauthorised'},
                                          status=401)
         return await handler(request)
+
+    @web.middleware
+    async def _utc_offset(self, request, handler):
+        """Say how far the server's time zone is from UTC
+
+        Times from the database are local to the server and do not give a
+        time zone, but the browser may be in a different one. Each API
+        response says the server's offset, so that the page can work out
+        when they were.
+
+        Args:
+            request (web.Request): Request being handled
+            handler (callable): Next handler
+
+        Return:
+            web.Response: Response from the handler, with an
+                'X-Patman-UTC-Offset' header giving the offset in minutes,
+                e.g. -360 for UTC-6
+        """
+        resp = await handler(request)
+        if request.path.startswith('/api/'):
+            resp.headers['X-Patman-UTC-Offset'] = str(times.utc_offset())
+        return resp
 
     @web.middleware
     async def _save_traffic(self, request, handler):
@@ -1274,7 +1298,7 @@ class Server(jobs.JobRunner):
         """
         app = web.Application(
             middlewares=[self._errors, self._auth, self._no_cache,
-                         self._save_traffic])
+                         self._utc_offset, self._save_traffic])
         app.router.add_get('/api/series', self._series_list)
         app.router.add_get(r'/api/series/{idnum:\d+}', self._series_detail)
         app.router.add_post(r'/api/series/{idnum:\d+}/sync',

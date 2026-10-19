@@ -72,6 +72,9 @@ Changed
 
 Fixed
 ~~~~~
+- Times on the ``patman serve`` page, such as when a job started, are right
+  when the browser is in a different time zone from the server. Before, they
+  were out by the difference.
 - The inbox of the ``patman serve`` page shows when a series is being
   reviewed, rather than offering 'Review' again, even after the page is
   reloaded or when the review was started elsewhere. The server refuses to
