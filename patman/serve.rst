@@ -166,7 +166,9 @@ review of the series, e.g. 'drop the comments about style'. These run ``patman
 review --revise``, updating the Gmail drafts if selected.
 
 'Send' under a review sends its Gmail draft, and 'Send N drafts' at the top
-sends them all; each needs a second tap to confirm.
+sends them all; each needs a second tap to confirm. 'Delete' under a review
+which has not been sent deletes it, with its Gmail draft (``patman review
+--delete``), also after a second tap.
 
 These run as jobs (see `Jobs`_), but the page stays where it is, so you can
 carry on reading the series. Each review a job acts on shows how the job is

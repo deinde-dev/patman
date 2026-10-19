@@ -10,6 +10,9 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman review --delete -i SEQ`` deletes the stored reviews of some
+  patches, or the cover letter, with their Gmail drafts, if they have not
+  been sent. On the ``patman serve`` page, each unsent review has 'Delete'.
 - ``patman serve --max-reviews N``, or the ``max_reviews`` setting, sets how
   many reviews run at once (default 5).
 - Starting a review on the ``patman serve`` page, from the inbox, the

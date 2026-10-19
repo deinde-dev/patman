@@ -43,7 +43,8 @@ INBOX_PAGE = 50
 
 # Arguments of 'patman review' which act on stored reviews rather than review
 # a series
-REVIEW_ACTIONS = {'--redraft', '--send', '--revise', '--respond-comment'}
+REVIEW_ACTIONS = {'--redraft', '--send', '--revise', '--respond-comment',
+                  '--delete'}
 
 # Tag given in a review which approves the patch
 RE_REVIEWED_BY = re.compile(r'^Reviewed-by:', re.MULTILINE)
@@ -1116,6 +1117,36 @@ class Server(jobs.JobRunner):
         return self._review_job(f'Send {params.parts_text(seqs)} of {what}',
                                 *args, target=target)
 
+    async def _delete(self, request):
+        """Handle 'POST /api/reviews/<id>/delete': delete reviews
+
+        This deletes the reviews of some patches, which must not have been
+        sent, along with their Gmail drafts, as a job. The body gives 'seqs',
+        the patches (0 for the cover letter), and may give a 'version',
+        which defaults to the latest.
+
+        Args:
+            request (web.Request): Request, with the series ID as 'idnum'
+
+        Return:
+            web.Response: Job state, with status 202
+
+        Raises:
+            BadRequest: The version or seqs are invalid, or no seqs are given
+            ValueError: The series or version does not exist, or has no link
+            JobBusyError: A job is already acting on one of the reviews
+        """
+        idnum = int(request.match_info['idnum'])
+        data = await self._read_json(request)
+        seqs = data.get('seqs') or []
+        if not seqs:
+            raise params.BadRequest('Please say which reviews to delete')
+        args, what, target = self._series_review_args(
+            idnum, params.get_int(data, 'version'), seqs, '--delete')
+        return self._review_job(
+            f'Delete {params.parts_text(seqs)} of {what}', *args,
+            target=target)
+
     async def _revise(self, request):
         """Handle 'POST /api/reviews/<id>/revise': revise reviews
 
@@ -1329,6 +1360,8 @@ class Server(jobs.JobRunner):
         app.router.add_post(r'/api/reviews/{idnum:\d+}/revise',
                             self._revise)
         app.router.add_post(r'/api/reviews/{idnum:\d+}/send', self._send)
+        app.router.add_post(r'/api/reviews/{idnum:\d+}/delete',
+                            self._delete)
         app.router.add_post(r'/api/reviews/{idnum:\d+}/respond',
                             self._respond)
         app.router.add_post(r'/api/review-items/{idnum:\d+}',

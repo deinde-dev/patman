@@ -977,6 +977,27 @@ async function viewReview(id, wantVer) {
   const revise = (seqs, part, note, drafts, msg) => runHere(`reviews/${id}/revise`,
     { part, note, drafts }, seqs, 'Revise', unsent, msg);
   const send = (seqs) => runHere(`reviews/${id}/send`, {}, seqs, 'Send', hasDraft);
+  // Delete a review, then show the series again without it
+  const remove = async (r) => {
+    let job;
+    try {
+      job = await api(`reviews/${id}/delete`, { json: { version: sv.version,
+                                                        seqs: [r.seq] } });
+    } catch (err) {
+      alert(err.message);
+      return;
+    }
+    const entry = entries.get(r.id);
+    entry.busy = true;
+    entry.show();
+    const st = await followJob(job, entry.strip, 'Deleting');
+    if (st && jobStatus(st)[0] === 'ok') {
+      route();
+    } else if (st) {
+      entry.busy = false;
+      entry.show();
+    }
+  };
   const reviewCard = (r) => {
     const card = h('div', { class: 'card review' });
     const strip = h('div', { class: 'jobstrip' });
@@ -1020,6 +1041,9 @@ async function viewReview(id, wantVer) {
                         title: 'Ask the agent to change the review' }, 'Revise'),
           confirmButton('Redraft', 'btn light small', () => redraft([r.seq]),
                         'Create the Gmail draft of this review again'),
+          confirmButton('Delete', 'btn light small', () => remove(r),
+                        'Delete this review, and its Gmail draft; it cannot be brought ' +
+                        'back'),
           hasDraft(r) && confirmButton('Send', 'btn small', () => send([r.seq]),
             r.status === 'edited'
               ? 'Create the Gmail draft of this review again, since it has changed, ' +

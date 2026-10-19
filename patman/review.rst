@@ -354,6 +354,19 @@ patchwork for this, so ``--send`` stops and asks for ``--redraft`` first::
     patman review -s 497923 -U us --send -n
     patman review -s 497923 -U us --send -i 0,2
 
+Deleting reviews
+~~~~~~~~~~~~~~~~
+
+To drop the review of a patch, or of the cover letter, before it is sent, e.g.
+because the agent's comments are not worth sending, delete it with
+``--delete``, giving the patches with ``-i`` (0 for the cover letter)::
+
+    patman review -s 497923 -U us --delete -i 0,3
+
+Its Gmail draft is deleted too. A review which has been sent cannot be deleted,
+since it is part of the discussion on the mailing list. To review a patch
+again, delete its review and review just that patch with ``-i``.
+
 Syncing drafts
 ~~~~~~~~~~~~~~
 

@@ -927,7 +927,8 @@ def do_review(args, pwork, cser):
     if getattr(args, 'respond_comment', None):
         return replies.respond_to_comment(args, pwork, cser, link)
 
-    if getattr(args, 'send', False) or getattr(args, 'revise', None):
+    if (getattr(args, 'send', False) or getattr(args, 'revise', None) or
+            getattr(args, 'delete', False)):
         return stored.do_stored(args, pwork, cser, link)
 
     # A redraft needs nothing from patchwork if the reviews' headers are

@@ -32,7 +32,7 @@ from patman.review import prompts
 
 
 def do_stored(args, pwork, cser, link):
-    """Handle --send and --revise, which act on stored reviews
+    """Handle --send, --revise and --delete, which act on stored reviews
 
     Args:
         args (Namespace): Command-line arguments
@@ -45,7 +45,65 @@ def do_stored(args, pwork, cser, link):
     """
     if args.send:
         return _do_send(args, cser, link)
+    if getattr(args, 'delete', False):
+        return _do_delete(args, cser, link)
     return _do_revise(args, pwork, cser, link)
+
+
+def _do_delete(args, cser, link):
+    """Delete some stored reviews of a series, with their Gmail drafts
+
+    Only reviews which have not been sent can be deleted, since a sent
+    review is part of the discussion on the mailing list. The patches must
+    be chosen with -i, so that all the reviews are not deleted by mistake.
+
+    Args:
+        args (Namespace): Command-line arguments
+        cser (Cseries): Open cseries instance
+        link (str): Patchwork series link/ID
+
+    Returns:
+        int: 0 on success, 1 if the Gmail drafts cannot be deleted
+
+    Raises:
+        ValueError: The series has not been reviewed, the patches are not
+            given or have no review, or a review has been sent
+    """
+    existing = cser.db.series_find_by_link(link)
+    if not existing:
+        raise ValueError(f'Series {link} has not been reviewed')
+    _, name, version, svid = existing
+    sel = common.parse_patch_selection(args.patches)
+    if not sel:
+        raise ValueError('Use -i to say which reviews to delete, with 0 for '
+                         'the cover letter')
+    reviews = sorted((rev for rev in cser.db.review_get_for_version(svid)
+                      if rev.seq in sel), key=lambda rev: rev.seq)
+    missing = sel - {rev.seq for rev in reviews}
+    if missing:
+        labels = ', '.join(_review_label(seq) for seq in sorted(missing))
+        raise ValueError(f"There is no review of {labels} in '{name}' "
+                         f'v{version}')
+    sent = [rev for rev in reviews
+            if rev.status in (database.REVIEW_SENT, database.REVIEW_REPLIED)]
+    if sent:
+        labels = ', '.join(_review_label(rev.seq) for rev in sent)
+        raise ValueError(f'The review of {labels} has been sent, so is not '
+                         'deleted')
+    if args.dry_run:
+        for rev in reviews:
+            tout.notice(f'Dry run: would delete the review of '
+                        f'{_review_label(rev.seq)}')
+        return 0
+    if any(rev.draft_id for rev in reviews):
+        if not gmail.check_available():
+            return 1
+        drafts.delete_gmail_drafts(args, reviews)
+    for rev in reviews:
+        cser.db.review_delete(rev.idnum)
+        tout.notice(f'Deleted the review of {_review_label(rev.seq)}')
+    cser.commit()
+    return 0
 
 
 def _do_send(args, cser, link):
