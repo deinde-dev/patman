@@ -19,6 +19,7 @@ The series and people are made up, as are the reviews.
 
 import argparse
 from datetime import datetime, timedelta, timezone
+import email.utils
 import os
 import shutil
 import subprocess
@@ -105,7 +106,7 @@ Signed-off-by: Alex Ample <alex@example.com>
 new file mode 100644
 --- /dev/null
 +++ b/drivers/video/ample-ab1234.c
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,32 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/*
 + * Driver for the Ample AB1234 LCD panel
@@ -211,6 +212,71 @@ Regards,
 Simon''',
 }
 
+# How the fake 'Revise' job changes the review of patch 1: (text to replace,
+# new text)
+REVISION = ('''Where does the 120ms come from? Please add a comment pointing to the
+datasheet, since it is a long delay.''',
+            '''Where does the 120ms come from? Please add a comment pointing to the
+datasheet. If the panel is ready sooner than that, a shorter delay would
+speed up booting.''')
+
+# Comments on patchwork, by (kind, ID)
+COMMENTS = {
+    ('patches', 9102): [{
+        'id': 7001, 'hours': 1,
+        'submitter': {'name': 'Tom Tester', 'email': 'tom@example.com'},
+        'subject': 'Re: [PATCH v2 2/3] sandbox: Enable the Ample panel',
+        'msgid': '<demo-7001@example.com>',
+        'web_url': f'{PW_URL}/comment/7001/',
+        'content': '''On Mon, Alex Ample wrote:
+> Enable the panel on sandbox, so that the driver is built and tested.
+
+Does this also need CONFIG_PANEL? The driver depends on it, so I don't
+think it is built otherwise.
+
+Tom
+'''}],
+}
+
+# The response which the fake 'Respond' job suggests, by comment ID
+COMMENT_RESPONSES = {
+    7001: '''Hi Tom,
+
+On {date}, Tom Tester <tom@example.com> wrote:
+> Does this also need CONFIG_PANEL? The driver depends on it, so I don't
+> think it is built otherwise.
+
+Good catch, it does. Alex, please add CONFIG_PANEL=y here too.
+
+Regards,
+Simon''',
+}
+
+# A reply to the earlier review of the Ethernet driver, and the response
+# which the fake 'Suggest a response' job writes
+REPLY = '''Hi Simon,
+
+On Tue, Simon Glass <sjg@chromium.org> wrote:
+> Please split this up.
+
+Would it be OK to split out the PHY reset and the tests, and keep the rest
+together? The driver does not build without its register definitions.
+
+Thanks,
+Jo
+'''
+
+REPLY_RESPONSE = '''Hi Jo,
+
+On {date}, Jo Placeholder <jo@example.com> wrote:
+> Would it be OK to split out the PHY reset and the tests, and keep the rest
+> together? The driver does not build without its register definitions.
+
+Yes, that is fine. Please also put the board change in its own patch.
+
+Regards,
+Simon'''
+
 
 # The stand-in for 'python -m patman' in jobs, which runs run_job() with the
 # real patman, rather than itself
@@ -248,10 +314,10 @@ def _fake_patchwork(subpath):
                  'patches': patches}
                 for sid, name, ver, hours, who, cover, patches in SERIES
                 if page]
-    if subpath.startswith('patches/') and subpath.endswith('/comments/'):
-        return []
-    if subpath.startswith('covers/') and subpath.endswith('/comments/'):
-        return []
+    if subpath.endswith('/comments/'):
+        kind, item_id = subpath.split('/')[:2]
+        return [{**com, 'date': _ago(com['hours'])}
+                for com in COMMENTS.get((kind, int(item_id)), [])]
     if subpath.startswith('patches/'):
         pid = int(subpath.split('/')[1])
         content, diff = PATCH_TEXT.get(pid, ('', ''))
@@ -281,7 +347,7 @@ def _patch_name(pid):
     return ''
 
 
-def _add_review(db, link, desc, version, patches, reviews, sent):
+def _add_review(db, link, desc, version, patches, reviews, sent, hours=0):
     """Add a reviewed series to the database
 
     Args:
@@ -293,6 +359,7 @@ def _add_review(db, link, desc, version, patches, reviews, sent):
         reviews (dict): Body of each review, by patch number
         sent (bool): True if the reviews have been sent, else they are
             drafts
+        hours (float): How many hours ago the reviews were written
 
     Return:
         int: ID of the version in the database
@@ -315,7 +382,7 @@ def _add_review(db, link, desc, version, patches, reviews, sent):
     for pcm, (_, pid) in zip(db.pcommit_get_list(svid), patches):
         db.pcommit_update(Pcommit(pcm.idnum, None, None, None, None, 'new',
                                   pid, 0))
-    stamp = datetime.now().isoformat()
+    stamp = (datetime.now() - timedelta(hours=hours)).isoformat()
     for seq, body in reviews.items():
         rid = db.review_add(svid, seq, body, 'Reviewed-by:' in body, stamp)
         db.review_set_draft_id(rid, f'demo-draft-{rid}')
@@ -342,14 +409,26 @@ def setup(topdir):
     # Earlier reviews, so that the lists are not empty
     _add_review(db, 600199, 'spi: Tidy up the clock setup', 3,
                 [('spi: Tidy up the clock setup', 8901)],
-                {1: 'Reviewed-by: Simon Glass <sjg@chromium.org>'}, True)
-    _add_review(db, 600112, 'net: Add a driver for the Example SoC Ethernet',
-                3, [('net: Add a driver for the Example SoC Ethernet', 8501)],
-                {1: 'Hi Jo,\n\nPlease split this up.\n\nRegards,\nSimon'},
-                True)
+                {1: 'Reviewed-by: Simon Glass <sjg@chromium.org>'}, True, 6)
+    svid = _add_review(
+        db, 600112, 'net: Add a driver for the Example SoC Ethernet', 3,
+        [('net: Add a driver for the Example SoC Ethernet', 8501)],
+        {1: 'Hi Jo,\n\nPlease split this up.\n\nRegards,\nSimon'}, True,
+        4 * 24)
+
+    # Jo replies to that review
+    rid = db.review_get_for_version(svid)[0].idnum
+    when = datetime.now(timezone.utc) - timedelta(days=2)
+    db.reply_add(rid, 'demo-reply-1', '<demo-reply-1@example.com>', '',
+                 'Jo Placeholder <jo@example.com>', 'sjg@chromium.org', '',
+                 'Re: [PATCH v3] net: Add a driver for the Example SoC '
+                 'Ethernet', email.utils.format_datetime(when), REPLY,
+                 when.isoformat())
+    db.review_set_replied(rid)
     _add_review(db, 600054, 'i2c: Support clock stretching', 1,
                 [('i2c: Support clock stretching', 8101)],
-                {1: 'Reviewed-by: Simon Glass <sjg@chromium.org>'}, True)
+                {1: 'Reviewed-by: Simon Glass <sjg@chromium.org>'}, True,
+                9 * 24)
     db.commit()
     db.close()
 
@@ -378,6 +457,42 @@ def run_job(db_path, args):
     db = Database(db_path)
     db.open_it()
     try:
+        for action in ('--suggest-reply', '--draft-reply', '--send-reply'):
+            if action in args:
+                return _reply_job(db, action,
+                                  int(args[args.index(action) + 1]))
+        if '--respond-comment' in args:
+            return _respond_job(
+                db, link, seqs[0],
+                int(args[args.index('--respond-comment') + 1]))
+        if '--revise' in args:
+            _say('Asking the agent to revise the reviews...', delay=2)
+            svid = db.series_find_by_link(link)[3]
+            for rev in db.review_get_for_version(svid):
+                if (rev.status in ('draft', 'edited') and
+                        (not seqs or rev.seq in seqs) and
+                        REVISION[0] in rev.body):
+                    db.review_set_body(rev.idnum,
+                                       rev.body.replace(*REVISION),
+                                       rev.approved)
+                    if '-d' in args:
+                        db.review_set_draft_id(rev.idnum,
+                                               f'demo-draft-{rev.idnum}-3')
+                    _say(f'Revised the review of patch {rev.seq}')
+            db.commit()
+            return 0
+        if '--delete' in args:
+            svid = db.series_find_by_link(link)[3]
+            for rev in db.review_get_for_version(svid):
+                if rev.status in ('draft', 'edited') and rev.seq in seqs:
+                    db.review_delete(rev.idnum)
+                    _say(f'Deleted the review of patch {rev.seq}')
+            db.commit()
+            return 0
+        if seqs == [0]:
+            _say('Reviewing the cover letter...', delay=2)
+            _say('The agent has no comments on the cover letter')
+            return 0
         if '--send' in args:
             _say(f"Sending the reviews of series {link}")
             svid = db.series_find_by_link(link)[3]
@@ -414,7 +529,7 @@ def run_job(db_path, args):
         for seq, subject in enumerate(subjects, 1):
             _say(f'Reviewing patch {seq}/{len(patches)}: {subject}',
                  delay=1.5)
-        reviews = {seq: body.format(date=_ago(2))
+        reviews = {seq: body.format(date=_ago(2)[:10])
                    for seq, body in REVIEWS.items()}
         svid = _add_review(db, link, name, version,
                            list(zip(subjects, [pat['id'] for pat in patches])),
@@ -427,6 +542,65 @@ def run_job(db_path, args):
         return 0
     finally:
         db.close()
+
+
+def _reply_job(db, action, reply_id):
+    """Pretend to suggest, draft or send a response to a reply
+
+    Args:
+        db (Database): Open database
+        action (str): '--suggest-reply', '--draft-reply' or '--send-reply'
+        reply_id (int): ID of the reply record
+
+    Return:
+        int: Exit code
+    """
+    if action == '--suggest-reply':
+        _say('Asking the agent for a response...', delay=2)
+        when = email.utils.parsedate_to_datetime(db.reply_get(reply_id).date)
+        db.reply_set_response(
+            reply_id, REPLY_RESPONSE.format(date=when.strftime('%Y-%m-%d')),
+            'suggested')
+        _say('Suggested a response')
+    elif action == '--draft-reply':
+        db.reply_set_status(reply_id, 'draft', f'demo-draft-reply-{reply_id}')
+        _say('Created a Gmail draft of the response')
+    else:
+        db.reply_set_status(reply_id, 'sent')
+        _say('Sent the response')
+    db.commit()
+    return 0
+
+
+def _respond_job(db, link, seq, comment_id):
+    """Pretend to have the agent suggest a response to a patchwork comment
+
+    Args:
+        db (Database): Open database
+        link (str): Patchwork series ID
+        seq (int): Patch which the comment is about, 0 for the cover letter
+        comment_id (int): ID of the comment on patchwork
+
+    Return:
+        int: Exit code
+    """
+    com = next(com for coms in COMMENTS.values() for com in coms
+               if com['id'] == comment_id)
+    _say(f"Reading comment {comment_id} from patchwork",
+         'Asking the agent for a response...', delay=1.5)
+    when = datetime.now(timezone.utc) - timedelta(hours=com['hours'])
+    date = email.utils.format_datetime(when)
+    who = com['submitter']
+    reply_id = db.reply_add_comment(
+        db.series_find_by_link(link)[3], seq, comment_id, com['msgid'], '',
+        f"{who['name']} <{who['email']}>", '', '', com['subject'], date,
+        com['content'], datetime.now().isoformat())
+    db.reply_set_response(
+        reply_id, COMMENT_RESPONSES[comment_id].format(
+            date=when.strftime('%Y-%m-%d')), 'suggested')
+    db.commit()
+    _say('Suggested a response')
+    return 0
 
 
 def serve(port):
