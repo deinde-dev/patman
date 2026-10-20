@@ -8,6 +8,13 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+Added
+~~~~~
+- ``--keep-assist-tags``, or the ``keep_assist_tags`` setting, keeps the tags
+  which a coding assistant adds, such as ``Co-developed-by: ...
+  <noreply@...>``, in the patches sent, for projects which want them. Set it
+  in a repo's ``.patman`` or ``.patman-defaults`` for one project.
+
 Changed
 ~~~~~~~
 - Tapping the Inbox tab of the ``patman serve`` page shows the tab at once,

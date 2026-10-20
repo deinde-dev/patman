@@ -114,6 +114,17 @@ line, or permanently via::
     [settings]
     insert_base_commit: False
 
+.. _keep_assist_tags:
+
+Patman removes the tags which a coding assistant adds to a commit, such as
+``Co-developed-by: Claude ... <noreply@anthropic.com>``, from the patches it
+sends. Some projects want these tags kept, to show how each patch was made.
+For those, use ``--keep-assist-tags``, or set it for the project, e.g. in the
+repo's ``.patman`` (or a tracked ``.patman-defaults``)::
+
+    [settings]
+    keep_assist_tags: True
+
 If you want to adjust settings (or aliases) that affect just a single
 project you can add a section that looks like [project_settings] or
 [project_alias].  If you want to use tags for your linux work, you could do::

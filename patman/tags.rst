@@ -223,4 +223,6 @@ Gerrit tags::
     Commit-xxxx: (except Commit-notes)
 
 ``Co-developed-by:`` and ``Co-Authored-By:`` trailers with a ``noreply@``
-address, as added by coding agents, are removed too.
+address, as added by coding assistants, are removed too, unless the
+``keep_assist_tags`` setting is ``True`` or ``--keep-assist-tags`` is given.
+See :ref:`keeping these tags <keep_assist_tags>`.

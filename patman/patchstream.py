@@ -23,8 +23,9 @@ from u_boot_pylib import gitutil
 RE_REMOVE = re.compile(r'^BUG=|^TEST=|^BRANCH=|^Review URL:'
                        r'|Reviewed-on:|Commit-\w*:')
 
-# AI co-developer tags to remove (noreply@ indicates non-human)
-RE_AI_TAG = re.compile(r'^(Co-developed-by|Co-Authored-By):.*noreply@',
+# Tags added by a coding assistant, to remove unless asked to keep them
+# (noreply@ indicates non-human)
+RE_ASSIST_TAG = re.compile(r'^(Co-developed-by|Co-Authored-By):.*noreply@',
                        re.IGNORECASE)
 
 # Lines which are allowed after a TEST= line
@@ -112,9 +113,10 @@ class PatchStream:
     Args:
         keep_change_id (bool): Keep the Change-Id tag
         insert_base_commit (bool): True to add the base commit to the end
+        keep_assist_tags (bool): Keep the tags added by a coding assistant
     """
     def __init__(self, series, is_log=False, keep_change_id=False,
-                 insert_base_commit=False):
+                 insert_base_commit=False, keep_assist_tags=False):
         self.skip_blank = False          # True to skip a single blank line
         self.found_test = False          # Found a TEST= line
         self.lines_after_test = 0        # Number of lines found after TEST=
@@ -125,6 +127,8 @@ class PatchStream:
         self.series = series             # Info about the patch series
         self.is_log = is_log             # True if indent like git log
         self.keep_change_id = keep_change_id  # True to keep Change-Id tags
+        # True to keep the tags added by a coding assistant
+        self.keep_assist_tags = keep_assist_tags
         self.in_change = None            # Name of the change list we are in
         self.change_version = 0          # Non-zero if we are in a change list
         self.change_lines = []           # Lines of the current change
@@ -671,7 +675,8 @@ class PatchStream:
             self.commit.subject = line
 
         # Detect the tags we want to remove, and skip blank lines
-        elif (RE_REMOVE.match(line) or RE_AI_TAG.match(line)
+        elif (RE_REMOVE.match(line) or
+              (RE_ASSIST_TAG.match(line) and not self.keep_assist_tags)
               ) and not commit_tag_match:
             self.skip_blank = True
 
@@ -956,7 +961,7 @@ def get_metadata_for_test(text):
     return series
 
 def fix_patch(backup_dir, fname, series, cmt, keep_change_id=False,
-              insert_base_commit=False, cwd=None):
+              insert_base_commit=False, cwd=None, keep_assist_tags=False):
     """Fix up a patch file, by adding/removing as required.
 
     We remove our tags from the patch file, insert changes lists, etc.
@@ -972,6 +977,7 @@ def fix_patch(backup_dir, fname, series, cmt, keep_change_id=False,
         keep_change_id (bool): Keep the Change-Id tag.
         insert_base_commit (bool): True to add the base commit to the end
         cwd (str): Directory containing filename, or None for current
+        keep_assist_tags (bool): Keep the tags added by a coding assistant
 
     Return:
         list: A list of errors, each str, or [] if all ok.
@@ -981,7 +987,8 @@ def fix_patch(backup_dir, fname, series, cmt, keep_change_id=False,
     outfd = os.fdopen(handle, 'w', encoding='utf-8')
     infd = open(fname, 'r', encoding='utf-8', errors='replace')
     pst = PatchStream(series, keep_change_id=keep_change_id,
-                      insert_base_commit=insert_base_commit)
+                      insert_base_commit=insert_base_commit,
+                      keep_assist_tags=keep_assist_tags)
     pst.commit = cmt
     pst.process_stream(infd, outfd)
     infd.close()
@@ -994,7 +1001,7 @@ def fix_patch(backup_dir, fname, series, cmt, keep_change_id=False,
     return cmt.warn
 
 def fix_patches(series, fnames, keep_change_id=False, insert_base_commit=False,
-                cwd=None):
+                cwd=None, keep_assist_tags=False):
     """Fix up a list of patches identified by filenames
 
     The patch files are processed in place, and overwritten.
@@ -1005,6 +1012,7 @@ def fix_patches(series, fnames, keep_change_id=False, insert_base_commit=False,
         keep_change_id (bool): Keep the Change-Id tag.
         insert_base_commit (bool): True to add the base commit to the end
         cwd (str): Directory containing the patch files, or None for current
+        keep_assist_tags (bool): Keep the tags added by a coding assistant
     """
     # Current workflow creates patches, so we shouldn't need a backup
     backup_dir = None  #tempfile.mkdtemp('clean-patch')
@@ -1015,7 +1023,8 @@ def fix_patches(series, fnames, keep_change_id=False, insert_base_commit=False,
         cmt.count = count
         result = fix_patch(backup_dir, fname, series, cmt,
                            keep_change_id=keep_change_id,
-                           insert_base_commit=insert_base_commit, cwd=cwd)
+                           insert_base_commit=insert_base_commit, cwd=cwd,
+                           keep_assist_tags=keep_assist_tags)
         if result:
             print('%d warning%s for %s:' %
                   (len(result), 's' if len(result) > 1 else '', fname))
