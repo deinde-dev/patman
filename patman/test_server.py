@@ -673,8 +673,10 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.call(srv, 'GET', '/api/version')
         self.assertEqual({}, traffic.take())
         _, state = self.call(srv, 'GET', '/api/sync')
+        none = {'hour': 0, 'today': 0, 'week': 0}
         self.assertEqual([{'url': 'https://pw', 'hour': [2, 500],
-                           'today': [2, 500], 'week': [2, 500]}],
+                           'today': [2, 500], 'week': [2, 500],
+                           'cached': none}],
                          state['traffic'])
 
         # Older counts only appear in the longer periods
@@ -683,7 +685,22 @@ class TestWebServer(unittest.TestCase, TestCommon):
                                  {'https://pw': (10, 1000)})
         self.assertEqual(
             [{'url': 'https://pw', 'hour': [2, 500], 'today': [2, 500],
-              'week': [12, 1500]}], traffic.get_summary(self.cser.db, now))
+              'week': [12, 1500], 'cached': none}],
+            traffic.get_summary(self.cser.db, now))
+
+        # Reads which the cache answers are counted too, including for a
+        # server which is not otherwise read
+        cache = pwcache.Cache(os.path.join(self.tmpdir, 'pwcache.db'))
+        cache.add_hit('https://pw')
+        cache.add_hit('https://pw')
+        cache.add_hit('https://other')
+        self.assertEqual(
+            [{'url': 'https://other', 'hour': [0, 0], 'today': [0, 0],
+              'week': [0, 0], 'cached': {'hour': 1, 'today': 1, 'week': 1}},
+             {'url': 'https://pw', 'hour': [2, 500], 'today': [2, 500],
+              'week': [12, 1500], 'cached': {'hour': 2, 'today': 2,
+                                             'week': 2}}],
+            traffic.get_summary(self.cser.db, now, cache))
 
     def test_sync(self):
         """A sync runs each command and records its output"""

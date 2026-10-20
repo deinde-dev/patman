@@ -2000,10 +2000,14 @@ function trafficCard(list) {
       h('div', { class: 'meta', title: 'Patchwork server' }, item.url),
       h('div', { class: 'traffic',
                  title: 'Requests sent to the server and data received from it' },
-        periods.flatMap(([key, label]) => [
-          h('span', { class: 'label' }, label),
-          h('span', {}, `${plural(item[key][0], 'request')}, ` +
-                        fmtBytes(item[key][1]))]))))
+        periods.flatMap(([key, label]) => {
+          const cached = item.cached ? item.cached[key] : 0;
+          return [
+            h('span', { class: 'label' }, label),
+            h('span', {}, `${plural(item[key][0], 'request')}, ` +
+                          fmtBytes(item[key][1]) +
+                          (cached ? `, ${cached} from the cache` : ''))];
+        }))))
       : h('div', { class: 'meta' }, 'No requests in the last 7 days'));
 }
 

@@ -25,6 +25,7 @@ from u_boot_pylib import tout
 from patman import database
 from patman import interpreter
 from patman import patchwork
+from patman import pwcache
 from patman import times
 from patman import traffic
 from patman.patchwork import Patchwork
@@ -238,7 +239,8 @@ class Server(jobs.JobRunner):
         state['interval'] = self.sync_interval
         state['review_sync'] = self.review_sync
         state['num_series'] = info.get_gather_count(self.cser)
-        state['traffic'] = traffic.get_summary(self.cser.db)
+        state['traffic'] = traffic.get_summary(self.cser.db,
+                                               cache=pwcache.get())
         return state
 
     def _start_sync(self):
