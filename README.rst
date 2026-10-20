@@ -45,6 +45,28 @@ Optional features are available as extras::
     pip install patch-manager[gmail]    # Gmail drafts of reviews and replies
     pip install patch-manager[all]      # everything
 
+To try changes before they are released, install the latest code from
+GitHub instead, with any extras inside the brackets::
+
+    pip install "patch-manager[all] @ git+https://github.com/deinde-dev/patman.git"
+
+The version stays the same between releases, so to pick up newer changes
+later, add ``--force-reinstall --no-deps``, which reinstalls patman without
+reinstalling the packages it uses::
+
+    pip install --force-reinstall --no-deps \
+        "patch-manager @ git+https://github.com/deinde-dev/patman.git"
+
+Some distributions, such as recent Debian and Ubuntu, do not let pip install
+into the system's Python, failing with 'externally-managed-environment'. There,
+install patman with pipx, which gives it its own environment::
+
+    pipx install "patch-manager[all]"         # the latest release
+    pipx install "patch-manager[all] @ git+https://github.com/deinde-dev/patman.git"
+
+To update it, use ``pipx upgrade patch-manager`` for a release, or
+``pipx reinstall patch-manager`` for the latest code from GitHub.
+
 The ``patman`` command is then on your path. It is also installed as
 ``patch-manager``, which is the only name the Debian package provides, since
 Debian already has an unrelated ``patman`` command.
