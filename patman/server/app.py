@@ -24,6 +24,7 @@ from u_boot_pylib import tout
 
 from patman import database
 from patman import interpreter
+from patman import patchwork
 from patman import times
 from patman import traffic
 from patman.patchwork import Patchwork
@@ -596,7 +597,8 @@ class Server(jobs.JobRunner):
         """Handle 'GET /api/comments/<kind>/<id>': read comments from patchwork
 
         The 'ups' query parameter selects the upstream whose patchwork server
-        is used.
+        is used. Comments read in the last few minutes are taken from the
+        cache, unless the 'refresh' query parameter is 1.
 
         Args:
             request (web.Request): Request, with 'kind' ('patch' or 'cover')
@@ -614,11 +616,15 @@ class Server(jobs.JobRunner):
         kind = request.match_info['kind']
         item_id = int(request.match_info['item_id'])
         pwork = self.get_pwork(request.query.get('ups') or None)
+        max_age = (0 if request.query.get('refresh') == '1'
+                   else patchwork.COMMENTS_MAX_AGE)
         async with aiohttp.ClientSession() as client:
             if kind == 'patch':
-                comments = await pwork.get_patch_comments(client, item_id)
+                comments = await pwork.get_patch_comments(client, item_id,
+                                                          max_age)
             else:
-                comments = await pwork.get_cover_comments(client, item_id)
+                comments = await pwork.get_cover_comments(client, item_id,
+                                                          max_age)
         if self.own_emails is None:
             # The address which 'patman review' sends reviews from
             email = gitutil.get_default_user_email()
@@ -630,7 +636,9 @@ class Server(jobs.JobRunner):
         """Handle 'GET /api/patch/<id>' or 'GET /api/cover/<id>'
 
         This reads a patch or cover letter from patchwork. The 'ups' query
-        parameter selects the upstream whose patchwork server is used.
+        parameter selects the upstream whose patchwork server is used. A patch
+        read in the last hour is taken from the cache, unless the 'refresh'
+        query parameter is 1. The response says when it was read.
 
         Args:
             request (web.Request): Request, with 'kind' ('patch' or 'cover')
@@ -644,12 +652,20 @@ class Server(jobs.JobRunner):
         """
         item_id = int(request.match_info['item_id'])
         pwork = self.get_pwork(request.query.get('ups') or None)
+        refresh = request.query.get('refresh') == '1'
+        read = None
         async with aiohttp.ClientSession() as client:
             if request.match_info['kind'] == 'patch':
-                data = await pwork.get_patch(client, item_id)
+                data = await pwork.get_patch(
+                    client, item_id,
+                    max_age=0 if refresh else patchwork.PATCH_MAX_AGE)
+                read = pwork.read_time(pwork.patch_path(item_id))
             else:
                 data = await pwork.get_cover(client, item_id)
-        return web.json_response(info.mail_info(data))
+        out = info.mail_info(data)
+        out['fetched'] = (times.to_str(datetime.fromtimestamp(read)) if read
+                          else times.now_str())
+        return web.json_response(out)
 
     async def _blob(self, request):
         """Handle 'GET /api/blob': read a file from the git repo

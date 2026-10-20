@@ -493,6 +493,8 @@ class TestWebServer(unittest.TestCase, TestCommon):
         srv = self.make_server()
         status, data = self.call(srv, 'GET', '/api/patch/1234')
         self.assertEqual(200, status)
+        # With no cache, the patch is read from patchwork now
+        self.assertTrue(data.pop('fetched'))
         self.assertEqual(
             {'id': 1234, 'name': '[1/2] video: Add a driver',
              'date': '2026-10-01T09:00:00', 'submitter': 'Fred',
@@ -505,6 +507,30 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(200, status)
         self.assertEqual(('Cover text', '', None),
                          (data['content'], data['diff'], data['submitter']))
+
+    def test_patch_refresh(self):
+        """A patch and its comments come from the cache, unless refreshed"""
+        srv = self.make_server()
+        now = [1000.0]
+        srv.pwork_for_testing.cache = pwcache.Cache(
+            os.path.join(self.tmpdir, 'pwcache.db'), clock=lambda: now[0])
+        self.requests.clear()
+        for _ in range(2):
+            _, data = self.call(srv, 'GET', '/api/patch/1234')
+            self.call(srv, 'GET', '/api/comments/patch/1234')
+        self.assertEqual(['patches/1234/', 'patches/1234/comments/'],
+                         self.requests)
+        self.assertEqual(times.to_str(datetime.fromtimestamp(1000)),
+                         data['fetched'])
+
+        # A refresh reads both from patchwork, and says when
+        now[0] += 60
+        _, data = self.call(srv, 'GET', '/api/patch/1234?refresh=1')
+        self.call(srv, 'GET', '/api/comments/patch/1234?refresh=1')
+        self.assertEqual(['patches/1234/', 'patches/1234/comments/'] * 2,
+                         self.requests)
+        self.assertEqual(times.to_str(datetime.fromtimestamp(1060)),
+                         data['fetched'])
 
     def test_blob(self):
         """A file can be read from the git repo by its blob hash"""

@@ -248,12 +248,15 @@ happen again, using the ``--patchwork-timeout`` setting for each attempt.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The comments on a patch (``kind`` is ``patch``) or cover letter (``cover``),
-given its patchwork ID: a list of Comment.
+given its patchwork ID: a list of Comment. Comments read from patchwork in
+the last five minutes are taken from the cache; with ``refresh=1``, they are
+read from patchwork.
 
 ``GET /api/patch/<id>``
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-A patch, given its patchwork ID:
+A patch, given its patchwork ID. A patch read from patchwork in the last
+hour is taken from the cache; with ``refresh=1``, it is read from patchwork:
 
 - ``id`` (int): patchwork ID
 - ``name`` (str): subject
@@ -265,11 +268,14 @@ A patch, given its patchwork ID:
 - ``web_url`` (str): URL of the patch on patchwork
 - ``series`` (list): the series it is in, each with ``id``, ``name`` and
   ``version``
+- ``fetched`` (str): when it was read from patchwork, as a local time like
+  ``2026-10-19 11:00:00``
 
 ``GET /api/cover/<id>``
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-A cover letter, given its patchwork ID, in the same form as a patch.
+A cover letter, given its patchwork ID, in the same form as a patch. A cover
+letter is kept in the cache for a day.
 
 ``GET /api/upstreams``
 ~~~~~~~~~~~~~~~~~~~~~~
