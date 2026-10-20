@@ -19,6 +19,10 @@ Fixed
   such as 'Send 3 drafts', leave out the reviews which a job is acting on and
   change once it finishes, rather than staying as they are until the page is
   shown again. A job which fails part way also shows which reviews it sent.
+- The review agent uses the Claude Code in ``~/.local/bin`` when that is not
+  on the PATH, as is common for a service such as the one running
+  ``patman serve``, rather than the old copy bundled with claude-agent-sdk.
+  If only the bundled copy is present, this is reported.
 
 0.5.0 - 2026-10-19
 ------------------

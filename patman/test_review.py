@@ -87,9 +87,35 @@ class TestReview(CseriesTester):
                 self.assertEqual('/x/claude', review.common.agent_options(
                     cli_path='/x/claude')['cli_path'])
 
-            # With no installed claude, the SDK picks its bundled one
-            with mock.patch('shutil.which', return_value=None):
+            # With no installed claude, the SDK picks its bundled one, which
+            # is reported once
+            with mock.patch('shutil.which', return_value=None), \
+                    mock.patch.object(review.common, '_BUNDLED_WARNED',
+                                      False), \
+                    terminal.capture() as (_, err):
                 self.assertNotIn('cli_path', review.common.agent_options())
+                review.common.agent_options()
+            self.assertEqual(1, err.getvalue().count(
+                'copy bundled with claude-agent-sdk is used'))
+
+    def test_find_claude_local_bin(self):
+        """Claude Code in ~/.local/bin is found when it is not on the PATH"""
+        local = os.path.join(self.tmpdir, '.local', 'bin')
+        os.makedirs(local)
+        cli = os.path.join(local, 'claude')
+        tools.write_file(cli, b'#!/bin/sh\n')
+        os.chmod(cli, 0o755)
+        empty = os.path.join(self.tmpdir, 'empty')
+        os.makedirs(empty)
+        with mock.patch.dict(os.environ, {'HOME': self.tmpdir,
+                                          'PATH': empty}):
+            self.assertEqual(cli, review.common.find_claude())
+            # It is added to the end of the PATH, for u_boot_pylib to find
+            self.assertEqual(os.pathsep.join([empty, local]),
+                             os.environ['PATH'])
+            self.assertEqual(cli, review.common.find_claude())
+            self.assertEqual(os.pathsep.join([empty, local]),
+                             os.environ['PATH'])
 
     def test_review_list_models(self):
         """--list-models prints the accepted aliases and exits cleanly"""
