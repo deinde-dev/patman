@@ -1990,6 +1990,23 @@ function fmtBytes(n) {
   return `${(n / 1e6).toFixed(1)} MB`;
 }
 
+// A table of the requests of each kind sent to a patchwork server, busiest
+// first, so that it is clear what the traffic is made of
+function trafficKinds(kinds) {
+  const rows = Object.entries(kinds || {})
+    .sort((a, b) => b[1].week[0] - a[1].week[0] || a[0].localeCompare(b[0]));
+  if (!rows.length) return null;
+  return h('div', { class: 'traffic kinds',
+                    title: 'Requests of each kind, today and in the last 7 days' },
+    h('span', { class: 'label' }, 'Kind'),
+    h('span', { class: 'label num' }, 'Today'),
+    h('span', { class: 'label num' }, '7 days'),
+    rows.flatMap(([kind, n]) => [
+      h('span', {}, kind),
+      h('span', { class: 'num' }, String(n.today[0])),
+      h('span', { class: 'num' }, String(n.week[0]))]));
+}
+
 // Show the requests which patman has sent to each patchwork server recently,
 // so that it is easy to see whether it is sending too many
 function trafficCard(list) {
@@ -2007,7 +2024,8 @@ function trafficCard(list) {
             h('span', {}, `${plural(item[key][0], 'request')}, ` +
                           fmtBytes(item[key][1]) +
                           (cached ? `, ${cached} from the cache` : ''))];
-        }))))
+        })),
+      trafficKinds(item.kinds)))
       : h('div', { class: 'meta' }, 'No requests in the last 7 days'));
 }
 
