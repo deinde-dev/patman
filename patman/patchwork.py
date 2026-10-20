@@ -18,6 +18,7 @@ from collections import namedtuple
 from u_boot_pylib import terminal
 from u_boot_pylib import tout
 
+from patman import lore
 from patman import pwcache
 from patman import traffic
 
@@ -301,6 +302,9 @@ class Patchwork:
         # Held while checking the events of a project, so that this is done
         # once when many series are synced at once
         self._events_lock = asyncio.Lock()
+        # Lore object for reading the comments on a series as a thread, None
+        # to use the default one if lore is enabled, or False for none
+        self.lore = None
 
     async def _request(self, client, subpath):
         """Call the patchwork API and return the result as JSON
@@ -403,9 +407,15 @@ class Patchwork:
             return None
         data = cache.get(self.url, subpath, max_age, keep, since)
         if data is not None:
-            self.cache_hits += 1
-            cache.add_hit(self.url)
+            self._note_hit()
         return data
+
+    def _note_hit(self):
+        """Count a read which the cache answers"""
+        self.cache_hits += 1
+        cache = self._get_cache()
+        if cache:
+            cache.add_hit(self.url)
 
     def _to_cache(self, subpath, data):
         """Keep a response in the cache, if there is one
@@ -592,6 +602,7 @@ class Patchwork:
         pwork.fake_request = func
         pwork.url = 'https://my-fake-url'
         pwork.cache = False
+        pwork.lore = False
         return pwork
 
     class _Stats:
@@ -1153,7 +1164,9 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
         """
         return f'{self.url}/project/{self.link_name}/list/?series={link}&state=*&archive=both'
 
-    async def _get_patch_status(self, client, patch_id, since=None):
+    # pylint: disable-next=R0913
+    async def _get_patch_status(self, client, patch_id, since=None,
+                                comments=None, hint=None):
         """Get the patch status
 
         Args:
@@ -1162,28 +1175,143 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
             since (float or None): Time from which patches in the cache are
                 kept current by events, as returned by follow_events(), or
                 None if they are not
+            comments (list of dict or None): Comments on the patch, e.g. from
+                lore, or None to read them from patchwork
+            hint (list of dict or None): Replies to the patch on lore, to say
+                whether the comments kept in the cache are current (see
+                _hinted_comments()), or None to read them from patchwork
 
         Return:
             PATCH: Patch information
 
         Requests:
-            1 for patch, unless events keep it current, 1 for patch comments
+            1 for patch, unless events keep it current, 1 for patch comments,
+            unless given
         """
         # The state is wanted, so read it from patchwork, unless events say
         # that the copy in the cache is current
         data = await self.get_patch(client, patch_id, max_age=0, since=since)
         state = data['state']
-        comment_data = await self.get_patch_comments(client, patch_id,
-                                                     max_age=0)
+        comment_data = comments
+        if comment_data is None and hint is not None:
+            comment_data = await self._hinted_comments(
+                client, 'patch', patch_id, hint, self._list_id(data))
+        if comment_data is None:
+            comment_data = await self.get_patch_comments(client, patch_id,
+                                                         max_age=0)
 
         return Patch(patch_id, state, data, comment_data)
 
-    async def get_series_cover(self, client, data):
+    @staticmethod
+    def _list_id(data):
+        """Get the ID of the list a patch was sent to
+
+        Args:
+            data (dict): Patch, as from get_patch()
+
+        Returns:
+            str or None: List ID, e.g. 'u-boot.lists.u-boot-project.org'
+        """
+        return (data.get('project') or {}).get('list_id') or None
+
+    # pylint: disable-next=R0913
+    async def _hinted_comments(self, client, kind, item_id, replies,
+                               list_id):
+        """Get the comments on a patch or cover letter, using lore as a hint
+
+        The comments come from patchwork, but those kept in the cache are
+        used if they were read in the last lore.RECHECK seconds and lore has
+        no new reply, i.e. one which they lack and which was not on lore when
+        they were read. Remembering what was on lore means that a reply which
+        patchwork does not have, or puts on another patch, leads to one read
+        rather than one on every sync. Replies on lore which were sent to
+        other lists are left out, since patchwork does not have them.
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            kind (str): 'patch' or 'cover'
+            item_id (int): Patchwork ID
+            replies (list of dict): Replies on lore, as from
+                lore.comments_for()
+            list_id (str or None): ID of the project's list
+
+        Returns:
+            list of dict: Comments, as from get_patch_comments()
+        """
+        cache = self._get_cache()
+        path = self.comments_path(kind, item_id)
+        seen_path = f'lore-seen/{path}'
+        if cache:
+            known = cache.get(self.url, path, lore.RECHECK)
+            seen = [{'msgid': mid}
+                    for mid in cache.get(self.url, seen_path, None) or []]
+            if known is not None and not lore.new_replies(
+                    replies, known + seen, list_id):
+                self._note_hit()
+                return known
+        if kind == 'patch':
+            data = await self.get_patch_comments(client, item_id, max_age=0)
+        else:
+            data = await self.get_cover_comments(client, item_id, max_age=0)
+        if cache:
+            cache.put(self.url, seen_path, [rep['msgid'] for rep in replies])
+        return data
+
+    def _get_lore(self):
+        """Get the Lore object to use, creating the default one if enabled
+
+        Returns:
+            lore.Lore or None: Lore object, or None if lore is not used
+        """
+        if self.lore is None:
+            self.lore = lore.Lore() if lore.MODE != 'off' else False
+        return self.lore or None
+
+    async def _lore_comments(self, client, data):
+        """Read the comments on a series from lore, as one thread
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            data (dict): Series, as from get_series()
+
+        Returns:
+            dict or None: Comments on the cover letter and each patch, keyed
+                by Message-ID without angle brackets, or None if lore is not
+                used, does not have the thread, cannot be read or is missing
+                any of the patches, e.g. because it is a few minutes behind
+        """
+        lre = self._get_lore()
+        cover = data.get('cover_letter')
+        items = list(data.get('patches') or [])
+        if cover:
+            items.append(cover)
+        if not lre or not items or not all(it.get('msgid') for it in items):
+            return None
+        messages = await lre.get_thread(client, items[-1]['msgid'] if cover
+                                        else items[0]['msgid'])
+        if messages is None:
+            return None
+        have = {lore.bare_msgid(str(msg.get('Message-ID', '')))
+                for msg in messages}
+        msgids = [it['msgid'] for it in items]
+        if any(lore.bare_msgid(mid) not in have for mid in msgids):
+            return None
+        return lore.comments_for(messages, msgids)
+
+    # pylint: disable-next=R0913
+    async def get_series_cover(self, client, data, comments=None, hint=None,
+                               list_id=None):
         """Get the cover information (including comments)
 
         Args:
             client (aiohttp.ClientSession): Session to use
             data (dict): Return value from self.get_series()
+            comments (list of dict or None): Comments on the cover letter,
+                e.g. from lore, or None to read them from patchwork
+            hint (list of dict or None): Replies to the cover letter on lore,
+                to say whether the comments kept in the cache are current, or
+                None to read them from patchwork
+            list_id (str or None): ID of the project's list, for 'hint'
 
         Returns:
             COVER object, or None if no cover letter
@@ -1194,7 +1322,13 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
         cover_id = None
         if cover:
             cover_id = cover['id']
-            info = await self.get_cover_comments(client, cover_id, max_age=0)
+            info = comments
+            if info is None and hint is not None:
+                info = await self._hinted_comments(client, 'cover', cover_id,
+                                                   hint, list_id)
+            if info is None:
+                info = await self.get_cover_comments(client, cover_id,
+                                                     max_age=0)
             cover = COVER(cover_id, len(info), cover['name'], info)
         return cover
 
@@ -1268,10 +1402,30 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
 
         count = len(patch_list)
         patches = []
+        # Read the replies as one thread from lore if possible, either as
+        # the comments themselves ('use') or to say which patches have new
+        # ones, so that only those are read from patchwork ('hint')
+        by_msgid = None
+        if read_comments or read_cover_comments:
+            by_msgid = await self._lore_comments(client, data)
+
+        def from_lore(item, use):
+            if by_msgid is None or (lore.MODE == 'use') != use:
+                return None
+            return by_msgid[lore.bare_msgid(item['msgid'])]
+
+        def comments_on(item):
+            return from_lore(item, True)
+
+        def hint_for(item):
+            return from_lore(item, False)
+
         if read_comments:
             since = await self.follow_events(client)
             # Returns a list of Patch objects
-            tasks = [self._get_patch_status(client, patch_list[i]['id'], since)
+            tasks = [self._get_patch_status(client, patch_list[i]['id'], since,
+                                            comments_on(patch_list[i]),
+                                            hint_for(patch_list[i]))
                      for i in range(count)]
 
             patch_status = await asyncio.gather(*tasks)
@@ -1288,7 +1442,13 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
             terminal.print_clear()
 
         if read_cover_comments:
-            cover = await self.get_series_cover(client, data)
+            cover_letter = data.get('cover_letter')
+            list_id = (self._list_id(patches[0].data)
+                       if patches and patches[0].data else None)
+            cover = await self.get_series_cover(
+                client, data,
+                comments_on(cover_letter) if cover_letter else None,
+                hint_for(cover_letter) if cover_letter else None, list_id)
         else:
             cover = None
 

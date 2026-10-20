@@ -956,6 +956,16 @@ def setup_parser():
         help='Seconds to wait for each patchwork request before trying '
              "again (the 'patchwork_timeout' setting) [default: %(default)s]")
     parser.add_argument(
+        '--lore', choices=('hint', 'use', 'off'), default='hint',
+        help="How a sync uses lore.kernel.org, which gives the replies to a "
+             "series in one request (the 'lore' setting): 'hint' reads the "
+             'comments on a patch from patchwork only if lore shows new '
+             "replies, or after a week; 'use' reads the comments from lore; "
+             "'off' reads them all from patchwork [default: %(default)s]")
+    parser.add_argument(
+        '--no-lore', action='store_const', const='off', dest='lore',
+        help="Do not use lore.kernel.org, the same as '--lore off'")
+    parser.add_argument(
         '-T', '--thread', action='store_true', dest='thread',
         default=False, help='Create patches as a single thread')
     parser.add_argument(

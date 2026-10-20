@@ -10,6 +10,11 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman status`` and the sync read the thread of each series from
+  lore.kernel.org, in one request, and read the comments on a patch from
+  patchwork only if lore shows new replies to it, or they have not been read
+  for a week. With ``--lore use``, or the ``lore`` setting, the comments come
+  from lore itself; ``--no-lore`` reads them all from patchwork as before.
 - ``patman status`` and the sync follow the project's events on patchwork,
   which say when a patch's state or delegate changes, and use the other
   patches from the cache rather than reading each one again. This halves

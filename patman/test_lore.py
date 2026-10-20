@@ -14,6 +14,7 @@ from unittest import mock
 
 from patman import lore
 from patman import pwcache
+from patman.patchwork import Patchwork
 
 
 def run(coro):
@@ -70,6 +71,14 @@ THREAD = ''.join([
     # Nothing to do with the series
     message('other@x', 'Hello', FRED, 'Hi'),
 ]).encode('utf-8')
+
+SERIES = {
+    'id': 7, 'received_all': True,
+    'cover_letter': {'id': 70, 'name': 'dm: Tidy up', 'msgid': '<cover@x>'},
+    'patches': [{'id': 71, 'name': 'dm: First', 'msgid': '<p1@x>'},
+                {'id': 72, 'name': 'dm: Second', 'msgid': '<p2@x>'}],
+}
+
 
 class Response:
     """Pretend response from lore"""
@@ -156,6 +165,117 @@ class TestLore(unittest.TestCase):
                 self.assertEqual(9, len(run(lre.get_thread(client,
                                                            'busy@x'))))
             self.assertEqual(3, len(client.urls))
+
+    def fake_patchwork(self, reads):
+        """Make a Patchwork object with a fake server, recording the reads
+
+        Each patch's comments on patchwork are the replies to it in THREAD
+        """
+        replies = {'patches/71/comments/': ['r1@x', 'r2@x'],
+                   'patches/72/comments/': ['r4@x'],
+                   'covers/70/comments/': ['r3@x']}
+
+        def fake(subpath):
+            reads.append(subpath)
+            if subpath == 'series/7/':
+                return SERIES
+            if subpath.endswith('/comments/'):
+                return [{'msgid': f'<{mid}>', 'content': 'From patchwork',
+                         'submitter': {'name': 'Pat', 'email': 'pat@x'},
+                         'date': ''} for mid in replies[subpath]]
+            return {'id': int(subpath.split('/')[1]), 'state': 'new',
+                    'project': {'list_id': 'u-boot.example.org'}}
+
+        pwork = Patchwork.for_testing(fake)
+        fake_lore = mock.Mock()
+        fake_lore.thread = lore.parse_mbox(THREAD)
+
+        async def get_thread(_client, msgid):
+            fake_lore.msgid = msgid
+            return fake_lore.thread
+        fake_lore.get_thread = get_thread
+        pwork.lore = fake_lore
+        return pwork
+
+    @staticmethod
+    def sync(pwork, reads):
+        """Sync series 7, giving the comments and the comment lists read"""
+        reads.clear()
+        cover, patches = run(pwork.series_get_state(None, '7', True, True))
+        return ([c['content'].strip() for c in cover.comments],
+                [[c['content'].strip()[:5] for c in pat.comments]
+                 for pat in patches],
+                sorted(r for r in reads if r.endswith('comments/')))
+
+    def test_sync_use(self):
+        """With 'use', a sync reads the comments from lore, else patchwork"""
+        reads = []
+        pwork = self.fake_patchwork(reads)
+        with mock.patch.object(lore, 'MODE', 'use'):
+            # The thread is read once, from its cover letter
+            self.assertEqual((['For the series:\n\nTested-by: Simon Glass '
+                               '<sjg@chromium.org>'],
+                              [['> Fir', 'Thank'], ['Nit']], []),
+                             self.sync(pwork, reads))
+            self.assertEqual('<cover@x>', pwork.lore.msgid)
+
+            # If lore does not have the thread, patchwork is asked
+            all_three = ['covers/70/comments/', 'patches/71/comments/',
+                         'patches/72/comments/']
+            pwork.lore.thread = None
+            self.assertEqual(all_three, self.sync(pwork, reads)[2])
+
+            # So it is if lore is missing a patch, e.g. because it is behind
+            pwork.lore.thread = [msg for msg in lore.parse_mbox(THREAD)
+                                 if 'p2@x' not in str(msg['Message-ID'])]
+            self.assertEqual(all_three, self.sync(pwork, reads)[2])
+
+    def test_sync_hint(self):
+        """With 'hint', comments come from patchwork when lore has new ones"""
+        reads = []
+        pwork = self.fake_patchwork(reads)
+        now = [1000.0]
+        pwork.cache = pwcache.Cache(os.path.join(self.tmpdir, 'pw.db'),
+                                    clock=lambda: now[0])
+        all_three = ['covers/70/comments/', 'patches/71/comments/',
+                     'patches/72/comments/']
+        with mock.patch.object(lore, 'MODE', 'hint'):
+            # The comments come from patchwork, and the first time all are
+            # read
+            result = self.sync(pwork, reads)
+            self.assertEqual((['From patchwork'],
+                              [['From ', 'From '], ['From ']], all_three),
+                             result)
+
+            # Lore has no new replies, so none is read again
+            self.assertEqual([], self.sync(pwork, reads)[2])
+
+            # A new reply to patch 2 on lore means that only it is read
+            extra = message('r5@x', 'Re: [PATCH 2/2] dm: Second', SIMON,
+                            'Reviewed-by: Simon Glass <sjg@chromium.org>',
+                            'p2@x', ['cover@x', 'p2@x'],
+                            'u-boot.example.org')
+            pwork.lore.thread = lore.parse_mbox(THREAD + extra.encode())
+            self.assertEqual(['patches/72/comments/'],
+                             self.sync(pwork, reads)[2])
+
+            # Patchwork does not have that reply, but it is only read once
+            self.assertEqual([], self.sync(pwork, reads)[2])
+
+            # A reply sent to another list is not on patchwork, so is left
+            # out
+            other = message('r6@x', 'Re: [PATCH 1/2] dm: First', SIMON, 'Hi',
+                            'p1@x', ['cover@x', 'p1@x'], 'linux.example.org')
+            pwork.lore.thread = lore.parse_mbox(THREAD + other.encode())
+            self.assertEqual([], self.sync(pwork, reads)[2])
+
+            # After a while, all are read again, in case lore lacks some
+            now[0] += lore.RECHECK + 1
+            self.assertEqual(all_three, self.sync(pwork, reads)[2])
+
+        # Without lore, all are read each time
+        pwork.lore = False
+        self.assertEqual(all_three, self.sync(pwork, reads)[2])
 
     def test_set_mode(self):
         """The mode must be one which is known"""
