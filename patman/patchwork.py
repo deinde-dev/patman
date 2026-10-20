@@ -7,6 +7,7 @@
 
 import asyncio
 import base64
+import json
 import re
 import socket
 from urllib.parse import quote_plus, urlparse
@@ -407,15 +408,20 @@ class Patchwork:
             return None
         data = cache.get(self.url, subpath, max_age, keep, since)
         if data is not None:
-            self._note_hit()
+            self._note_hit(data)
         return data
 
-    def _note_hit(self):
-        """Count a read which the cache answers"""
+    def _note_hit(self, data):
+        """Count a read which the cache answers
+
+        Args:
+            data (dict or list or str): Response from the cache, whose size
+                as JSON is about what patchwork would have sent
+        """
         self.cache_hits += 1
         cache = self._get_cache()
         if cache:
-            cache.add_hit(self.url)
+            cache.add_hit(self.url, len(json.dumps(data)))
 
     def _to_cache(self, subpath, data):
         """Keep a response in the cache, if there is one
@@ -1247,7 +1253,7 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
                     for mid in cache.get(self.url, seen_path, None) or []]
             if known is not None and not lore.new_replies(
                     replies, known + seen, list_id):
-                self._note_hit()
+                self._note_hit(known)
                 return known
         if kind == 'patch':
             data = await self.get_patch_comments(client, item_id, max_age=0)

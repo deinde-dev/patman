@@ -128,7 +128,14 @@ class Cache:
                 'PRIMARY KEY (server, path))')
             self.con.execute(
                 'CREATE TABLE IF NOT EXISTS hits (hour TEXT, server TEXT, '
-                'count INTEGER, PRIMARY KEY (hour, server))')
+                'count INTEGER, bytes INTEGER DEFAULT 0, '
+                'PRIMARY KEY (hour, server))')
+            # A cache made before the size of each read was counted
+            cols = [row[1] for row in self.con.execute(
+                'PRAGMA table_info(hits)')]
+            if 'bytes' not in cols:
+                self.con.execute(
+                    'ALTER TABLE hits ADD COLUMN bytes INTEGER DEFAULT 0')
             self.con.execute(
                 'CREATE TABLE IF NOT EXISTS follow (server TEXT, project TEXT, '
                 'started REAL, last TEXT, checked REAL, '
@@ -331,17 +338,20 @@ class Cache:
         return traffic.hour_key(datetime.fromtimestamp(when))
 
     @_safe(None)
-    def add_hit(self, server):
+    def add_hit(self, server, nbytes=0):
         """Count a read which the cache answers
 
         Args:
             server (str): URL of the patchwork server
+            nbytes (int): Size of the response, which patchwork would
+                otherwise have sent
         """
         with self.con:
             self.con.execute(
-                'INSERT INTO hits (hour, server, count) VALUES (?, ?, 1) '
-                'ON CONFLICT (hour, server) DO UPDATE SET count = count + 1',
-                (self._hour(self._clock()), server))
+                'INSERT INTO hits (hour, server, count, bytes) '
+                'VALUES (?, ?, 1, ?) ON CONFLICT (hour, server) DO UPDATE '
+                'SET count = count + 1, bytes = bytes + excluded.bytes',
+                (self._hour(self._clock()), server, nbytes))
 
     @_safe({})
     def hits_since(self, since):
@@ -352,11 +362,12 @@ class Cache:
 
         Returns:
             dict: key (str): URL of the patchwork server
-                value (int): Number of reads
+                value (list of int): [number of reads, bytes they hold]
         """
-        return dict(self.con.execute(
-            'SELECT server, SUM(count) FROM hits WHERE hour >= ? '
-            'GROUP BY server', (since,)))
+        return {server: [count, nbytes] for server, count, nbytes in
+                self.con.execute(
+                    'SELECT server, SUM(count), SUM(bytes) FROM hits '
+                    'WHERE hour >= ? GROUP BY server', (since,))}
 
     def close(self):
         """Close the cache"""

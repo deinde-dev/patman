@@ -2024,12 +2024,13 @@ function trafficCard(list) {
       h('div', { class: 'traffic',
                  title: 'Requests sent to the server and data received from it' },
         periods.flatMap(([key, label]) => {
-          const cached = item.cached ? item.cached[key] : 0;
+          const [hits, saved] = item.cached[key];
           return [
             h('span', { class: 'label' }, label),
             h('span', {}, `${plural(item[key][0], 'request')}, ` +
                           fmtBytes(item[key][1]) +
-                          (cached ? `, ${cached} from the cache` : ''))];
+                          (hits ? `, ${hits} from the cache` +
+                                  (saved ? ` (${fmtBytes(saved)})` : '') : ''))];
         })),
       trafficKinds(item.kinds)))
       : h('div', { class: 'meta' }, 'No requests in the last 7 days'));
