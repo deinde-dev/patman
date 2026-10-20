@@ -241,6 +241,9 @@ def make_review_name(link, upstream=None):
 def fetch_series(pwork, link):
     """Fetch and validate series metadata from patchwork
 
+    If patchwork lacks some of the patches, they are taken from lore if it
+    has them (see Patchwork.fill_from_lore()).
+
     Args:
         pwork (Patchwork): Configured patchwork instance
         link (str): Patchwork series link/ID
@@ -249,13 +252,21 @@ def fetch_series(pwork, link):
         tuple: (series_data, clean_name, version, patch_count)
 
     Raises:
-        ValueError: if the series is incomplete
+        ValueError: if the series is incomplete, even with lore
     """
     series_data = common.pw_call(pwork.get_series, link)
+    if not series_data.get('received_all', True):
+        series_data = common.pw_call(pwork.fill_from_lore, series_data)
+        for patch in series_data['patches']:
+            if patch['id'] in series_data.get('lore_patches', []):
+                tout.notice(f"Patchwork lacks {patch['name']}; using the "
+                            'copy on lore')
 
     series_name = series_data.get('name', f'series-{link}')
     version = series_data.get('version', 1)
     patch_count = series_data.get('received_total', 0)
+    if series_data.get('lore_patches'):
+        patch_count = len(series_data['patches'])
     total = series_data.get('total', patch_count)
 
     clean_name = clean_series_name(series_name)

@@ -15,6 +15,7 @@ from unittest import mock
 from patman import lore
 from patman import pwcache
 from patman.patchwork import Patchwork
+from patman.review import lookup
 
 
 def run(coro):
@@ -276,6 +277,86 @@ class TestLore(unittest.TestCase):
         # Without lore, all are read each time
         pwork.lore = False
         self.assertEqual(all_three, self.sync(pwork, reads)[2])
+
+    def test_patch_info(self):
+        """The place of a patch in its series comes from its subject"""
+        msgs = {str(m['Message-ID']).strip('<>'): m
+                for m in lore.parse_mbox(THREAD)}
+        self.assertEqual((1, 2, 2, '[2/2] dm: Second'),
+                         lore.patch_info(msgs['p2@x']))
+        self.assertEqual((2, 1, 2, '[v2,1/2] dm: First'),
+                         lore.patch_info(msgs['v2@x']))
+        self.assertIsNone(lore.patch_info(msgs['cover@x']))
+        self.assertIsNone(lore.patch_info(msgs['other@x']))
+
+    def test_fill_from_lore(self):
+        """Patches which patchwork lacks are taken from lore"""
+        incomplete = {
+            'id': 8, 'version': 1, 'total': 2, 'received_total': 1,
+            'received_all': False,
+            'cover_letter': {'id': 80, 'name': 'dm: Tidy up',
+                             'msgid': '<cover@x>'},
+            'patches': [{'id': 81, 'name': '[1/2] dm: First',
+                         'msgid': '<p1@x>'}]}
+        reads = []
+
+        def fake(subpath):
+            reads.append(subpath)
+            if subpath == 'series/8/':
+                return incomplete
+            return {'id': 81, 'headers': {}, 'content': 'pw'}
+
+        pwork = Patchwork.for_testing(fake)
+        fake_lore = mock.Mock()
+        fake_lore.thread = lore.parse_mbox(THREAD)
+
+        async def get_thread(_client, _msgid):
+            return fake_lore.thread
+        fake_lore.get_thread = get_thread
+        pwork.lore = fake_lore
+
+        data = run(pwork.fill_from_lore(None, incomplete))
+        self.assertEqual(['[1/2] dm: First', '[2/2] dm: Second'],
+                         [p['name'] for p in data['patches']])
+        self.assertEqual(['lore:p2@x'], data['lore_patches'])
+        self.assertNotIn('lore_patches', incomplete)
+
+        # The patch from lore can be read like any other, with its replies
+        patch = run(pwork.get_patch(None, 'lore:p2@x'))
+        self.assertEqual(('<p2@x>', 'Second', '', 'new'),
+                         (patch['headers']['Message-ID'],
+                          patch['content'].strip(), patch['diff'],
+                          patch['state']))
+        self.assertEqual(['<r4@x>'], [c['msgid'] for c in run(
+            pwork.get_patch_comments(None, 'lore:p2@x'))])
+
+        # The mbox has both patches, from lore, in order
+        mbox = pwork.lore_mbox(data)
+        self.assertEqual(
+            ['[PATCH 1/2] dm: First', '[PATCH 2/2] dm: Second'],
+            [str(m['Subject']) for m in lore.parse_mbox(mbox)])
+        self.assertIsNone(pwork.lore_mbox(incomplete))
+
+        # A review fills in the series, and goes ahead
+        with mock.patch.object(lookup.tout, 'notice') as notice:
+            data, _, _, count = lookup.fetch_series(pwork, '8')
+        self.assertEqual(2, count)
+        self.assertIn('Patchwork lacks [2/2] dm: Second; using the copy on '
+                      'lore', [c.args[0] for c in notice.call_args_list])
+
+        # If lore lacks the patch, the review cannot go ahead
+        fake_lore.thread = [m for m in lore.parse_mbox(THREAD)
+                            if 'p2@x' not in str(m['Message-ID'])]
+        with mock.patch.object(lookup.tout, 'notice'):
+            with self.assertRaises(ValueError) as exc:
+                lookup.fetch_series(pwork, '8')
+        self.assertIn('patchwork received 1 of 2', str(exc.exception))
+
+        # A complete series is left alone, and lore is not asked
+        fake_lore.get_thread = mock.Mock()
+        done = dict(SERIES)
+        self.assertIs(done, run(pwork.fill_from_lore(None, done)))
+        fake_lore.get_thread.assert_not_called()
 
     def test_set_mode(self):
         """The mode must be one which is known"""

@@ -185,6 +185,11 @@ For example, to take the comments from lore::
     [settings]
     lore: use
 
+Patchwork sometimes misses a patch in a series, which then stays incomplete
+even though the patch is on the list. ``patman review`` takes any such patch
+from the thread on lore, saying which, and applies the whole series from
+lore's copy; if lore lacks the patch too, the review does not go ahead.
+
 Tracking several series
 -----------------------
 

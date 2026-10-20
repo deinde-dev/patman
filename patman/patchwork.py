@@ -306,6 +306,13 @@ class Patchwork:
         # Lore object for reading the comments on a series as a thread, None
         # to use the default one if lore is enabled, or False for none
         self.lore = None
+        # Patches which patchwork lacks, taken from lore (see fill_from_lore())
+        #   key (str): ID given to the patch, 'lore:<msgid>'
+        #   value (tuple): (email.message.EmailMessage, list of replies)
+        self._lore_patches = {}
+        # Messages of the thread on lore of a series filled in from it, by
+        # Message-ID without angle brackets
+        self._lore_thread = {}
 
     async def _request(self, client, subpath):
         """Call the patchwork API and return the result as JSON
@@ -1022,6 +1029,9 @@ class Patchwork:
                 '''
             "prefixes": ["3/3", ...]
         """
+        if str(patch_id) in self._lore_patches:
+            return lore.to_patch(self._lore_patches[str(patch_id)][0],
+                                 str(patch_id))
         keep = self._in_project if since is not None else None
         return await self._cached_request(client, self.patch_path(patch_id),
                                           max_age, keep, since)
@@ -1068,6 +1078,8 @@ class Patchwork:
                 >...'
             headers: dict: email headers, see get_cover() for an example
         """
+        if str(patch_id) in self._lore_patches:
+            return self._lore_patches[str(patch_id)][1]
         return await self._cached_request(
             client, self.comments_path('patch', patch_id), max_age)
 
@@ -1305,6 +1317,114 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
         return lore.comments_for(messages, msgids)
 
     # pylint: disable-next=R0913
+    async def fill_from_lore(self, client, data):
+        """Add the patches which patchwork lacks from a series, using lore
+
+        Patchwork sometimes misses a patch in a series, which then stays
+        incomplete, though the patch is on the list. Lore usually has it, so
+        this adds each missing patch from the thread on lore, with an ID of
+        'lore:<msgid>', which get_patch() and get_patch_comments() accept.
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            data (dict): Series, as from get_series()
+
+        Returns:
+            dict: The series, with the patches from lore added in order and
+                'lore_patches' giving their IDs, or as given if it is
+                complete, lore is not used or does not have what is missing
+        """
+        lre = self._get_lore()
+        patches = list(data.get('patches') or [])
+        total = data.get('total') or 0
+        if data.get('received_all') or not lre or not total:
+            return data
+        root = (data.get('cover_letter') or (patches or [{}])[0]).get('msgid')
+        if not root:
+            return data
+        messages = await lre.get_thread(client, root)
+        if not messages:
+            return data
+        for msg in messages:
+            mid = lore.bare_msgid(str(msg.get('Message-ID', '')))
+            self._lore_thread[mid] = msg
+
+        have = set()
+        for patch in patches:
+            match = RE_SEQ.search(patch.get('name') or '')
+            if match:
+                have.add(int(match.group(1)))
+        version = data.get('version') or 1
+        found = {}
+        for msg in messages:
+            info = lore.patch_info(msg)
+            if info and info[0] == version and info[2] == total and \
+                    not str(msg.get('Subject', '')).lower().startswith('re:'):
+                found.setdefault(info[1], msg)
+
+        added = []
+        for seq in range(1, total + 1):
+            if seq in have or seq not in found:
+                continue
+            msg = found[seq]
+            msgid = lore.bare_msgid(str(msg.get('Message-ID', '')))
+            patch_id = f'lore:{msgid}'
+            replies = lore.comments_for(messages, [msgid])[msgid]
+            self._lore_patches[patch_id] = (msg, replies)
+            patch = lore.to_patch(msg, patch_id)
+            patches.append({key: patch[key]
+                            for key in ('id', 'name', 'msgid', 'date')})
+            added.append(patch_id)
+        if not added:
+            return data
+
+        def seq_of(patch):
+            match = RE_SEQ.search(patch.get('name') or '')
+            return int(match.group(1)) if match else 0
+
+        out = dict(data)
+        out['patches'] = sorted(patches, key=seq_of)
+        out['lore_patches'] = added
+        return out
+
+    def lore_mbox(self, data):
+        """Get an mbox of the patches in a series filled in from lore
+
+        The patches which patchwork has are taken from lore too, so that the
+        series is applied from one source.
+
+        Args:
+            data (dict): Series, as from fill_from_lore()
+
+        Returns:
+            bytes or None: Content of the mbox, or None if the series has no
+                patches from lore, or lore lacks any of them
+        """
+        if not data.get('lore_patches'):
+            return None
+        out = []
+        for patch in data['patches']:
+            msg = self._lore_message(patch)
+            if msg is None:
+                return None
+            out.append(b'From mboxrd@z Thu Jan  1 00:00:00 1970\n' +
+                       msg.raw.rstrip(b'\n') + b'\n\n')
+        return b''.join(out)
+
+    def _lore_message(self, patch):
+        """Get the message on lore holding a patch of a filled-in series
+
+        Args:
+            patch (dict): Patch from the series
+
+        Returns:
+            email.message.EmailMessage or None: Message, or None if it is
+                not known
+        """
+        if str(patch.get('id')) in self._lore_patches:
+            return self._lore_patches[str(patch['id'])][0]
+        return self._lore_thread.get(lore.bare_msgid(patch.get('msgid', '')))
+
     async def get_series_cover(self, client, data, comments=None, hint=None,
                                list_id=None):
         """Get the cover information (including comments)
