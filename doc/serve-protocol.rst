@@ -285,10 +285,10 @@ what to review. The ``ups`` query parameter gives the upstream, defaulting to
 the default upstream, which must have a patchwork project. The ``page`` query
 parameter gives the page, starting at 1, with 50 series on each.
 
-The server keeps each page it reads from patchwork for ten minutes, timed
-from when it read the first page, and reading the first page again drops
-the others. With ``refresh=1``, it reads the page from patchwork whatever it
-has kept.
+The server keeps each page it reads from patchwork in the cache for ten
+minutes, timed from when it read the first page; a later page is read again
+if it is older than the first. With ``refresh=1``, it reads the page from
+patchwork whatever it has kept.
 
 The response has ``ups``, ``page``, ``per_page``, ``fetched`` (when the
 server read the first page from patchwork, as a local time like

@@ -634,7 +634,8 @@ class Patchwork:
         self.proj_id = project_id
         self.link_name = link_name
 
-    async def get_recent_series(self, client, project, page=1, per_page=50):
+    async def get_recent_series(self, client, project, page=1, per_page=50,
+                                max_age=0):
         """Read the most recent series in a project, newest first
 
         Args:
@@ -642,13 +643,14 @@ class Patchwork:
             project (str): Project link name, e.g. 'uboot'
             page (int): Page number, starting at 1
             per_page (int): Number of series in each page
+            max_age (float or None): Oldest cached copy to use, in seconds; 0
+                (the default) to read patchwork, or None to use any
 
         Returns:
             list of dict: Series information, as for get_series()
         """
-        return await self._request(
-            client, f'series/?project={project}&order=-date&page={page}'
-            f'&per_page={per_page}')
+        return await self._cached_request(
+            client, self.recent_series_path(project, page, per_page), max_age)
 
     async def get_series(self, client, link, max_age=SERIES_MAX_AGE):
         """Read information about a series

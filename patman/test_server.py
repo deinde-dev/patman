@@ -29,6 +29,7 @@ from patman import interpreter
 from patman.database import Pcommit
 from patman import patchwork
 from patman.patchwork import Patchwork
+from patman import pwcache
 from patman import server
 from patman import times
 from patman import traffic
@@ -1497,34 +1498,42 @@ class TestWebServer(unittest.TestCase, TestCommon):
         srv = self.make_server()
         srv.pwork_for_testing.fake_request = read
         now = [1000.0]
-        srv._clock = lambda: now[0]
+        srv.pwork_for_testing.cache = pwcache.Cache(
+            os.path.join(self.tmpdir, 'pwcache.db'), clock=lambda: now[0])
         query = 'series/?project=uboot&order=-date&page={}&per_page=50'
+
+        def at(when):
+            return times.to_str(datetime.fromtimestamp(when))
 
         def inbox(args=''):
             status, data = self.call(srv, 'GET', f'/api/inbox{args}')
             self.assertEqual(200, status)
             return data['series'][0]['id'], data['fetched']
 
-        with mock.patch.object(server.app.times, 'now_str',
-                               return_value='2026-10-19 11:00:00'):
-            self.assertEqual((1, '2026-10-19 11:00:00'), inbox())
+        self.assertEqual((1, at(1000)), inbox())
 
         # Showing it again, or its next page twice, reads only that page
         now[0] += server.app.INBOX_KEEP
-        self.assertEqual((1, '2026-10-19 11:00:00'), inbox())
+        self.assertEqual((1, at(1000)), inbox())
         self.assertEqual(2, inbox('?page=2')[0])
         self.assertEqual(2, inbox('?page=2')[0])
         self.assertEqual([query.format(1), query.format(2)], reads)
 
-        # Once it is too old, it is read again, along with the next page
+        # Once it is too old, it is read again, and so is the next page,
+        # which is now older than the first
         now[0] += 1
-        with mock.patch.object(server.app.times, 'now_str',
-                               return_value='2026-10-19 11:10:01'):
-            self.assertEqual((3, '2026-10-19 11:10:01'), inbox())
+        self.assertEqual((3, at(now[0])), inbox())
         self.assertEqual(4, inbox('?page=2')[0])
 
         # A refresh reads it at once
         self.assertEqual(5, inbox('?refresh=1')[0])
+        self.assertEqual(5, inbox()[0])
+
+        # It is kept when the server starts again
+        srv = self.make_server()
+        srv.pwork_for_testing.fake_request = read
+        srv.pwork_for_testing.cache = pwcache.Cache(
+            os.path.join(self.tmpdir, 'pwcache.db'), clock=lambda: now[0])
         self.assertEqual(5, inbox()[0])
         self.assertEqual(5, len(reads))
 
