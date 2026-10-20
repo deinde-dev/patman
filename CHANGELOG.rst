@@ -49,6 +49,9 @@ Changed
 
 Fixed
 ~~~~~
+- An AI review no longer carries a second Reviewed-by tag, with an address
+  which the agent guesses; patman drops any tag which the agent writes and
+  adds the reviewer's own.
 - The ``patman serve`` page no longer says 'offline' for good after the
   server misses one check of the sync state, e.g. while restarting; it asks
   again ten seconds later.

@@ -2214,6 +2214,41 @@ VERDICT: skip"""
         self.assertEqual('skip', verdict)
         self.assertEqual([], comments)
 
+    def test_review_parse_tags(self):
+        """Test that tags which the agent writes in a comment are dropped"""
+        from patman.review.emails import (parse_review_output,
+                                          format_review_email)
+
+        text = """GREETING: Jan
+COMMENT:
+> diff --git a/common/Kconfig b/common/Kconfig
+> @@ -885,9 +885,14 @@ config AVB_VERIFY
+> +	  Only mmc is initialised by AVB itself.
+
+BTW AVB_VERIFY still depends on MMC.
+
+> Reviewed-by: Fred <fred@example.com>
+Neither of these is blocking:
+
+Reviewed-by: Simon Glass <simon.glass@example.com>
+
+COMMENT:
+Tested-by: Simon Glass <simon.glass@example.com>
+
+VERDICT: approved"""
+        greeting, verdict, comments = parse_review_output(text)
+        self.assertEqual('approved', verdict)
+        self.assertEqual(1, len(comments))
+        self.assertEqual('BTW AVB_VERIFY still depends on MMC.\n\n'
+                         '> Reviewed-by: Fred <fred@example.com>\n'
+                         'Neither of these is blocking:', comments[0][1])
+
+        ctx = self._make_review_ctx(author_name='Jan Kehren',
+                                    author_email='jan@example.com')
+        reply = format_review_email(ctx, greeting, verdict, comments)
+        self.assertEqual(1, reply.count('Reviewed-by: Test <test@test.com>'))
+        self.assertNotIn('simon.glass@example.com', reply)
+
     def test_review_empty_dropped(self):
         """Test a non-approval with no comments yields no review"""
 
