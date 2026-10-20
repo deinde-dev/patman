@@ -4,6 +4,7 @@
 #
 """Tests for the cache of responses from patchwork"""
 
+import asyncio
 import os
 import shutil
 import sqlite3
@@ -13,6 +14,26 @@ from unittest import mock
 
 from u_boot_pylib import terminal
 from patman import pwcache
+from patman.patchwork import Patchwork
+
+
+def run(coro):
+    """Run a coroutine in a loop of its own
+
+    asyncio.run() leaves the thread with no event loop, which breaks later
+    tests in the same process that expect one
+
+    Args:
+        coro (coroutine): Coroutine to run
+
+    Returns:
+        Its result
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 class TestPwCache(unittest.TestCase):
@@ -120,6 +141,59 @@ class TestPwCache(unittest.TestCase):
             self.assertEqual('/x/pw.db', pwcache.default_path())
         with mock.patch.dict(os.environ, {'PATMAN_PWCACHE': 'off'}):
             self.assertIsNone(pwcache.default_path())
+
+    def test_get_patch(self):
+        """A patch is read from patchwork once, then from the cache"""
+        requests = []
+
+        def fake(subpath):
+            requests.append(subpath)
+            return {'id': 5, 'state': f'state{len(requests)}'}
+
+        pwork = Patchwork.for_testing(fake)
+        pwork.cache = self.cache()
+
+        def get(**kwargs):
+            return run(pwork.get_patch(None, '5', **kwargs))['state']
+
+        self.assertEqual('state1', get())
+        self.assertEqual('state1', get())
+        self.assertEqual((['patches/5/'], 1), (requests, pwork.cache_hits))
+
+        # Asking for the current state reads patchwork, and keeps the result
+        self.assertEqual('state2', get(max_age=0))
+        self.assertEqual('state2', get())
+        self.assertEqual(2, len(requests))
+
+        # Once the kept copy is too old, patchwork is read again
+        self.now += 2 * 60 * 60
+        self.assertEqual('state3', get())
+        self.assertEqual(3, len(requests))
+
+        # With no cache, every call reads patchwork
+        pwork.cache = False
+        self.assertEqual('state4', get())
+        self.assertEqual('state5', get())
+
+    def test_hits(self):
+        """Reads which the cache answers are counted for each server"""
+        pwork = Patchwork.for_testing(lambda _: {'id': 5, 'state': 'new'})
+        pwork.cache = self.cache()
+        for _ in range(3):
+            run(pwork.get_patch(None, '5'))
+        self.assertEqual({pwork.url: 2}, pwork.cache.hits_since(''))
+
+    def test_get_patch_broken(self):
+        """Patches are still read when the cache fails"""
+        pwork = Patchwork.for_testing(lambda _: {'id': 5, 'state': 'new'})
+        pwork.cache = self.cache()
+        pwork.cache.con = mock.MagicMock()
+        pwork.cache.con.execute.side_effect = sqlite3.OperationalError('full')
+        with terminal.capture():
+            for _ in range(2):
+                self.assertEqual('new',
+                                 run(pwork.get_patch(None, '5'))['state'])
+        self.assertEqual((2, 0), (pwork.request_count, pwork.cache_hits))
 
     def test_prune_daily(self):
         """Old entries are dropped when the cache is opened, once a day"""

@@ -17,6 +17,7 @@ from collections import namedtuple
 from u_boot_pylib import terminal
 from u_boot_pylib import tout
 
+from patman import pwcache
 from patman import traffic
 
 # Information passed to series_get_states()
@@ -59,6 +60,12 @@ DNS_ERROR = getattr(aiohttp, 'ClientConnectorDNSError', ())
 # Seconds to wait for a request to complete before trying again, which can be
 # changed with the 'patchwork_timeout' setting
 REQUEST_TIMEOUT = 30
+
+# Seconds for which each kind of response from patchwork is used again from
+# the cache, rather than read again (see pwcache)
+#
+# A patch's text does not change, but its state may
+PATCH_MAX_AGE = 60 * 60
 
 # Maximum number of requests to send to patchwork at once. Busy servers may
 # block a client which opens a lot of connections, so keep this small
@@ -223,6 +230,10 @@ class Patchwork:
         self.semaphore = asyncio.Semaphore(
             1 if single_thread else MAX_CONCURRENT)
         self.request_count = 0
+        # Cache of responses, None to use the default one, or False for none
+        self.cache = None
+        # Number of responses taken from the cache rather than patchwork
+        self.cache_hits = 0
 
     async def _request(self, client, subpath):
         """Call the patchwork API and return the result as JSON
@@ -290,6 +301,120 @@ class Patchwork:
                         raise
                     await asyncio.sleep(i + 1)
 
+    def _get_cache(self):
+        """Get the cache to use, opening the default one the first time
+
+        Returns:
+            pwcache.Cache or None: Cache, or None if there is none
+        """
+        if self.cache is None:
+            self.cache = pwcache.get() or False
+        return self.cache or None
+
+    def _from_cache(self, subpath, max_age, keep=None):
+        """Get a response from the cache, if there is a suitable one
+
+        Args:
+            subpath (str): Path of the request
+            max_age (float or None): Oldest response to use, in seconds; 0 to
+                use none (unless 'keep' says it is current), or None to use any
+            keep (callable or None): Function which is passed a cached
+                response and returns True if it is current however old it is,
+                e.g. because it cannot change
+
+        Returns:
+            dict or list or str or None: Response, or None if there is none
+        """
+        cache = self._get_cache()
+        if not cache or (max_age == 0 and not keep):
+            return None
+        data = cache.get(self.url, subpath, max_age, keep)
+        if data is not None:
+            self.cache_hits += 1
+            cache.add_hit(self.url)
+        return data
+
+    def _to_cache(self, subpath, data):
+        """Keep a response in the cache, if there is one
+
+        Args:
+            subpath (str): Path of the request
+            data (dict or list or str): Response
+        """
+        cache = self._get_cache()
+        if cache:
+            cache.put(self.url, subpath, data)
+
+    async def _cached_request(self, client, subpath, max_age, keep=None):
+        """Call the patchwork API, using a recent enough response if cached
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            subpath (str): URL subpath to use
+            max_age (float or None): Oldest cached response to use, in
+                seconds; 0 to always read patchwork, still caching the result,
+                or None to use any cached response
+            keep (callable or None): Function which is passed a cached
+                response and returns True if it is current however old it is
+
+        Returns:
+            dict: Json result
+
+        Raises:
+            ValueError: the URL could not be read
+        """
+        data = self._from_cache(subpath, max_age, keep)
+        if data is None:
+            data = await self._request(client, subpath)
+            self._to_cache(subpath, data)
+        return data
+
+    def read_time(self, subpath):
+        """Get when the cached copy of a response was read from patchwork
+
+        Args:
+            subpath (str): Path of the request, as from patch_path() etc.
+
+        Returns:
+            float or None: Time it was read, in seconds since the epoch, or
+                None if there is no copy
+        """
+        cache = self._get_cache()
+        return cache.fetched(self.url, subpath) if cache else None
+
+    def read_age(self, subpath):
+        """Get how long ago the cached copy of a response was read
+
+        Args:
+            subpath (str): Path of the request, as from patch_path() etc.
+
+        Returns:
+            float or None: Age in seconds, or None if there is no copy
+        """
+        cache = self._get_cache()
+        return cache.age(self.url, subpath) if cache else None
+
+    @staticmethod
+    def patch_path(patch_id):
+        """Get the request path for a patch, e.g. for read_time()"""
+        return f'patches/{patch_id}/'
+
+    @staticmethod
+    def comments_path(kind, item_id):
+        """Get the request path for the comments on a patch or cover letter
+
+        Args:
+            kind (str): 'patch' or 'cover'
+            item_id (str or int): Patchwork ID
+        """
+        return f"{'patches' if kind == 'patch' else 'covers'}/{item_id}/comments/"
+
+    @staticmethod
+    def recent_series_path(project, page, per_page):
+        """Get the request path for a page of the most recent series"""
+        return (f'series/?project={project}&order=-date&page={page}'
+                f'&per_page={per_page}')
+
     @staticmethod
     def set_timeout(secs):
         """Set the time to wait for each request before trying again
@@ -315,6 +440,7 @@ class Patchwork:
         pwork = Patchwork(None, show_progress=False)
         pwork.fake_request = func
         pwork.url = 'https://my-fake-url'
+        pwork.cache = False
         return pwork
 
     class _Stats:
@@ -622,12 +748,18 @@ class Patchwork:
                    f'&order=-date&per_page={per_page}')
         return await self._request(client, subpath)
 
-    async def get_patch(self, client, patch_id):
+    async def get_patch(self, client, patch_id, max_age=PATCH_MAX_AGE):
         """Read information about a patch
+
+        A copy kept from an earlier read is used if it is recent enough. The
+        text of a patch does not change, but its state and delegate may, so
+        pass max_age=0 when these must be current.
 
         Args:
             client (aiohttp.ClientSession): Session to use
             patch_id (str): Patchwork patch ID
+            max_age (float or None): Oldest kept copy to use, in seconds; 0 to
+                read patchwork, or None to use any kept copy
 
         Returns: dict containing patchwork's patch information
             "id": 185,
@@ -696,7 +828,8 @@ class Patchwork:
                 '''
             "prefixes": ["3/3", ...]
         """
-        return await self._request(client, f'patches/{patch_id}/')
+        return await self._cached_request(client, self.patch_path(patch_id),
+                                          max_age)
 
     async def get_patch_comments(self, client, patch_id):
         """Read comments about a patch
@@ -833,7 +966,8 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
         Requests:
             1 for patch, 1 for patch comments
         """
-        data = await self.get_patch(client, patch_id)
+        # The state is wanted, so read it from patchwork
+        data = await self.get_patch(client, patch_id, max_age=0)
         state = data['state']
         comment_data = await self.get_patch_comments(client, patch_id)
 
