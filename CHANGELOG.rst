@@ -17,6 +17,9 @@ Added
 
 Changed
 ~~~~~~~
+- The installation instructions say how to install the latest code from
+  GitHub, to try changes before they are released, and how to install with
+  pipx where pip cannot install into the system's Python.
 - Tapping the Inbox tab of the ``patman serve`` page shows the tab at once,
   saying that the inbox is loading while it is read from patchwork.
 
