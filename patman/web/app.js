@@ -1911,14 +1911,21 @@ async function refreshJobCount() {
   if (count) jobCountTimer = setTimeout(refreshJobCount, 3000);
 }
 
+// Seconds to wait before asking again when the server does not answer, e.g.
+// because it is restarting
+const SYNC_RETRY = 10;
+
 async function refreshSync() {
   const wasRunning = syncState && syncState.running;
   refreshJobCount();
+  clearTimeout(syncTimer);
   try {
     syncState = await api('sync');
   } catch (err) {
     syncBtn.className = 'bad';
     syncText.textContent = 'offline';
+    // Keep asking, so that this goes once the server is back
+    syncTimer = setTimeout(refreshSync, SYNC_RETRY * 1000);
     return;
   }
   const st = syncState;
@@ -1926,7 +1933,6 @@ async function refreshSync() {
                       syncOk(st) ? 'ok' : 'bad';
   syncText.textContent = st.running ? 'syncing' :
     st.finished ? ago(parseTime(st.finished)) : 'sync';
-  clearTimeout(syncTimer);
   syncTimer = setTimeout(refreshSync, st.running ? 1500 : 60000);
   if (location.hash === '#/sync') viewSync();
   else if (wasRunning && !st.running) route();
