@@ -1415,6 +1415,74 @@ class TestReview(CseriesTester):
         self.assertEqual([None], [call.get('resume') for call in calls])
         self.assertEqual('Hi Fred,\n\nLooks fine', db.review_get(other).body)
 
+    def test_review_revise_worktree(self):
+        """Revising one review runs the agent in the review's worktree"""
+        self.make_git_tree()
+        subprocess.run(['git', 'branch', 'pw-123-review'], cwd=self.tmpdir,
+                       check=True)
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'Fred series', None)
+        svid = db.ser_ver_add(sid, 1, link='123')
+        rid = db.review_add(svid, 1, 'Hi Fred,\n\nNit', False,
+                            '2026-10-01T00:00:00')
+        db.review_set_session(rid, 'sess-1')
+        db.commit()
+        wt_path = os.path.join(self.tmpdir, '.git', 'patman', 'worktrees',
+                               'pw-123-review')
+        seen = []
+
+        async def mock_agent(_prompt, _options):
+            seen.append(os.path.isdir(wt_path))
+            return True, '---SEQ 1---\nHi Fred,\n\nReviewed-by: Simon\n'
+
+        def run():
+            args = cmdline.parse_args(
+                ['review', '-s', '123', '--revise', 'Approve it', '-i', '1',
+                 '--reviewer', 'Simon Glass <sjg@chromium.org>'],
+                config_fname=False)
+            with mock.patch.object(review.stored.gitutil, 'get_top_level',
+                                   return_value=self.tmpdir), \
+                    mock.patch.object(review.core.claude_mod,
+                                      'run_agent_collect',
+                                      side_effect=mock_agent), \
+                    mock.patch.object(review.core.claude_mod,
+                                      'check_available', return_value=True), \
+                    mock.patch.object(review.common,
+                                      'ClaudeAgentOptions') as opts, \
+                    mock.patch.object(review.stored, '_review_commits',
+                                      return_value=['abc1 dm: Fix it']), \
+                    terminal.capture():
+                self.assertEqual(
+                    0, review.stored._do_revise(args, None, cser, '123'))
+            db.review_set_body(rid, 'Hi Fred,\n\nNit', False)
+            db.commit()
+            return opts.call_args.kwargs['cwd']
+
+        # The worktree is removed after the review, so it is checked out
+        # again for the agent and then removed, leaving the branch
+        self.assertEqual(wt_path, run())
+        self.assertEqual([True], seen)
+        self.assertFalse(os.path.exists(wt_path))
+        out = subprocess.run(['git', 'branch', '--list', 'pw-123-review'],
+                             cwd=self.tmpdir, capture_output=True, text=True,
+                             check=True).stdout
+        self.assertIn('pw-123-review', out)
+
+        # A worktree which is still there is used and left in place
+        subprocess.run(['git', 'worktree', 'add', '-q', wt_path,
+                        'pw-123-review'], cwd=self.tmpdir, check=True)
+        self.assertEqual(wt_path, run())
+        self.assertTrue(os.path.isdir(wt_path))
+
+        # If the branch cannot be checked out, the agent runs in the main
+        # checkout
+        subprocess.run(['git', 'worktree', 'remove', wt_path],
+                       cwd=self.tmpdir, check=True)
+        subprocess.run(['git', 'checkout', '-q', 'pw-123-review'],
+                       cwd=self.tmpdir, check=True)
+        self.assertEqual(self.tmpdir, run())
+
     def test_review_send(self):
         """The Gmail drafts of a series' reviews can be sent"""
         cser = self.get_database()
