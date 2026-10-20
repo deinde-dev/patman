@@ -10,6 +10,10 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman status`` and the sync follow the project's events on patchwork,
+  which say when a patch's state or delegate changes, and use the other
+  patches from the cache rather than reading each one again. This halves
+  the requests a sync sends to patchwork.
 - The patchwork traffic on the ``patman serve`` page lists the requests of
   each kind, such as ``patch-comments`` or ``series-search``, for today and
   the last seven days, to show what the traffic to each server is made of.

@@ -79,6 +79,23 @@ MBOX_MAX_AGE = 60 * 60
 # The projects on a server rarely change
 PROJECTS_MAX_AGE = 24 * 60 * 60
 
+# Events which say that a patch has changed, so that a copy of it in the
+# cache is out of date
+PATCH_EVENTS = ('patch-state-changed', 'patch-delegated')
+
+# Seconds within which the events of a project are not checked again, so
+# that a sync of many series checks them once
+EVENTS_RECHECK = 60
+
+# Seconds after which the events of a project are no longer followed, if
+# they have not been checked, since there may be too many to read
+EVENTS_MAX_GAP = 7 * 24 * 60 * 60
+
+# Events to read on each page, and the most pages to read when checking the
+# events of a project; if there are more, following begins again
+EVENTS_PER_PAGE = 100
+EVENTS_MAX_PAGES = 20
+
 # Maximum number of requests to send to patchwork at once. Busy servers may
 # block a client which opens a lot of connections, so keep this small
 MAX_CONCURRENT = 4
@@ -281,6 +298,9 @@ class Patchwork:
         self.cache = None
         # Number of responses taken from the cache rather than patchwork
         self.cache_hits = 0
+        # Held while checking the events of a project, so that this is done
+        # once when many series are synced at once
+        self._events_lock = asyncio.Lock()
 
     async def _request(self, client, subpath):
         """Call the patchwork API and return the result as JSON
@@ -360,24 +380,28 @@ class Patchwork:
             self.cache = pwcache.get() or False
         return self.cache or None
 
-    def _from_cache(self, subpath, max_age, keep=None):
+    def _from_cache(self, subpath, max_age, keep=None, since=None):
         """Get a response from the cache, if there is a suitable one
 
         Args:
             subpath (str): Path of the request
             max_age (float or None): Oldest response to use, in seconds; 0 to
-                use none (unless 'keep' says it is current), or None to use any
+                use none (unless 'keep' or 'since' says it is current), or
+                None to use any
             keep (callable or None): Function which is passed a cached
                 response and returns True if it is current however old it is,
                 e.g. because it cannot change
+            since (float or None): Use a response read at or after this time,
+                however old, since events keep it current (see
+                follow_events())
 
         Returns:
             dict or list or str or None: Response, or None if there is none
         """
         cache = self._get_cache()
-        if not cache or (max_age == 0 and not keep):
+        if not cache or (max_age == 0 and not keep and since is None):
             return None
-        data = cache.get(self.url, subpath, max_age, keep)
+        data = cache.get(self.url, subpath, max_age, keep, since)
         if data is not None:
             self.cache_hits += 1
             cache.add_hit(self.url)
@@ -394,7 +418,9 @@ class Patchwork:
         if cache:
             cache.put(self.url, subpath, data)
 
-    async def _cached_request(self, client, subpath, max_age, keep=None):
+    # pylint: disable-next=R0913
+    async def _cached_request(self, client, subpath, max_age, keep=None,
+                              since=None):
         """Call the patchwork API, using a recent enough response if cached
 
         Args:
@@ -405,6 +431,8 @@ class Patchwork:
                 or None to use any cached response
             keep (callable or None): Function which is passed a cached
                 response and returns True if it is current however old it is
+            since (float or None): Use a response read at or after this time,
+                however old, since events keep it current
 
         Returns:
             dict: Json result
@@ -412,11 +440,85 @@ class Patchwork:
         Raises:
             ValueError: the URL could not be read
         """
-        data = self._from_cache(subpath, max_age, keep)
+        data = self._from_cache(subpath, max_age, keep, since)
         if data is None:
             data = await self._request(client, subpath)
             self._to_cache(subpath, data)
         return data
+
+    async def follow_events(self, client):
+        """Follow the events of the project, to keep patches in the cache
+        current
+
+        Patchwork records an event when a patch's state or delegate changes.
+        Reading these since the last check says which patches have changed,
+        so those are dropped from the cache and the rest are current, which
+        saves reading each patch again to see its state. Comments have no
+        events on some servers, so are not covered.
+
+        Following begins with the first check, so only patches read since
+        then are covered. If the events have not been checked for
+        EVENTS_MAX_GAP, or there are too many to read, following begins
+        again.
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+
+        Returns:
+            float or None: Time from which patches in the cache are kept
+                current, or None if events are not followed, e.g. because
+                there is no cache or no project
+        """
+        cache = self._get_cache()
+        project = self.link_name
+        if not cache or not project:
+            return None
+        async with self._events_lock:
+            now = cache.now()
+            state = cache.get_follow(self.url, project)
+            if state:
+                started, last, checked = state
+                if now - checked < EVENTS_RECHECK:
+                    return started
+                if now - checked <= EVENTS_MAX_GAP:
+                    events = await self._read_events(client, project, last)
+                    if events is not None:
+                        for event in events:
+                            if event['category'] in PATCH_EVENTS:
+                                cache.drop(self.url, self.patch_path(
+                                    event['payload']['patch']['id']))
+                        last = max([last] + [ev['date'] for ev in events])
+                        cache.set_follow(self.url, project, started, last, now)
+                        return started
+
+            # Begin following, from the newest event
+            newest = await self._request(
+                client, f'events/?project={project}&per_page=1')
+            last = newest[0]['date'] if newest else ''
+            cache.set_follow(self.url, project, now, last, now)
+            return now
+
+    async def _read_events(self, client, project, since):
+        """Read the events of a project since a date
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            project (str): Project link name, e.g. 'uboot'
+            since (str): Date of the newest event seen, as patchwork gives it
+
+        Returns:
+            list of dict or None: Events, or None if there are more than
+                EVENTS_MAX_PAGES pages of them
+        """
+        events = []
+        for page in range(1, EVENTS_MAX_PAGES + 1):
+            res = await self._request(
+                client, f'events/?project={project}&since={quote_plus(since)}'
+                f'&per_page={EVENTS_PER_PAGE}&page={page}')
+            events += res
+            if len(res) < EVENTS_PER_PAGE:
+                return events
+        return None
 
     def read_time(self, subpath):
         """Get when the cached copy of a response was read from patchwork
@@ -819,7 +921,8 @@ class Patchwork:
                    f'&order=-date&per_page={per_page}')
         return await self._request(client, subpath)
 
-    async def get_patch(self, client, patch_id, max_age=PATCH_MAX_AGE):
+    async def get_patch(self, client, patch_id, max_age=PATCH_MAX_AGE,
+                        since=None):
         """Read information about a patch
 
         A copy kept from an earlier read is used if it is recent enough. The
@@ -831,6 +934,9 @@ class Patchwork:
             patch_id (str): Patchwork patch ID
             max_age (float or None): Oldest kept copy to use, in seconds; 0 to
                 read patchwork, or None to use any kept copy
+            since (float or None): Use a kept copy read at or after this
+                time, however old, as returned by follow_events(), if it is
+                in the project whose events are followed
 
         Returns: dict containing patchwork's patch information
             "id": 185,
@@ -899,8 +1005,20 @@ class Patchwork:
                 '''
             "prefixes": ["3/3", ...]
         """
+        keep = self._in_project if since is not None else None
         return await self._cached_request(client, self.patch_path(patch_id),
-                                          max_age)
+                                          max_age, keep, since)
+
+    def _in_project(self, data):
+        """Check whether a patch is in the project whose events are followed
+
+        Args:
+            data (dict): Patch, as from get_patch()
+
+        Returns:
+            bool: True if it is in the project
+        """
+        return (data.get('project') or {}).get('link_name') == self.link_name
 
     async def get_patch_comments(self, client, patch_id,
                                  max_age=COMMENTS_MAX_AGE):
@@ -1035,21 +1153,25 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
         """
         return f'{self.url}/project/{self.link_name}/list/?series={link}&state=*&archive=both'
 
-    async def _get_patch_status(self, client, patch_id):
+    async def _get_patch_status(self, client, patch_id, since=None):
         """Get the patch status
 
         Args:
             client (aiohttp.ClientSession): Session to use
             patch_id (int): Patch ID to look up in patchwork
+            since (float or None): Time from which patches in the cache are
+                kept current by events, as returned by follow_events(), or
+                None if they are not
 
         Return:
             PATCH: Patch information
 
         Requests:
-            1 for patch, 1 for patch comments
+            1 for patch, unless events keep it current, 1 for patch comments
         """
-        # The state is wanted, so read it from patchwork
-        data = await self.get_patch(client, patch_id, max_age=0)
+        # The state is wanted, so read it from patchwork, unless events say
+        # that the copy in the cache is current
+        data = await self.get_patch(client, patch_id, max_age=0, since=since)
         state = data['state']
         comment_data = await self.get_patch_comments(client, patch_id,
                                                      max_age=0)
@@ -1147,8 +1269,9 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
         count = len(patch_list)
         patches = []
         if read_comments:
+            since = await self.follow_events(client)
             # Returns a list of Patch objects
-            tasks = [self._get_patch_status(client, patch_list[i]['id'])
+            tasks = [self._get_patch_status(client, patch_list[i]['id'], since)
                      for i in range(count)]
 
             patch_status = await asyncio.gather(*tasks)
