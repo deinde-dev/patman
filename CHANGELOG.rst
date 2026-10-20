@@ -15,6 +15,9 @@ Changed
 
 Fixed
 ~~~~~
+- Settings for the options of a subcommand of a subcommand, such as
+  ``keep_change_id`` or ``insert_base_commit`` for ``patman series send``,
+  take effect. They were only used by ``patman send``.
 - ``patman review --revise`` on a single review carries on from the agent
   session which wrote it again. The session belongs to the review's worktree,
   which is removed once the review is done, so the revision checks out the
