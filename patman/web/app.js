@@ -1769,6 +1769,12 @@ function inboxCard(s, ups, pw) {
 // Show the inbox; 'more' adds the next page, and 'refresh' has the server read
 // it from patchwork again rather than use what it read in the last few minutes
 async function viewInbox(more, refresh) {
+  // Reading patchwork can take a while, so show the tab straight away
+  const hash = location.hash;
+  if (!more && !refresh) {
+    setView('Inbox', 'inbox', false,
+            h('div', { class: 'spinner' }, 'Loading the inbox…'));
+  }
   const upstreams = await api('upstreams').catch(() => []);
   let ups = null;
   try { ups = localStorage.getItem('patman-inbox-ups'); } catch (e) { /* ignore */ }
@@ -1781,6 +1787,8 @@ async function viewInbox(more, refresh) {
   }
   const data = await api(`inbox?ups=${encodeURIComponent(ups)}&page=${inbox.page + 1}` +
                          (refresh ? '&refresh=1' : ''));
+  // Leave alone whatever screen was chosen while waiting
+  if (location.hash !== hash) return;
   if (inbox.page === 0) inbox.fetched = data.fetched;
   inbox.page = data.page;
   inbox.series.push(...data.series);
