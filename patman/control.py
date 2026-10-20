@@ -29,6 +29,7 @@ from u_boot_pylib import tout
 
 from patman import cseries
 from patman import dbmerge
+from patman import lore
 from patman import patchstream
 from patman import review as review_mod
 from patman import send
@@ -746,6 +747,7 @@ def do_patman(args, test_db=None, pwork=None, cser=None):
     """
     if getattr(args, 'patchwork_timeout', None):
         Patchwork.set_timeout(args.patchwork_timeout)
+    lore.set_mode(getattr(args, 'lore', None) or 'hint')
     if args.full_help:
         # The pager takes a single file, so put the parts of the manual
         # together in one

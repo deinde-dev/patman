@@ -152,6 +152,39 @@ used, e.g. because the disk is full, patman says so once and reads patchwork
 instead. To use another file, set ``PATMAN_PWCACHE`` to its path, or set it
 to ``off`` to use no cache.
 
+Reading replies from lore
+-------------------------
+
+Patchwork cannot say which patches have new comments, so ``patman status`` and
+the sync would read the comments on every patch. Since each comment is also an
+email, patman reads the thread of the series from `lore.kernel.org
+<https://lore.kernel.org>`_ instead, which gives every reply in one request,
+and uses it to see which patches have new replies. Only those are read from
+patchwork, along with any whose comments have not been read from patchwork for
+a week, in case lore lacks a reply, as it sometimes does. The comments
+themselves still come from patchwork, so the review tags are the same.
+
+Lore's ``all`` archive finds the thread on any list which lore carries. If
+lore does not have the thread, or is missing one of the patches, e.g. because
+it is a few minutes behind, the comments are read from patchwork as before.
+
+The ``--lore`` option, or the ``lore`` setting, chooses how lore is used:
+
+``hint`` (the default)
+    Use lore to see which patches have new replies, as above
+
+``use``
+    Take the comments from lore itself, which saves more requests, but misses
+    any reply which lore lacks
+
+``off``
+    Do not use lore; ``--no-lore`` does the same
+
+For example, to take the comments from lore::
+
+    [settings]
+    lore: use
+
 Tracking several series
 -----------------------
 
