@@ -10,6 +10,9 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman review`` can review a series which patchwork has not received in
+  full, as happens when it misses a patch, taking the missing patches from
+  the thread on lore.kernel.org and applying the series from lore's copy.
 - The patchwork traffic on the ``patman serve`` page gives the size of the
   reads which the cache answers, e.g. '638 from the cache (8.1 MB)', as well
   as their number.

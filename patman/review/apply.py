@@ -28,12 +28,16 @@ from patman.review import lookup
 from patman.review import prompts
 
 
-async def fetch_mbox(pwork, link):
+async def fetch_mbox(pwork, link, series_data=None):
     """Download the series mbox file from patchwork
+
+    If patchwork lacks patches which were taken from lore, the whole series
+    is taken from lore instead, so that it can be applied.
 
     Args:
         pwork (Patchwork): Patchwork instance to fetch from
         link (str): Patchwork series link/ID
+        series_data (dict or None): Series, as from lookup.fetch_series()
 
     Returns:
         str: Path to the downloaded mbox file
@@ -41,11 +45,16 @@ async def fetch_mbox(pwork, link):
     Raises:
         ValueError: if the download fails
     """
-    tout.notice(f'Downloading mbox for series {link} from {pwork.url}')
     mbox_path = os.path.join(tempfile.gettempdir(),
                              f'patman_review_{link}.mbox')
-    async with aiohttp.ClientSession() as client:
-        content = await pwork.get_series_mbox(client, link)
+    content = pwork.lore_mbox(series_data) if series_data else None
+    if content:
+        tout.notice(f'Taking series {link} from lore, since patchwork lacks '
+                    'some of its patches')
+    else:
+        tout.notice(f'Downloading mbox for series {link} from {pwork.url}')
+        async with aiohttp.ClientSession() as client:
+            content = await pwork.get_series_mbox(client, link)
     if not content:
         raise ValueError(f'Empty mbox downloaded for series {link}')
 
@@ -54,8 +63,9 @@ async def fetch_mbox(pwork, link):
     return mbox_path
 
 
+# pylint: disable-next=R0913
 async def apply_series(pwork, link, branch_name, upstream_branch,
-                       repo_path):
+                       repo_path, series_data=None):
     """Download and apply a patch series to a new local branch
 
     Uses the Claude agent to handle the git am process, including conflict
@@ -67,6 +77,7 @@ async def apply_series(pwork, link, branch_name, upstream_branch,
         branch_name (str): Name for the new branch
         upstream_branch (str): Branch to base from
         repo_path (str): Path to the git repository
+        series_data (dict or None): Series, as from lookup.fetch_series()
 
     Returns:
         tuple: (success, branch_name) where success is bool and
@@ -77,7 +88,7 @@ async def apply_series(pwork, link, branch_name, upstream_branch,
         return False, None
 
     # Download the mbox
-    mbox_path = await fetch_mbox(pwork, link)
+    mbox_path = await fetch_mbox(pwork, link, series_data)
 
     # Build the prompt and run the agent
     prompt = prompts.build_apply_prompt(
@@ -95,7 +106,9 @@ async def apply_series(pwork, link, branch_name, upstream_branch,
     return success, branch_name
 
 
-def apply_series_sync(pwork, link, branch_name, upstream_branch, repo_path):
+# pylint: disable-next=R0913
+def apply_series_sync(pwork, link, branch_name, upstream_branch, repo_path,
+                      series_data=None):
     """Synchronous wrapper for apply_series()
 
     Args:
@@ -104,12 +117,13 @@ def apply_series_sync(pwork, link, branch_name, upstream_branch, repo_path):
         branch_name (str): Name for the new branch
         upstream_branch (str): Branch to base from
         repo_path (str): Path to the git repository
+        series_data (dict or None): Series, as from lookup.fetch_series()
 
     Returns:
         tuple: (success, branch_name)
     """
     return common.run(apply_series(
-        pwork, link, branch_name, upstream_branch, repo_path))
+        pwork, link, branch_name, upstream_branch, repo_path, series_data))
 
 
 def main_branch(ups, git_dir=None):
@@ -305,7 +319,7 @@ def apply_and_check(ctx, link):
         False if applying failed
     """
     success, _ = apply_series_sync(ctx.pwork, link, ctx.branch_name,
-        ctx.upstream_branch, ctx.repo_path)
+        ctx.upstream_branch, ctx.repo_path, ctx.series_data)
 
     if not success:
         # The agent hit a real problem, or was interrupted (which leaves

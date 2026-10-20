@@ -212,9 +212,71 @@ def parse_mbox(data):
     messages = []
     for part in re.split(rb'^From [^\n]*\n', data, flags=re.M):
         if part.strip():
-            messages.append(email.message_from_bytes(
-                part, policy=email.policy.default))
+            msg = email.message_from_bytes(part, policy=email.policy.default)
+            # Keep the message as sent, for writing it to an mbox again
+            msg.raw = part
+            messages.append(msg)
     return messages
+
+
+# The parts of the prefix of a patch's subject, e.g. '[PATCH v3 2/5]'
+RE_SUBJECT = re.compile(r'\s*\[([^\]]*)\]\s*(.*)', re.S)
+RE_SEQ = re.compile(r'\b(\d+)/(\d+)\b')
+RE_VERSION = re.compile(r'\bv(\d+)\b', re.I)
+
+
+def patch_info(msg):
+    """Get the place of a patch in its series, from its subject
+
+    Args:
+        msg (email.message.EmailMessage): Message
+
+    Returns:
+        tuple or None: None if the message is not a patch in a series, else:
+            int: Version, 1 if none is given
+            int: Number of the patch, starting at 1
+            int: Number of patches in the series
+            str: Name as patchwork gives it, e.g. '[v3,2/5] dm: Tidy up'
+    """
+    subject = ' '.join(str(msg.get('Subject', '')).split())
+    match = RE_SUBJECT.match(subject)
+    if not match or 'PATCH' not in match.group(1).upper():
+        return None
+    seq = RE_SEQ.search(match.group(1))
+    if not seq or int(seq.group(1)) == 0:
+        return None
+    version = RE_VERSION.search(match.group(1))
+    parts = [part for part in match.group(1).split()
+             if part.upper() != 'PATCH']
+    return (int(version.group(1)) if version else 1, int(seq.group(1)),
+            int(seq.group(2)), f"[{','.join(parts)}] {match.group(2)}")
+
+
+def to_patch(msg, patch_id):
+    """Turn a message holding a patch into a patch, as patchwork gives them
+
+    Args:
+        msg (email.message.EmailMessage): Message
+        patch_id (str): ID to give it, e.g. 'lore:<msgid>'
+
+    Returns:
+        dict: Patch, with 'id', 'msgid', 'name', 'date', 'submitter',
+            'content' (the commit message), 'diff', 'headers', 'state' and
+            'web_url'
+    """
+    cmt = to_comment(msg)
+    body = cmt['content']
+    pos = body.find('\ndiff --git ')
+    info = patch_info(msg)
+    return {
+        'id': patch_id, 'msgid': cmt['msgid'], 'date': cmt['date'],
+        'name': info[3] if info else cmt['subject'],
+        'submitter': cmt['submitter'],
+        'content': body if pos < 0 else body[:pos + 1],
+        'diff': '' if pos < 0 else body[pos + 1:],
+        'headers': cmt['headers'], 'state': 'new',
+        'web_url': cmt['web_url'], 'project': {},
+    }
 
 
 def _get_body(msg):

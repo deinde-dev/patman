@@ -454,11 +454,17 @@ def _register_series(cser, clean_name, version, link, series_data,
                 None, None, None))
 
         patches = series_data.get('patches', [])
+
+        def pw_id(patch):
+            # A patch taken from lore is not on patchwork, so has no ID there
+            pid = patch.get('id')
+            return pid if isinstance(pid, int) else None
+
         pcommits = []
         for i, patch in enumerate(patches):
             pcommits.append(database.Pcommit(idnum=None, seq=i,
                 subject=patch.get('name', ''), svid=svid, change_id=None,
-                state=None, patch_id=patch.get('id'), num_comments=0))
+                state=None, patch_id=pw_id(patch), num_comments=0))
         if pcommits:
             cser.db.pcommit_add_list(svid, pcommits)
 
@@ -466,7 +472,7 @@ def _register_series(cser, clean_name, version, link, series_data,
             # patch_id from the patchwork data
             pclist = cser.db.pcommit_get_list(svid)
             for pcm, patch in zip(pclist, patches):
-                patch_id = patch.get('id')
+                patch_id = pw_id(patch)
                 if patch_id:
                     cser.db.pcommit_update(database.Pcommit(
                         idnum=pcm.idnum, seq=pcm.seq, subject=pcm.subject,

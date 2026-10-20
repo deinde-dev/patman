@@ -2088,6 +2088,21 @@ class TestReview(CseriesTester):
         svr = cser.db.ser_ver_get_by_id(v2[3])
         self.assertEqual((9, '[v2,0/1] foo bar'), (svr.cover_id, svr.name))
 
+    def test_register_series_lore(self):
+        """A patch taken from lore is recorded with no patchwork ID"""
+        cser = self.get_cser()
+        series_data = {
+            'patches': [{'id': 1, 'name': '[1/2] foo'},
+                        {'id': 'lore:p2@x', 'name': '[2/2] bar'}],
+            'cover_letter': None,
+        }
+        review.core._register_series(cser, 'foo', 1, '502', series_data)
+        cser.commit()
+        svid = cser.db.series_find_by_link('502')[3]
+        self.assertEqual([(0, 1), (1, None)],
+                         [(pcm.seq, pcm.patch_id)
+                          for pcm in cser.db.pcommit_get_list(svid)])
+
     def test_review_get_previous_skips_gap(self):
         """Test prior-review lookup skips versions that have no reviews"""
         cser = self.get_cser()
