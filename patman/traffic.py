@@ -6,7 +6,8 @@
 
 A busy patchwork server may block a client which sends it a lot of
 requests, so patman notes how many it sends, and how much it receives, in
-the 'traffic' table of the database, in hourly totals for each server.
+the 'traffic' table of the database, in hourly totals for each server and
+kind of request, e.g. 'patch-comments' (see patchwork.request_kind()).
 The counts are kept in memory and written out when patman exits, or by the
 server after each request it handles, since patchwork may be read after
 the database is closed.
@@ -18,7 +19,7 @@ from datetime import datetime, timedelta
 import os
 
 # Counts not yet written to the database
-#   key (str): URL of the patchwork server
+#   key (tuple of str): URL of the patchwork server, kind of request
 #   value (list of int): [number of requests, bytes received]
 _counts = defaultdict(lambda: [0, 0])
 
@@ -30,15 +31,17 @@ _db_path = None  # pylint: disable=C0103
 KEEP_DAYS = 90
 
 
-def add(url, requests=0, nbytes=0):
+def add(url, requests=0, nbytes=0, kind=''):
     """Count requests sent to a patchwork server, or bytes received
 
     Args:
         url (str): URL of the patchwork server
         requests (int): Number of requests sent
         nbytes (int): Number of bytes received
+        kind (str): Kind of request, e.g. 'patch-comments', or '' if not
+            known
     """
-    item = _counts[url]
+    item = _counts[url, kind]
     item[0] += requests
     item[1] += nbytes
 
@@ -47,10 +50,11 @@ def take():
     """Get the counts not yet written out, and forget them
 
     Return:
-        dict: key (str): URL of the patchwork server
+        dict: key (tuple of str): URL of the patchwork server, kind of
+                request
             value (tuple): (number of requests, bytes received)
     """
-    out = {url: tuple(item) for url, item in _counts.items()}
+    out = {key: tuple(item) for key, item in _counts.items()}
     _counts.clear()
     return out
 
@@ -138,6 +142,10 @@ def get_summary(db, now=None, cache=None):
                 since midnight and in the last seven days
             cached (dict): Number of reads answered by the cache in each of
                 these periods, keyed by 'hour', 'today' and 'week'
+            kinds (dict): The requests of each kind, e.g. 'patch-comments',
+                today and in the last seven days: key (str): kind
+                value (dict): [requests, bytes] keyed by 'today' and 'week'.
+                Requests counted before kinds were recorded are left out
     """
     now = now or datetime.now()
     periods = {
@@ -150,11 +158,17 @@ def get_summary(db, now=None, cache=None):
     def item(url):
         return out.setdefault(url, {
             'url': url, 'hour': [0, 0], 'today': [0, 0], 'week': [0, 0],
-            'cached': {'hour': 0, 'today': 0, 'week': 0}})
+            'cached': {'hour': 0, 'today': 0, 'week': 0}, 'kinds': {}})
 
     for name, since in periods.items():
         for url, (requests, nbytes) in db.traffic_get(since).items():
             item(url)[name] = [requests, nbytes]
+        if name != 'hour':
+            for (url, kind), counts in db.traffic_get_kinds(since).items():
+                if kind:
+                    item(url)['kinds'].setdefault(
+                        kind, {'today': [0, 0], 'week': [0, 0]})[name] = \
+                        list(counts)
         if cache:
             for url, count in cache.hits_since(since).items():
                 item(url)['cached'][name] = count

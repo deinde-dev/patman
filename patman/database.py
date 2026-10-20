@@ -22,7 +22,7 @@ from u_boot_pylib import tout
 from patman.series import Series
 
 # Schema version (version 0 means there is no database yet)
-LATEST = 16
+LATEST = 17
 
 # Information about a review record
 # Review status values
@@ -344,6 +344,21 @@ class Database:  # pylint:disable=R0904
         """Allow reviewed series to be hidden from the list of reviews"""
         self.cur.execute('ALTER TABLE series ADD COLUMN hidden BIT')
 
+    def _migrate_to_v17(self):
+        """Count the requests to patchwork servers by kind, too
+
+        The kind is part of the key, so the table is made again; the earlier
+        counts have no kind
+        """
+        self.cur.execute(
+            'CREATE TABLE traffic_new (hour TEXT, url TEXT, kind TEXT, '
+            'requests INTEGER, bytes INTEGER, PRIMARY KEY (hour, url, kind))')
+        self.cur.execute(
+            "INSERT INTO traffic_new SELECT hour, url, '', requests, bytes "
+            'FROM traffic')
+        self.cur.execute('DROP TABLE traffic')
+        self.cur.execute('ALTER TABLE traffic_new RENAME TO traffic')
+
     # pylint: disable=R0912
     def migrate_to(self, dest_version):
         """Migrate the database to the selected version
@@ -408,6 +423,8 @@ class Database:  # pylint:disable=R0904
                 self._migrate_to_v15()
             elif version == 16:
                 self._migrate_to_v16()
+            elif version == 17:
+                self._migrate_to_v17()
 
             # Save the new version if we have a schema_version table
             if version > 1:
@@ -456,18 +473,21 @@ class Database:  # pylint:disable=R0904
 
         Args:
             hour (str): Hour to add to, e.g. '2026-10-19 08'
-            counts (dict): key (str): URL of the patchwork server
+            counts (dict): key (tuple of str or str): URL of the patchwork
+                    server and the kind of request, e.g. 'patch-comments', or
+                    just the URL if the kind is not known
                 value (tuple): (number of requests, bytes received)
             drop_before (str or None): Drop the counts for hours before this
                 one, or None to keep them all
         """
-        for url, (requests, nbytes) in counts.items():
+        for key, (requests, nbytes) in counts.items():
+            url, kind = key if isinstance(key, tuple) else (key, '')
             self.execute(
-                'INSERT INTO traffic (hour, url, requests, bytes) '
-                'VALUES (?, ?, ?, ?) ON CONFLICT (hour, url) DO UPDATE SET '
-                'requests = requests + excluded.requests, '
+                'INSERT INTO traffic (hour, url, kind, requests, bytes) '
+                'VALUES (?, ?, ?, ?, ?) ON CONFLICT (hour, url, kind) DO '
+                'UPDATE SET requests = requests + excluded.requests, '
                 'bytes = bytes + excluded.bytes',
-                (hour, url, requests, nbytes))
+                (hour, url, kind, requests, nbytes))
         if drop_before:
             self.execute('DELETE FROM traffic WHERE hour < ?', (drop_before,))
 
@@ -485,6 +505,23 @@ class Database:  # pylint:disable=R0904
             'SELECT url, SUM(requests), SUM(bytes) FROM traffic '
             'WHERE hour >= ? GROUP BY url', (since,))
         return {url: (requests, nbytes) for url, requests, nbytes in res}
+
+    def traffic_get_kinds(self, since):
+        """Get the requests of each kind sent to patchwork since an hour
+
+        Args:
+            since (str): First hour to include, e.g. '2026-10-19 08'
+
+        Return:
+            dict: key (tuple of str): URL of the patchwork server, kind of
+                    request ('' for those counted before kinds were)
+                value (tuple): (number of requests, bytes received)
+        """
+        res = self.execute(
+            'SELECT url, kind, SUM(requests), SUM(bytes) FROM traffic '
+            'WHERE hour >= ? GROUP BY url, kind', (since,))
+        return {(url, kind): (requests, nbytes)
+                for url, kind, requests, nbytes in res}
 
     def commit(self):
         """Commit changes to the database"""

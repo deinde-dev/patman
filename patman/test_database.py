@@ -290,7 +290,14 @@ class TestDatabase(CseriesTester):
             self.assertEqual(f'Update database to v{version}',
                              out.getvalue().strip())
             self.assertEqual(version, db.get_schema_version())
-        self.assertEqual(16, database.LATEST)
+            if version == 16:
+                # Traffic counted before v17 has no kind
+                db.execute("INSERT INTO traffic (hour, url, requests, bytes) "
+                           "VALUES ('2026-10-18 09', 'https://pw', 5, 100)")
+                db.commit()
+        self.assertEqual(17, database.LATEST)
+        self.assertEqual({('https://pw', ''): (5, 100)},
+                         db.traffic_get_kinds('2026-10-18 00'))
 
     def test_traffic(self):
         """Requests to patchwork are counted by the hour"""
@@ -317,7 +324,7 @@ class TestDatabase(CseriesTester):
         traffic.add('https://pw', requests=4, nbytes=40)
         with mock.patch.object(traffic, '_db_path', db.db_path):
             traffic._save_at_exit()
-            self.assertEqual({'https://pw': (4, 40)}, traffic.take())
+            self.assertEqual({('https://pw', ''): (4, 40)}, traffic.take())
 
             traffic.add('https://pw', requests=4, nbytes=40)
             db.close()

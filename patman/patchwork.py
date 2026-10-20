@@ -83,6 +83,25 @@ PROJECTS_MAX_AGE = 24 * 60 * 60
 # block a client which opens a lot of connections, so keep this small
 MAX_CONCURRENT = 4
 
+# The kinds of request sent to patchwork, for counting them (see
+# request_kind()). Each is (kind, regex matching the request path), tried in
+# order
+REQUEST_KINDS = [
+    ('patch-comments', re.compile(r'patches/\d+/comments/')),
+    ('patch', re.compile(r'patches/\d+/')),
+    ('cover-comments', re.compile(r'covers/\d+/comments/')),
+    ('cover', re.compile(r'covers/\d+/')),
+    ('mbox', re.compile(r'series/\d+/mbox/')),
+    ('series', re.compile(r'series/\d+/')),
+    ('patch-states', re.compile(r'patches/\?series=')),
+    ('series-search', re.compile(r'series/\?.*\bq=')),
+    ('recent-series', re.compile(r'series/\?')),
+    ('patch-search', re.compile(r'patches/\?.*\bq=')),
+    ('patch-list', re.compile(r'patches/\?')),
+    ('projects', re.compile(r'projects/')),
+    ('events', re.compile(r'events/')),
+]
+
 # Patches which are part of a multi-patch series are shown with a prefix like
 # [prefix, version, sequence], for example '[RFC, v2, 3/5]'. All but the last
 # part is optional. This decodes the string into groups. For single patches
@@ -202,6 +221,22 @@ class Review:
         self.snippets = snippets
 
 
+def request_kind(subpath):
+    """Get the kind of a request to patchwork, for counting it
+
+    Args:
+        subpath (str): Path of the request, e.g. 'patches/123/comments/'
+
+    Returns:
+        str: Kind, e.g. 'patch-comments', or the first part of the path if
+            it is not a known kind
+    """
+    for kind, pattern in REQUEST_KINDS:
+        if pattern.match(subpath):
+            return kind
+    return subpath.split('/')[0].split('?')[0] or 'other'
+
+
 def get_proxy(url):
     """Get the proxy to use for a URL, if any
 
@@ -268,15 +303,17 @@ class Patchwork:
         full_url = f'{self.url}/api/1.2/{subpath}'
         async with self.semaphore:
             # print('full_url', full_url)
+            kind = request_kind(subpath)
             for i in range(RETRIES + 1):
                 try:
-                    traffic.add(self.url, requests=1)
+                    traffic.add(self.url, requests=1, kind=kind)
                     async with client.get(
                             full_url, proxy=get_proxy(full_url),
                             timeout=aiohttp.ClientTimeout(
                                 total=REQUEST_TIMEOUT)) as response:
                         traffic.add(self.url,
-                                    nbytes=len(await response.read()))
+                                    nbytes=len(await response.read()),
+                                    kind=kind)
                         if response.status in RETRY_STATUS and i < RETRIES:
                             # The server is overloaded, so try again later
                             await asyncio.sleep(i + 1)
@@ -751,14 +788,14 @@ class Patchwork:
         self.request_count += 1
         full_url = f'{self.url}/{subpath}'
         async with self.semaphore:
-            traffic.add(self.url, requests=1)
+            traffic.add(self.url, requests=1, kind='mbox')
             async with client.get(
                     full_url, proxy=get_proxy(full_url)) as response:
-                traffic.add(self.url, nbytes=len(await response.read()))
+                content = await response.read()
+                traffic.add(self.url, nbytes=len(content), kind='mbox')
                 if response.status != 200:
                     raise ValueError(
                         f'Failed to download mbox: HTTP {response.status}')
-                content = await response.read()
         self._to_cache(subpath, base64.b64encode(content).decode('ascii'))
         return content
 
