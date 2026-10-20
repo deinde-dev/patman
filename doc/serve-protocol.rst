@@ -123,6 +123,10 @@ A review of one patch, or of the cover letter:
 - ``timestamp`` (str): when it was written
 - ``status`` (str or null): ``new``, ``draft``, ``sent``, ``replied`` or
   ``deleted``
+- ``msgid`` (str or null): Message-ID of the email the review replies to,
+  e.g. ``<20261016072640.772964-4-jan.kehren@emteria.com>``, which locates
+  the patch on the list, e.g. on lore when patchwork lacks it; null until the
+  review is drafted. Only given by ``GET /api/reviews/<id>``
 - ``replies`` (list of Reply): replies to the review, oldest first; only given
   by ``GET /api/reviews/<id>``
 - ``job`` (int or null): number of the job which is waiting or running to act

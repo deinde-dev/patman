@@ -1078,6 +1078,13 @@ async function viewReview(id, wantVer) {
         REVIEW_STATUS[r.status] || r.status || ''));
     const [mailBtn, mailBox] = itemId
       ? mailToggle(r.seq ? 'patch' : 'cover', itemId, ser.upstream) : [null, null];
+    // A patch which patchwork lacks, e.g. taken from lore for the review, can
+    // still be read on lore
+    const loreLink = !itemId && r.msgid && h('a', {
+      class: 'btn light small', target: '_blank', rel: 'noopener',
+      href: `https://lore.kernel.org/all/${encodeURIComponent(r.msgid.replace(/^<|>$/g, '')).replace(/%40/g, '@')}/`,
+      title: `Show the ${r.seq ? 'patch' : 'cover letter'} on lore.kernel.org, in a ` +
+             'new tab, since patchwork does not have it' }, 'lore ↗');
     const [commentsBtn, commentsBox] = itemId && sv.link
       ? commentsToggle(ser, sv, r.seq, itemId) : [null, null];
     const responses = commentResponses(sv, r.seq).map((rp) => replyBox(rp, id));
@@ -1100,8 +1107,8 @@ async function viewReview(id, wantVer) {
     const free = () => unsent(r) && !(entries.get(r.id) || {}).busy;
     const drawCard = () => fill(card, header,
       renderMail(r.body, free() ? ask : null, free() ? editChunk : null),
-      (mailBtn || free()) && h('div', { class: 'actions' },
-        mailBtn, commentsBtn,
+      (mailBtn || loreLink || free()) && h('div', { class: 'actions' },
+        mailBtn, loreLink, commentsBtn,
         free() && [
           h('button', { class: 'btn light small', title: 'Change the review yourself',
                         onclick: () => editReview(card, r, header, show,

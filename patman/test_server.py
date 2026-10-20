@@ -291,8 +291,15 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(
             {'id': rid, 'seq': 1, 'body': '> code\nLooks good',
              'approved': True, 'timestamp': '2026-10-01 10:00:00',
-             'status': 'draft', 'replies': [], 'job': None},
+             'status': 'draft', 'msgid': None, 'replies': [], 'job': None},
             latest['reviews'][1])
+
+        # A review with its headers gives the message it replies to, which
+        # locates the patch on the list
+        db.review_set_envelope(rid, {'in_reply_to': '<p1@x>'})
+        db.commit()
+        _, data = self.call(srv, 'GET', f'/api/reviews/{ser_id}')
+        self.assertEqual('<p1@x>', data['versions'][0]['reviews'][1]['msgid'])
         self.assertEqual(['old review'],
                          [r['body'] for r in data['versions'][1]['reviews']])
         self.assertEqual([(1, 'a', 6)],

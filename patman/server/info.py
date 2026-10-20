@@ -439,6 +439,10 @@ def get_review_detail(cser, idnum):
         info['reviews'] = []
         for rev in cser.db.review_get_for_version(svr.idnum):
             item = review_info(rev)
+            # The message the review replies to, which locates the patch on
+            # the list, e.g. one which patchwork lacks
+            env = cser.db.review_get_envelope(rev.idnum)
+            item['msgid'] = (env or {}).get('in_reply_to')
             item['replies'] = [reply_info(reply) for reply in
                                cser.db.reply_get_for_review(rev.idnum)]
             info['reviews'].append(item)
