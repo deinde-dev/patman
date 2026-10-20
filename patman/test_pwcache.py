@@ -231,6 +231,41 @@ class TestPwCache(unittest.TestCase):
         self.assertEqual(4, get_cover())
         self.assertEqual('covers/9/comments/', reads[-1])
 
+    def test_mbox(self):
+        """A series' mbox is kept, as bytes"""
+        content = b'From x\n\xff\xfe binary-ish\n'
+        gets = []
+
+        class Response:
+            """Pretend response from patchwork"""
+            status = 200
+
+            async def read(self):
+                """Get the content"""
+                return content
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+        class Client:  # pylint: disable=R0903
+            """Pretend aiohttp session"""
+            def get(self, url, **_kwargs):
+                """Start a request"""
+                gets.append(url)
+                return Response()
+
+        pwork = Patchwork('https://pw.example', show_progress=False)
+        pwork.cache = self.cache()
+        self.assertEqual(content,
+                         run(pwork.get_series_mbox(Client(), '7')))
+        self.assertEqual(content,
+                         run(pwork.get_series_mbox(Client(), '7')))
+        self.assertEqual(['https://pw.example/series/7/mbox/'], gets)
+        self.assertEqual(1, pwork.cache_hits)
+
     def test_hits(self):
         """Reads which the cache answers are counted for each server"""
         pwork = Patchwork.for_testing(lambda _: {'id': 5, 'state': 'new'})

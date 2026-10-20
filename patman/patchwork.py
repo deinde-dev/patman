@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import base64
 import re
 import socket
 from urllib.parse import quote_plus, urlparse
@@ -73,6 +74,10 @@ COMMENTS_MAX_AGE = 5 * 60
 # A series gains patches until patchwork has them all (received_all), then
 # does not change, so is then kept however old it is
 SERIES_MAX_AGE = 10 * 60
+# Patchwork adds review tags to a series' mbox as they arrive
+MBOX_MAX_AGE = 60 * 60
+# The projects on a server rarely change
+PROJECTS_MAX_AGE = 24 * 60 * 60
 
 # Maximum number of requests to send to patchwork at once. Busy servers may
 # block a client which opens a lot of connections, so keep this small
@@ -473,11 +478,15 @@ class Patchwork:
         self.request_count = 0
         return self._Stats(self)
 
-    async def get_projects(self):
+    async def get_projects(self, max_age=PROJECTS_MAX_AGE):
         """Get a list of projects on the server
 
         Reads all the pages of projects, since some servers have more
         projects than fit on one page.
+
+        Args:
+            max_age (float or None): Oldest cached copy to use, in seconds; 0
+                to read patchwork, or None to use any
 
         Returns:
             list of dict, one for each project
@@ -490,8 +499,9 @@ class Patchwork:
         async with aiohttp.ClientSession() as client:
             page = 1
             while True:
-                res = await self._request(
-                    client, f'projects/?page={page}&per_page={per_page}')
+                res = await self._cached_request(
+                    client, f'projects/?page={page}&per_page={per_page}',
+                    max_age)
                 projects += res
                 if len(res) < per_page:
                     break
@@ -712,16 +722,19 @@ class Patchwork:
         res = await self._request(client, f'patches/?series={link}')
         return [patch.get('state') for patch in res]
 
-    async def get_series_mbox(self, client, link):
+    async def get_series_mbox(self, client, link, max_age=MBOX_MAX_AGE):
         """Download the raw mbox file for a series.
 
         The mbox URL lives directly under '/series/<link>/mbox/' rather
         than the JSON API, so this fetches the bytes directly rather
-        than routing through self._request().
+        than routing through self._request(). It is cached, base64-encoded,
+        since the cache holds JSON
 
         Args:
             client (aiohttp.ClientSession): Session to use
             link (str): Patchwork series link/ID
+            max_age (float or None): Oldest cached copy to use, in seconds; 0
+                to read patchwork, or None to use any
 
         Returns:
             bytes: Raw mbox content
@@ -729,8 +742,12 @@ class Patchwork:
         Raises:
             ValueError: if the download fails
         """
+        subpath = f'series/{link}/mbox/'
+        kept = self._from_cache(subpath, max_age)
+        if kept is not None:
+            return base64.b64decode(kept)
         self.request_count += 1
-        full_url = f'{self.url}/series/{link}/mbox/'
+        full_url = f'{self.url}/{subpath}'
         async with self.semaphore:
             traffic.add(self.url, requests=1)
             async with client.get(
@@ -739,7 +756,9 @@ class Patchwork:
                 if response.status != 200:
                     raise ValueError(
                         f'Failed to download mbox: HTTP {response.status}')
-                return await response.read()
+                content = await response.read()
+        self._to_cache(subpath, base64.b64encode(content).decode('ascii'))
+        return content
 
     async def search_patches(self, client, query, project_id=None,
                              per_page=20):
