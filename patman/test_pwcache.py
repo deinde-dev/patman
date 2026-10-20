@@ -286,6 +286,28 @@ class TestPwCache(unittest.TestCase):
                                  run(pwork.get_patch(None, '5'))['state'])
         self.assertEqual((2, 0), (pwork.request_count, pwork.cache_hits))
 
+    def test_follow(self):
+        """The cache records how far events are followed, and drops entries"""
+        cache = self.cache()
+        self.assertIsNone(cache.get_follow('https://pw', 'uboot'))
+        cache.set_follow('https://pw', 'uboot', 1000.0, '2026-10-20T10:00', 1005)
+        self.assertEqual((1000.0, '2026-10-20T10:00', 1005.0),
+                         cache.get_follow('https://pw', 'uboot'))
+        self.assertIsNone(cache.get_follow('https://pw', 'linux'))
+
+        # An entry read since following began is current however old
+        cache.put('https://pw', 'patches/1/', {'id': 1})
+        self.now += 10 ** 6
+        self.assertIsNone(cache.get('https://pw', 'patches/1/', 0))
+        self.assertEqual({'id': 1}, cache.get('https://pw', 'patches/1/', 0,
+                                              since=1000.0))
+        self.assertIsNone(cache.get('https://pw', 'patches/1/', 0,
+                                    since=1001.0))
+        self.assertIsNone(cache.get('https://pw', 'patches/1/', 0,
+                                    keep=lambda _: False, since=1000.0))
+        cache.drop('https://pw', 'patches/1/')
+        self.assertIsNone(cache.get('https://pw', 'patches/1/', None))
+
     def test_prune_daily(self):
         """Old entries are dropped when the cache is opened, once a day"""
         cache = self.cache()

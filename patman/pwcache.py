@@ -21,7 +21,12 @@ one, since that depends on what it wants: the text of a patch never changes,
 but its state does.
 
 Each read which the cache answers is counted, in hourly totals for each
-server, for showing with the patchwork traffic (see traffic). Entries which
+server, for showing with the patchwork traffic (see traffic).
+
+The cache also records how far it has followed the events of a project on
+a server, e.g. a patch's state changing, so that a patch read since it began
+following them can be used however old it is, being dropped when an event
+says that it has changed (see Patchwork.follow_events()). Entries which
 are not used for KEEP_DAYS are dropped, which is checked once a day.
 
 If the cache stops working, e.g. because the disk is full or the file is
@@ -113,7 +118,7 @@ class Cache:
         layout = self.con.execute('PRAGMA user_version').fetchone()[0]
         if layout != LAYOUT:
             with self.con:
-                for table in ('objects', 'hits', 'meta'):
+                for table in ('objects', 'hits', 'follow', 'meta'):
                     self.con.execute(f'DROP TABLE IF EXISTS {table}')
                 self.con.execute(f'PRAGMA user_version = {LAYOUT}')
         with self.con:
@@ -124,6 +129,10 @@ class Cache:
             self.con.execute(
                 'CREATE TABLE IF NOT EXISTS hits (hour TEXT, server TEXT, '
                 'count INTEGER, PRIMARY KEY (hour, server))')
+            self.con.execute(
+                'CREATE TABLE IF NOT EXISTS follow (server TEXT, project TEXT, '
+                'started REAL, last TEXT, checked REAL, '
+                'PRIMARY KEY (server, project))')
             self.con.execute(
                 'CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, '
                 'value REAL)')
@@ -142,7 +151,8 @@ class Cache:
                 (now,))
 
     @_safe(None)
-    def get(self, server, path, max_age, keep=None):
+    # pylint: disable-next=R0913
+    def get(self, server, path, max_age, keep=None, since=None):
         """Get a response from the cache, if there is a recent enough one
 
         Args:
@@ -153,6 +163,9 @@ class Cache:
             keep (callable or None): Function which is passed the response
                 and returns True if it is current however old it is, e.g.
                 because it cannot change
+            since (float or None): If not None, accept an entry read at or
+                after this time, however old, if 'keep' (when given) also
+                accepts it; used for entries which events keep current
 
         Returns:
             dict or list or None: Response, or None if there is none recent
@@ -168,7 +181,12 @@ class Cache:
         data = json.loads(zlib.decompress(blob))
         too_old = max_age is not None and (max_age == 0 or
                                            now - fetched > max_age)
-        if too_old and not (keep and keep(data)):
+        if since is not None:
+            # Events keep the entry current, if it is read since they did
+            current = fetched >= since and (not keep or keep(data))
+        else:
+            current = bool(keep and keep(data))
+        if too_old and not current:
             return None
         with self.con:
             self.con.execute(
@@ -205,6 +223,65 @@ class Cache:
         """
         fetched = self.fetched(server, path)
         return None if fetched is None else self._clock() - fetched
+
+    def now(self):
+        """Get the time, as the cache sees it
+
+        Returns:
+            float: Time in seconds since the epoch
+        """
+        return self._clock()
+
+    @_safe(None)
+    def drop(self, server, path):
+        """Drop an entry, e.g. because an event says that it has changed
+
+        Args:
+            server (str): URL of the patchwork server
+            path (str): Path of the request, e.g. 'patches/123/'
+        """
+        with self.con:
+            self.con.execute(
+                'DELETE FROM objects WHERE server = ? AND path = ?',
+                (server, path))
+
+    @_safe(None)
+    def get_follow(self, server, project):
+        """Get how far the events of a project have been followed
+
+        Args:
+            server (str): URL of the patchwork server
+            project (str): Project link name, e.g. 'uboot'
+
+        Returns:
+            tuple or None: None if they are not followed, else:
+                float: Time when following began; entries read since then
+                    are kept current by the events
+                str: Date of the newest event seen, as patchwork gives it
+                float: Time when the events were last checked
+        """
+        return self.con.execute(
+            'SELECT started, last, checked FROM follow '
+            'WHERE server = ? AND project = ?', (server, project)).fetchone()
+
+    @_safe(None)
+    # pylint: disable-next=R0913
+    def set_follow(self, server, project, started, last, checked):
+        """Record how far the events of a project have been followed
+
+        Args:
+            server (str): URL of the patchwork server
+            project (str): Project link name, e.g. 'uboot'
+            started (float): Time when following began
+            last (str): Date of the newest event seen
+            checked (float): Time when the events were checked
+        """
+        with self.con:
+            self.con.execute(
+                'INSERT OR REPLACE INTO follow '
+                '(server, project, started, last, checked) '
+                'VALUES (?, ?, ?, ?, ?)',
+                (server, project, started, last, checked))
 
     @_safe(None)
     def put(self, server, path, data):
