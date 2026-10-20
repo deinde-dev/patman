@@ -1604,7 +1604,9 @@ class CseriesHelper:
         Each series is read from the patchwork server of its upstream. A
         series with no upstream, or whose upstream has no patchwork URL, is
         read from the server of the default upstream, or from pwork if that
-        has no URL either.
+        has no URL either. Each Patchwork object is given the project of the
+        upstream, so that it can follow the project's events; series in
+        different projects on one server are read with different objects.
 
         Args:
             pwork (Patchwork): Patchwork object to use when nothing else is
@@ -1620,18 +1622,28 @@ class CseriesHelper:
         default = self.db.upstream_get_default()
         fallback = ((default and self.db.upstream_get_patchwork_url(default))
                     or pwork.url)
-        pworks = {pwork.url: pwork}
+        main = (pwork.url, pwork.link_name)
+        pworks = {main: pwork}
         groups = OrderedDict()
         for svid, sync in to_fetch.items():
             ser = sdict.get(sync.series_id)
-            url = None
-            if ser and ser.upstream:
-                url = self.db.upstream_get_patchwork_url(ser.upstream)
+            ups = ser.upstream if ser and ser.upstream else None
+            url = self.db.upstream_get_patchwork_url(ups) if ups else None
+            if not url:
+                ups = default
             url = url or fallback
-            if url not in pworks:
-                pworks[url] = self._make_patchwork(url)
-            groups.setdefault(url, OrderedDict())[svid] = sync
-        return [(pworks[url], fetch) for url, fetch in groups.items()]
+            proj = self.db.patchwork_get(ups) if ups else None
+            link = proj[2] if proj else None
+            key = (url, link)
+            if url == pwork.url and link in (None, pwork.link_name):
+                key = main
+            if key not in pworks:
+                pwk = self._make_patchwork(url)
+                if proj:
+                    pwk.project_set(proj[1], proj[2])
+                pworks[key] = pwk
+            groups.setdefault(key, OrderedDict())[svid] = sync
+        return [(pworks[key], fetch) for key, fetch in groups.items()]
 
     async def _sync_groups(self, groups):
         """Read the series state from each patchwork server
