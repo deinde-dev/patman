@@ -627,6 +627,17 @@ Date:   .*
             '(9 requests)', next(itr))
         self.assert_finished(itr)
 
+    def test_series_gather_project(self):
+        """Each patchwork server's object has its upstream's project"""
+        cser, pwork, bad = self.setup_gather_two_servers()
+        cser.db.patchwork_update('Other', 7, 'other-proj', 'other')
+        cser.commit()
+        with mock.patch.object(cser, '_make_patchwork', return_value=bad):
+            with terminal.capture():
+                with self.assertRaises(ValueError):
+                    cser.gather_all(pwork, False, False, False, False)
+        self.assertEqual((7, 'other-proj'), (bad.proj_id, bad.link_name))
+
     def test_series_gather_all_default_ups(self):
         """Series with no upstream are read from the default upstream"""
         cser, pwork, bad = self.setup_gather_two_servers()

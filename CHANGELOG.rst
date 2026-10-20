@@ -62,6 +62,8 @@ Fixed
   on the PATH, as is common for a service such as the one running
   ``patman serve``, rather than the old copy bundled with claude-agent-sdk.
   If only the bundled copy is present, this is reported.
+- A sync of series on more than one patchwork server follows the events
+  of each server's project, rather than only those of the first server.
 
 0.5.0 - 2026-10-19
 ------------------
