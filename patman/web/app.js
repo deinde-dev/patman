@@ -950,17 +950,22 @@ async function trackJob(job, verb, targets, refresh) {
       continue;
     }
     const [status] = jobStatus(st);
+    // A job which fails may still have done some of its work, e.g. sent some
+    // of the drafts, so read the reviews again either way
+    const fresh = await refresh().catch(() => new Map());
+    targets.forEach((t) => {
+      const now = fresh.get(t.r.id);
+      if (now) Object.assign(t.r, now);
+    });
     if (status !== 'ok') {
       lock(false);
       targets.forEach((t) => say(t, 'failed', h('span', {}, `${verb} ${status}`),
                                  ' ', output()));
       return;
     }
-    const fresh = await refresh();
     targets.forEach((t) => {
       const old = before.get(t.r.id);
       const now = fresh.get(t.r.id);
-      if (now) Object.assign(t.r, now);
       t.busy = false;
       t.show();
       const changed = now && now.body !== old;
@@ -1010,7 +1015,14 @@ async function viewReview(id, wantVer) {
     const targets = sv.reviews.filter((r) => (seqs.length ? seqs.includes(r.seq)
                                                           : want(r)))
       .map((r) => entries.get(r.id));
-    trackJob(job, verb, targets, refresh);
+    follow(job, verb, targets);
+  };
+  // Show a job on the cards it acts on, leaving them out of the buttons at
+  // the top until it finishes
+  const follow = (job, verb, targets) => {
+    const done = trackJob(job, verb, targets, refresh);
+    drawActions();
+    done.then(drawActions);
   };
   const redraft = (seqs) => runHere(`reviews/${id}/redraft`, {}, seqs, 'Redraft',
                                     unsent);
@@ -1117,10 +1129,8 @@ async function viewReview(id, wantVer) {
   });
   byJob.forEach(async (targets, jid) => {
     const st = await api(`jobs/${jid}`).catch(() => null);
-    if (st) trackJob(st, st.title.split(' ')[0], targets, refresh);
+    if (st) follow(st, st.title.split(' ')[0], targets);
   });
-  const anyUnsent = sv.reviews.some(unsent);
-  const drafts = sv.reviews.filter(hasDraft).length;
   const reviseAll = h('div', {});
   const askAll = () => fill(reviseAll, h('div', { class: 'card' },
     h('div', { class: 'name' }, 'Revise all the reviews'),
@@ -1139,27 +1149,37 @@ async function viewReview(id, wantVer) {
     'Review again', 'btn light small',
     'Have the agent review this version of the series again, replacing its reviews',
     reviewAgain);
-  const actions = sv.link && h('div', { class: 'actions' },
-    anyUnsent && confirmButton('Redraft all', 'btn light small', () => redraft([]),
-                               'Create the Gmail drafts of all the unsent reviews again'),
-    anyUnsent && h('button', { class: 'btn light small', onclick: askAll,
-                               title: 'Ask the agent to change all the unsent reviews' },
-                   'Revise all'),
-    drafts > 0 && confirmButton(drafts === 1 ? 'Send the draft' : `Send ${drafts} drafts`,
-                                'btn small', () => send([]),
-                                'Send the Gmail drafts of the reviews, first drafting again ' +
-                                'any which are out of date'),
-    againBtn,
-    h('button', { class: 'btn light small', onclick: () => setHidden(id, !ser.hidden),
-                  title: ser.hidden ? 'Show this series in the list of active reviews'
-                                    : 'Hide this series from the list of active reviews, ' +
-                                      'e.g. once you have finished with it' },
-      ser.hidden ? 'Unhide' : 'Hide'),
-    ser.patchwork_url && h('a', { class: 'btn light small', target: '_blank',
-      rel: 'noopener', title: 'Open the series on patchwork, in a new tab',
-      href: ser.project ? `${ser.patchwork_url}/project/${ser.project}/list/?series=${sv.link}`
-                      : ser.patchwork_url },
-      'patchwork ↗'));
+  // The buttons which act on all the reviews, drawn again when a job starts or
+  // finishes, since they depend on which reviews are unsent and not busy
+  const actions = sv.link && h('div', { class: 'actions' });
+  function drawActions() {
+    if (!actions) return;
+    const idle = sv.reviews.filter((r) => !entries.get(r.id).busy);
+    const anyUnsent = idle.some(unsent);
+    const drafts = idle.filter(hasDraft).length;
+    fill(actions,
+      anyUnsent && confirmButton('Redraft all', 'btn light small', () => redraft([]),
+                                 'Create the Gmail drafts of all the unsent reviews again'),
+      anyUnsent && h('button', { class: 'btn light small', onclick: askAll,
+                                 title: 'Ask the agent to change all the unsent reviews' },
+                     'Revise all'),
+      drafts > 0 && confirmButton(drafts === 1 ? 'Send the draft' : `Send ${drafts} drafts`,
+                                  'btn small', () => send([]),
+                                  'Send the Gmail drafts of the reviews, first drafting again ' +
+                                  'any which are out of date'),
+      againBtn,
+      h('button', { class: 'btn light small', onclick: () => setHidden(id, !ser.hidden),
+                    title: ser.hidden ? 'Show this series in the list of active reviews'
+                                      : 'Hide this series from the list of active reviews, ' +
+                                        'e.g. once you have finished with it' },
+        ser.hidden ? 'Unhide' : 'Hide'),
+      ser.patchwork_url && h('a', { class: 'btn light small', target: '_blank',
+        rel: 'noopener', title: 'Open the series on patchwork, in a new tab',
+        href: ser.project ? `${ser.patchwork_url}/project/${ser.project}/list/?series=${sv.link}`
+                        : ser.patchwork_url },
+        'patchwork ↗'));
+  }
+  drawActions();
   setView(ser.desc || ser.name, 'reviews', true,
     h('div', { class: 'card' },
       h('div', { class: 'name' }, ser.desc || ser.name),

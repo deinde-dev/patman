@@ -13,6 +13,13 @@ Changed
 - Tapping the Inbox tab of the ``patman serve`` page shows the tab at once,
   saying that the inbox is loading while it is read from patchwork.
 
+Fixed
+~~~~~
+- On a reviewed series in the ``patman serve`` page, the buttons at the top,
+  such as 'Send 3 drafts', leave out the reviews which a job is acting on and
+  change once it finishes, rather than staying as they are until the page is
+  shown again. A job which fails part way also shows which reviews it sent.
+
 0.5.0 - 2026-10-19
 ------------------
 
