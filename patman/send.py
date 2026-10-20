@@ -291,7 +291,7 @@ def email_patches(col, series, cover_fname, patch_files, process_tags, its_a_go,
 
 def prepare_patches(col, branch, count, start, end, ignore_binary, signoff,
                     keep_change_id=False, git_dir=None, cwd=None,
-                    insert_base_commit=True):
+                    insert_base_commit=True, keep_assist_tags=False):
     """Figure out what patches to generate, then generate them
 
     The patch files are written to the current directory, e.g. 0001_xxx.patch
@@ -311,6 +311,8 @@ def prepare_patches(col, branch, count, start, end, ignore_binary, signoff,
         cwd (str): Path to use for git operations (None to use current dir)
         insert_base_commit (bool): True to add the 'base-commit'/'branch'
             trailers to the patches / cover letter
+        keep_assist_tags (bool): Keep the tags added by a coding assistant,
+            such as 'Co-developed-by: Claude ... <noreply@anthropic.com>'
 
     Returns:
         Tuple:
@@ -339,7 +341,8 @@ def prepare_patches(col, branch, count, start, end, ignore_binary, signoff,
     # Fix up the patch files to our liking, and insert the cover letter
     patchstream.fix_patches(
         series, patch_files, keep_change_id,
-        insert_base_commit=insert_base_commit and not cover_fname, cwd=cwd)
+        insert_base_commit=insert_base_commit and not cover_fname, cwd=cwd,
+        keep_assist_tags=keep_assist_tags)
     if cover_fname and series.get('cover'):
         patchstream.insert_cover_letter(
             cover_fname, series, to_do, cwd=cwd,
@@ -373,7 +376,8 @@ def send(args, git_dir=None, cwd=None):
         col, args.branch, args.count, args.start, args.end,
         args.ignore_binary, args.add_signoff,
         keep_change_id=args.keep_change_id, git_dir=git_dir, cwd=cwd,
-        insert_base_commit=getattr(args, 'insert_base_commit', True))
+        insert_base_commit=getattr(args, 'insert_base_commit', True),
+        keep_assist_tags=getattr(args, 'keep_assist_tags', False))
 
     series_to = getattr(args, 'series_to', None)
     if series_to:

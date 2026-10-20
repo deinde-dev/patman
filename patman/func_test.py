@@ -8,6 +8,7 @@
 
 import asyncio
 import contextlib
+import io
 import os
 import pathlib
 import re
@@ -639,6 +640,40 @@ here
 '''
         pstrm = PatchStream.process_text(text)
         self.assertEqual(["Found 2 lines after TEST="], pstrm.commit.warn)
+
+    def test_assist_tags(self):
+        """Test removing the tags added by a coding assistant, or keeping them"""
+        text = '''This is a patch
+
+Some more text
+
+Co-developed-by: Claude Opus 5.5 <noreply@anthropic.com>
+Co-Authored-By: Claude <noreply@anthropic.com>
+Co-developed-by: A Person <person@example.com>
+Signed-off-by: A Person <person@example.com>
+'''
+        def process(**kwargs):
+            pstrm = PatchStream(Series(), **kwargs)
+            pstrm.commit = Commit(None)
+            outfd = io.StringIO()
+            pstrm.process_stream(io.StringIO(text), outfd)
+            return outfd.getvalue()
+
+        out = process()
+        self.assertNotIn('noreply@', out)
+        self.assertIn('Co-developed-by: A Person <person@example.com>', out)
+        self.assertIn('Signed-off-by: A Person', out)
+
+        out = process(keep_assist_tags=True)
+        self.assertIn(
+            'Co-developed-by: Claude Opus 5.5 <noreply@anthropic.com>', out)
+        self.assertIn('Co-Authored-By: Claude <noreply@anthropic.com>', out)
+
+        # The setting reaches the arguments
+        for argv, keep in ((['send'], False),
+                           (['send', '--keep-assist-tags'], True)):
+            args = cmdline.parse_args(argv, config_fname=False)
+            self.assertEqual(keep, args.keep_assist_tags)
 
     def test_blank_line_at_end(self):
         """Test detecting a blank line at the end of a file"""

@@ -166,6 +166,11 @@ def add_send_args(par):
         '--keep-change-id', action='store_true',
         help='Preserve Change-Id tags in patches to send.')
     par.add_argument(
+        '--keep-assist-tags', action='store_true',
+        help="Keep the tags which a coding assistant adds, such as "
+             "'Co-developed-by: ... <noreply@...>', in the patches to send, "
+             "for projects which want them (or set 'keep_assist_tags')")
+    par.add_argument(
         '--no-base-commit', action='store_false', dest='insert_base_commit',
         default=True,
         help="Don't add 'base-commit'/'branch' trailers to the patches or "

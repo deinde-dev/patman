@@ -148,6 +148,29 @@ class TestSettings(unittest.TestCase):
                     self.assertEqual('base-proj', args.project)
                     create.assert_called_once()
 
+    def test_nested_subcommand(self):
+        # A setting reaches a subcommand of a subcommand, such as
+        # 'series send', as well as 'send'
+        with cleared_command_line_args():
+            with empty_git_repository():
+                with open('.patman-defaults', 'w', buffering=1) as f:
+                    f.write('[settings]\n'
+                            'keep_assist_tags: True\n'
+                            'insert_base_commit: False\n')
+                with tempfile.NamedTemporaryFile() as global_config:
+                    for argv in (['send'], ['series', 'send']):
+                        args = cmdline.parse_args(
+                            argv, config_fname=global_config.name)
+                        self.assertTrue(args.keep_assist_tags, argv)
+                        self.assertFalse(args.insert_base_commit, argv)
+
+                    # Without the setting, the default holds
+                    os.unlink('.patman-defaults')
+                    args = cmdline.parse_args(
+                        ['series', 'send'], config_fname=global_config.name)
+                    self.assertFalse(args.keep_assist_tags)
+                    self.assertTrue(args.insert_base_commit)
+
 
 if __name__ == '__main__':
     unittest.main()

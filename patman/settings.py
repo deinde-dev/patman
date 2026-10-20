@@ -320,7 +320,48 @@ def _UpdateDefaults(main_parser, config, argv):
     for parser, pdefs in zip(full_parser_list, parser_defaults):
         parser.set_defaults(**{k: v for k, v in defaults.items()
                                if k in pdefs})
+
+    _set_nested_defaults(main_parser, config, defaults)
     return defaults
+
+
+def _set_nested_defaults(main_parser, config, defaults):
+    """Give the settings to the subcommands of subcommands
+
+    A subcommand of a subcommand, such as 'series send', applies its own
+    defaults after those of the parsers above it, so these need setting too
+
+    Args:
+        main_parser (argparse.ArgumentParser): Main parser
+        config (_ProjectConfigParser): Settings read from the config files
+        defaults (dict): Defaults of all the arguments, including those
+            from the settings, by name
+    """
+    settings = {name: defaults[name] for name, _ in config.items('settings')
+                if name in defaults}
+    for parser in _nested_parsers(main_parser):
+        dests = {action.dest for action in parser._actions}
+        parser.set_defaults(**{k: v for k, v in settings.items()
+                               if k in dests})
+
+
+def _nested_parsers(parser, depth=0):
+    """Find the parsers of subcommands of subcommands, e.g. 'series send'
+
+    Args:
+        parser (argparse.ArgumentParser): Parser to look in
+        depth (int): How many levels of subcommand 'parser' is below the main
+            parser
+
+    Yields:
+        argparse.ArgumentParser: Each parser at least two levels down
+    """
+    if depth >= 2:
+        yield parser
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for sub in set(action.choices.values()):
+                yield from _nested_parsers(sub, depth + 1)
 
 
 def _ReadAliasFile(fname):
