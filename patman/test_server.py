@@ -29,6 +29,7 @@ from patman import interpreter
 from patman.database import Pcommit
 from patman import patchwork
 from patman.patchwork import Patchwork
+from patman import pwcache
 from patman import server
 from patman import times
 from patman import traffic
@@ -492,6 +493,8 @@ class TestWebServer(unittest.TestCase, TestCommon):
         srv = self.make_server()
         status, data = self.call(srv, 'GET', '/api/patch/1234')
         self.assertEqual(200, status)
+        # With no cache, the patch is read from patchwork now
+        self.assertTrue(data.pop('fetched'))
         self.assertEqual(
             {'id': 1234, 'name': '[1/2] video: Add a driver',
              'date': '2026-10-01T09:00:00', 'submitter': 'Fred',
@@ -504,6 +507,30 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(200, status)
         self.assertEqual(('Cover text', '', None),
                          (data['content'], data['diff'], data['submitter']))
+
+    def test_patch_refresh(self):
+        """A patch and its comments come from the cache, unless refreshed"""
+        srv = self.make_server()
+        now = [1000.0]
+        srv.pwork_for_testing.cache = pwcache.Cache(
+            os.path.join(self.tmpdir, 'pwcache.db'), clock=lambda: now[0])
+        self.requests.clear()
+        for _ in range(2):
+            _, data = self.call(srv, 'GET', '/api/patch/1234')
+            self.call(srv, 'GET', '/api/comments/patch/1234')
+        self.assertEqual(['patches/1234/', 'patches/1234/comments/'],
+                         self.requests)
+        self.assertEqual(times.to_str(datetime.fromtimestamp(1000)),
+                         data['fetched'])
+
+        # A refresh reads both from patchwork, and says when
+        now[0] += 60
+        _, data = self.call(srv, 'GET', '/api/patch/1234?refresh=1')
+        self.call(srv, 'GET', '/api/comments/patch/1234?refresh=1')
+        self.assertEqual(['patches/1234/', 'patches/1234/comments/'] * 2,
+                         self.requests)
+        self.assertEqual(times.to_str(datetime.fromtimestamp(1060)),
+                         data['fetched'])
 
     def test_blob(self):
         """A file can be read from the git repo by its blob hash"""
@@ -646,8 +673,10 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.call(srv, 'GET', '/api/version')
         self.assertEqual({}, traffic.take())
         _, state = self.call(srv, 'GET', '/api/sync')
+        none = {'hour': 0, 'today': 0, 'week': 0}
         self.assertEqual([{'url': 'https://pw', 'hour': [2, 500],
-                           'today': [2, 500], 'week': [2, 500]}],
+                           'today': [2, 500], 'week': [2, 500],
+                           'cached': none}],
                          state['traffic'])
 
         # Older counts only appear in the longer periods
@@ -656,7 +685,22 @@ class TestWebServer(unittest.TestCase, TestCommon):
                                  {'https://pw': (10, 1000)})
         self.assertEqual(
             [{'url': 'https://pw', 'hour': [2, 500], 'today': [2, 500],
-              'week': [12, 1500]}], traffic.get_summary(self.cser.db, now))
+              'week': [12, 1500], 'cached': none}],
+            traffic.get_summary(self.cser.db, now))
+
+        # Reads which the cache answers are counted too, including for a
+        # server which is not otherwise read
+        cache = pwcache.Cache(os.path.join(self.tmpdir, 'pwcache.db'))
+        cache.add_hit('https://pw')
+        cache.add_hit('https://pw')
+        cache.add_hit('https://other')
+        self.assertEqual(
+            [{'url': 'https://other', 'hour': [0, 0], 'today': [0, 0],
+              'week': [0, 0], 'cached': {'hour': 1, 'today': 1, 'week': 1}},
+             {'url': 'https://pw', 'hour': [2, 500], 'today': [2, 500],
+              'week': [12, 1500], 'cached': {'hour': 2, 'today': 2,
+                                             'week': 2}}],
+            traffic.get_summary(self.cser.db, now, cache))
 
     def test_sync(self):
         """A sync runs each command and records its output"""
@@ -1497,34 +1541,42 @@ class TestWebServer(unittest.TestCase, TestCommon):
         srv = self.make_server()
         srv.pwork_for_testing.fake_request = read
         now = [1000.0]
-        srv._clock = lambda: now[0]
+        srv.pwork_for_testing.cache = pwcache.Cache(
+            os.path.join(self.tmpdir, 'pwcache.db'), clock=lambda: now[0])
         query = 'series/?project=uboot&order=-date&page={}&per_page=50'
+
+        def at(when):
+            return times.to_str(datetime.fromtimestamp(when))
 
         def inbox(args=''):
             status, data = self.call(srv, 'GET', f'/api/inbox{args}')
             self.assertEqual(200, status)
             return data['series'][0]['id'], data['fetched']
 
-        with mock.patch.object(server.app.times, 'now_str',
-                               return_value='2026-10-19 11:00:00'):
-            self.assertEqual((1, '2026-10-19 11:00:00'), inbox())
+        self.assertEqual((1, at(1000)), inbox())
 
         # Showing it again, or its next page twice, reads only that page
         now[0] += server.app.INBOX_KEEP
-        self.assertEqual((1, '2026-10-19 11:00:00'), inbox())
+        self.assertEqual((1, at(1000)), inbox())
         self.assertEqual(2, inbox('?page=2')[0])
         self.assertEqual(2, inbox('?page=2')[0])
         self.assertEqual([query.format(1), query.format(2)], reads)
 
-        # Once it is too old, it is read again, along with the next page
+        # Once it is too old, it is read again, and so is the next page,
+        # which is now older than the first
         now[0] += 1
-        with mock.patch.object(server.app.times, 'now_str',
-                               return_value='2026-10-19 11:10:01'):
-            self.assertEqual((3, '2026-10-19 11:10:01'), inbox())
+        self.assertEqual((3, at(now[0])), inbox())
         self.assertEqual(4, inbox('?page=2')[0])
 
         # A refresh reads it at once
         self.assertEqual(5, inbox('?refresh=1')[0])
+        self.assertEqual(5, inbox()[0])
+
+        # It is kept when the server starts again
+        srv = self.make_server()
+        srv.pwork_for_testing.fake_request = read
+        srv.pwork_for_testing.cache = pwcache.Cache(
+            os.path.join(self.tmpdir, 'pwcache.db'), clock=lambda: now[0])
         self.assertEqual(5, inbox()[0])
         self.assertEqual(5, len(reads))
 

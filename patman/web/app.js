@@ -744,9 +744,12 @@ function mailHref(kind, id, ups) {
   return `#/${kind}/${id}${ups ? '/' + encodeURIComponent(ups) : ''}`;
 }
 
-async function viewMail(kind, id, ups) {
+// Show a patch or cover letter; 'refresh' reads it from patchwork again rather
+// than using a copy the server read recently
+async function viewMail(kind, id, ups, refresh) {
   const q = ups ? `?ups=${encodeURIComponent(ups)}` : '';
-  const m = await api(`${kind}/${id}${q}`);
+  const rq = refresh ? `${q ? '&' : '?'}refresh=1` : '';
+  const m = await api(`${kind}/${id}${q}${rq}`);
   const comments = h('div', { class: 'list' },
                      h('div', { class: 'spinner' }, 'Loading comments…'));
   const ser = m.series[0];
@@ -758,6 +761,14 @@ async function viewMail(kind, id, ups) {
         m.submitter && h('span', {}, m.submitter),
         m.date && h('span', {}, ago(parseTime(m.date, true))),
         ser && h('span', {}, `series ${ser.id} v${ser.version}`)),
+      m.fetched && h('div', { class: 'row fetched' },
+        h('span', { class: 'grow ver' }, `Read from patchwork ${ago(parseTime(m.fetched))}`),
+        h('button', { class: 'btn light small',
+                      title: 'Read this from patchwork again, e.g. to see its current state',
+                      onclick: (ev) => {
+          ev.target.disabled = true;
+          viewMail(kind, id, ups, true).catch((err) => showError(err));
+        } }, 'Refresh')),
       m.web_url && h('div', { class: 'actions' },
         h('a', { class: 'btn light small', href: m.web_url, target: '_blank',
                  rel: 'noopener', title: 'Open this on patchwork, in a new tab' },
@@ -768,7 +779,7 @@ async function viewMail(kind, id, ups) {
     h('div', { class: 'section' }, 'Comments'),
     comments);
   try {
-    fill(comments, ...renderComments(await api(`comments/${kind}/${id}${q}`)));
+    fill(comments, ...renderComments(await api(`comments/${kind}/${id}${q}${rq}`)));
   } catch (err) {
     fill(comments, h('div', { class: 'error' }, err.message));
   }
@@ -1989,10 +2000,14 @@ function trafficCard(list) {
       h('div', { class: 'meta', title: 'Patchwork server' }, item.url),
       h('div', { class: 'traffic',
                  title: 'Requests sent to the server and data received from it' },
-        periods.flatMap(([key, label]) => [
-          h('span', { class: 'label' }, label),
-          h('span', {}, `${plural(item[key][0], 'request')}, ` +
-                        fmtBytes(item[key][1]))]))))
+        periods.flatMap(([key, label]) => {
+          const cached = item.cached ? item.cached[key] : 0;
+          return [
+            h('span', { class: 'label' }, label),
+            h('span', {}, `${plural(item[key][0], 'request')}, ` +
+                          fmtBytes(item[key][1]) +
+                          (cached ? `, ${cached} from the cache` : ''))];
+        }))))
       : h('div', { class: 'meta' }, 'No requests in the last 7 days'));
 }
 

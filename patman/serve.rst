@@ -137,11 +137,14 @@ review. Tap a series to see its patches and start a review.
 
 The inbox is read from patchwork with one request for the 50 newest series.
 The server keeps what it reads for ten minutes, so going back to the Inbox tab,
-or opening it on another device, does not read it again; the top of the inbox
-says when it was read, and 'Refresh' reads it again at once. Nothing more is
-read until you tap 'Load more' at the bottom, which reads the next 50; the
-button goes once patchwork has no more. Tapping a series uses what was read
-already, while reading a patch asks patchwork for it.
+opening it on another device or starting the server again does not read it
+again; the top of the inbox says when it was read, and 'Refresh' reads it again
+at once. Nothing more is read until you tap 'Load more' at the bottom, which
+reads the next 50; the button goes once patchwork has no more. Tapping a series
+uses what was read already. A patch read in the last hour, and its comments
+read in the last five minutes, are shown from patman's cache of patchwork (see
+:ref:`the cache <patchwork_cache>`); the page says when the patch was read,
+and its 'Refresh' reads both again, e.g. to see the current state.
 
 'Review' on a series starts the review as a job, but the inbox stays where it
 is, so you can start reviews of other series too. Each series shows how its

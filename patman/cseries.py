@@ -852,7 +852,9 @@ class Cseries(cser_helper.CseriesHelper):
             quiet (bool): True to skip writing the message
         """
         tout.detail(f"Patchwork URL '{pwork.url}': finding name '{name}'")
-        res = self.loop.run_until_complete(pwork.get_projects())
+        # Setting the project is rare and the project may be new, so read the
+        # list from patchwork
+        res = self.loop.run_until_complete(pwork.get_projects(max_age=0))
         proj_id = None
         link_name = None
         for proj in res:

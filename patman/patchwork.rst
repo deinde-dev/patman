@@ -92,6 +92,57 @@ whole series, is added to every patch which does not already have it. The new br
 For a worked example using real series, see
 :doc:`Checking status and collecting tags </guide/status-and-tags>`.
 
+.. _patchwork_cache:
+
+The cache
+---------
+
+Patchwork servers can be slow, and may block a client which sends them a lot
+of requests, so patman keeps what it reads in a cache and uses it again rather
+than asking each time. The cache is a file of its own,
+``~/.cache/patman/patchwork.db`` (or under ``$XDG_CACHE_HOME``), shared by all
+your repos and by ``patman serve``. It holds nothing which cannot be read
+again, so it is safe to delete.
+
+How long something is used from the cache depends on whether it can change:
+
+- a patch: an hour, since its text does not change but its state can
+- a cover letter: a day, since it has no state
+- a series: for good once patchwork has all its patches, or ten minutes
+  before that
+- comments: five minutes
+- a series' mbox, used to apply a series for a review: an hour, since
+  patchwork adds review tags to it as they arrive
+- the list of projects: a day
+
+These are never cached, so always ask patchwork:
+
+- searches for a series by its name, as used by ``patman series autolink``
+  to find the link of a series you have sent, by ``patman review -S`` and by
+  ``patman review --scan``, so that a new series is found as soon as it is
+  there
+- searches for a patch by its title, as used by ``patman review -P``
+- the states of the patches in a series, which ``patman review --scan`` reads
+  for a newer version of a series you reviewed
+- the patches and comments which ``patman review --learn-voice`` reads to
+  learn how you write reviews
+
+These are always read from patchwork, though what is read is kept for
+others to use:
+
+- the state and comments of each patch, and the comments on the cover letter,
+  in ``patman status`` and the sync, which need them to be current; these do
+  use a series from the cache once it is complete
+- a series which is still arriving, when the sync reads it, so that its new
+  patches are seen
+- the list of projects, when setting the project with
+  ``patman patchwork set-project``, since the project may be new
+
+Entries which are not used for 90 days are dropped. If the cache cannot be
+used, e.g. because the disk is full, patman says so once and reads patchwork
+instead. To use another file, set ``PATMAN_PWCACHE`` to its path, or set it
+to ``off`` to use no cache.
+
 Tracking several series
 -----------------------
 

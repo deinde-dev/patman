@@ -122,18 +122,22 @@ def _save_at_exit():
             db.close()
 
 
-def get_summary(db, now=None):
+def get_summary(db, now=None, cache=None):
     """Get the traffic to each patchwork server over recent periods
 
     Args:
         db (Database): Open database
         now (datetime or None): Current time, or None for now
+        cache (pwcache.Cache or None): Cache whose counts of the reads it
+            answers are added, or None for none
 
     Return:
         list of dict: One item for each server, ordered by URL, with:
             url (str): URL of the patchwork server
             hour, today, week (list of int): [requests, bytes] this hour,
                 since midnight and in the last seven days
+            cached (dict): Number of reads answered by the cache in each of
+                these periods, keyed by 'hour', 'today' and 'week'
     """
     now = now or datetime.now()
     periods = {
@@ -142,9 +146,16 @@ def get_summary(db, now=None):
         'week': hour_key(now - timedelta(days=7)),
     }
     out = {}
+
+    def item(url):
+        return out.setdefault(url, {
+            'url': url, 'hour': [0, 0], 'today': [0, 0], 'week': [0, 0],
+            'cached': {'hour': 0, 'today': 0, 'week': 0}})
+
     for name, since in periods.items():
         for url, (requests, nbytes) in db.traffic_get(since).items():
-            item = out.setdefault(url, {'url': url, 'hour': [0, 0],
-                                        'today': [0, 0], 'week': [0, 0]})
-            item[name] = [requests, nbytes]
+            item(url)[name] = [requests, nbytes]
+        if cache:
+            for url, count in cache.hits_since(since).items():
+                item(url)['cached'][name] = count
     return [out[url] for url in sorted(out)]

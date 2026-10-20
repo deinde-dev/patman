@@ -14,7 +14,7 @@ import ipaddress
 import os
 import re
 import subprocess
-import time
+from datetime import datetime
 
 import aiohttp
 from aiohttp import web
@@ -24,6 +24,8 @@ from u_boot_pylib import tout
 
 from patman import database
 from patman import interpreter
+from patman import patchwork
+from patman import pwcache
 from patman import times
 from patman import traffic
 from patman.patchwork import Patchwork
@@ -118,8 +120,6 @@ class Server(jobs.JobRunner):
         # The inbox for each patchwork server and project, as read from it:
         # a dict with 'read' (monotonic time), 'fetched' (time, as in the
         # database) and 'pages' (dict of page number to list of series)
-        self._inbox_kept = {}
-        self._clock = time.monotonic
 
     def get_pw_url(self, ups):
         """Get the patchwork URL for an upstream
@@ -239,7 +239,8 @@ class Server(jobs.JobRunner):
         state['interval'] = self.sync_interval
         state['review_sync'] = self.review_sync
         state['num_series'] = info.get_gather_count(self.cser)
-        state['traffic'] = traffic.get_summary(self.cser.db)
+        state['traffic'] = traffic.get_summary(self.cser.db,
+                                               cache=pwcache.get())
         return state
 
     def _start_sync(self):
@@ -598,7 +599,8 @@ class Server(jobs.JobRunner):
         """Handle 'GET /api/comments/<kind>/<id>': read comments from patchwork
 
         The 'ups' query parameter selects the upstream whose patchwork server
-        is used.
+        is used. Comments read in the last few minutes are taken from the
+        cache, unless the 'refresh' query parameter is 1.
 
         Args:
             request (web.Request): Request, with 'kind' ('patch' or 'cover')
@@ -616,11 +618,15 @@ class Server(jobs.JobRunner):
         kind = request.match_info['kind']
         item_id = int(request.match_info['item_id'])
         pwork = self.get_pwork(request.query.get('ups') or None)
+        max_age = (0 if request.query.get('refresh') == '1'
+                   else patchwork.COMMENTS_MAX_AGE)
         async with aiohttp.ClientSession() as client:
             if kind == 'patch':
-                comments = await pwork.get_patch_comments(client, item_id)
+                comments = await pwork.get_patch_comments(client, item_id,
+                                                          max_age)
             else:
-                comments = await pwork.get_cover_comments(client, item_id)
+                comments = await pwork.get_cover_comments(client, item_id,
+                                                          max_age)
         if self.own_emails is None:
             # The address which 'patman review' sends reviews from
             email = gitutil.get_default_user_email()
@@ -632,7 +638,9 @@ class Server(jobs.JobRunner):
         """Handle 'GET /api/patch/<id>' or 'GET /api/cover/<id>'
 
         This reads a patch or cover letter from patchwork. The 'ups' query
-        parameter selects the upstream whose patchwork server is used.
+        parameter selects the upstream whose patchwork server is used. A patch
+        read in the last hour is taken from the cache, unless the 'refresh'
+        query parameter is 1. The response says when it was read.
 
         Args:
             request (web.Request): Request, with 'kind' ('patch' or 'cover')
@@ -646,12 +654,20 @@ class Server(jobs.JobRunner):
         """
         item_id = int(request.match_info['item_id'])
         pwork = self.get_pwork(request.query.get('ups') or None)
+        refresh = request.query.get('refresh') == '1'
+        read = None
         async with aiohttp.ClientSession() as client:
             if request.match_info['kind'] == 'patch':
-                data = await pwork.get_patch(client, item_id)
+                data = await pwork.get_patch(
+                    client, item_id,
+                    max_age=0 if refresh else patchwork.PATCH_MAX_AGE)
+                read = pwork.read_time(pwork.patch_path(item_id))
             else:
                 data = await pwork.get_cover(client, item_id)
-        return web.json_response(info.mail_info(data))
+        out = info.mail_info(data)
+        out['fetched'] = (times.to_str(datetime.fromtimestamp(read)) if read
+                          else times.now_str())
+        return web.json_response(out)
 
     async def _blob(self, request):
         """Handle 'GET /api/blob': read a file from the git repo
@@ -743,10 +759,11 @@ class Server(jobs.JobRunner):
         The 'ups' query parameter selects the upstream, defaulting to the
         default one, and 'page' selects the page of results.
 
-        What is read from patchwork is kept for INBOX_KEEP seconds, so that
-        showing the inbox again, from this page or another, does not read it
-        again; 'refresh=1' reads it anyway. Reading the first page again
-        drops the others, so that they follow on from it.
+        What is read from patchwork is kept in the cache (see pwcache) for
+        INBOX_KEEP seconds, so that showing the inbox again, from this page
+        or another, or after a restart, does not read it again; 'refresh=1'
+        reads it anyway. A later page is only used from the cache if it is no
+        older than the first, so that it follows on from it.
 
         Args:
             request (web.Request): Request
@@ -765,27 +782,25 @@ class Server(jobs.JobRunner):
         if not proj:
             raise ValueError(f"No patchwork project for upstream '{ups}'")
         pwork = self.get_pwork(ups)
-        key = (pwork.url, proj[2])
-        kept = self._inbox_kept.get(key)
-        if (request.query.get('refresh') == '1' or not kept or
-                (page == 1 and self._clock() - kept['read'] > INBOX_KEEP)):
-            kept = None
-        series_list = kept and kept['pages'].get(page)
-        if series_list is None:
-            async with aiohttp.ClientSession() as client:
-                series_list = await pwork.get_recent_series(
-                    client, proj[2], page, INBOX_PAGE)
-            if not kept:
-                kept = {'read': self._clock(), 'fetched': times.now_str(),
-                        'pages': {}}
-                self._inbox_kept[key] = kept
-            kept['pages'][page] = series_list
+        first = pwork.recent_series_path(proj[2], 1, INBOX_PAGE)
+        if request.query.get('refresh') == '1':
+            max_age = 0
+        elif page == 1:
+            max_age = INBOX_KEEP
+        else:
+            max_age = pwork.read_age(first) or 0
+        async with aiohttp.ClientSession() as client:
+            series_list = await pwork.get_recent_series(
+                client, proj[2], page, INBOX_PAGE, max_age=max_age)
+        read = pwork.read_time(first)
         series = info.get_inbox(self.cser, self.rcser, series_list)
         for item in series:
             item['job'] = self._reviewing(item['id'])
         return web.json_response({
             'ups': ups, 'page': page, 'per_page': INBOX_PAGE,
-            'fetched': kept['fetched'], 'series': series})
+            'fetched': (times.to_str(datetime.fromtimestamp(read)) if read
+                        else times.now_str()),
+            'series': series})
 
     def _job_state(self, job):
         """Get the state of a job, with the reviewed series it acts on

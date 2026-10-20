@@ -10,6 +10,14 @@ Unreleased
 
 Added
 ~~~~~
+- patman keeps what it reads from patchwork in a cache,
+  ``~/.cache/patman/patchwork.db``, and uses it again rather than asking each
+  time, for as long as suits what it is: a patch for an hour, comments for
+  five minutes, a complete series for good. Searches, ``patman status`` and
+  the sync still read the current state. On the ``patman serve`` page, a
+  patch says when it was read, with 'Refresh' to read it again, the inbox is
+  kept across a restart, and the patchwork traffic includes the reads which
+  the cache answers. Set ``PATMAN_PWCACHE`` to ``off`` to use no cache.
 - ``--keep-assist-tags``, or the ``keep_assist_tags`` setting, keeps the tags
   which a coding assistant adds, such as ``Co-developed-by: ...
   <noreply@...>``, in the patches sent, for projects which want them. Set it
