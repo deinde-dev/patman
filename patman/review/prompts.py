@@ -252,6 +252,8 @@ Rules:
 - Write each comment paragraph on a single line - do not hard-wrap the
   prose; the reader's mail client will wrap it. Keep the quoted '> '
   lines and any indented code exactly as they are
+- Do not write a Reviewed-by or other tag: patman adds the tag when the
+  VERDICT is approved
 - Always end with exactly one VERDICT: line (approved or changes_needed)
 '''
 

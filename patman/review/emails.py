@@ -102,6 +102,34 @@ def _parse_comments(text):
     return comments
 
 
+# A review tag, which the agent sometimes writes in a comment, e.g.
+# 'Reviewed-by: Simon Glass <simon@example.com>'
+RE_TAG = re.compile(r'^\s*(Reviewed|Acked|Tested)-by:', re.I)
+
+
+def _drop_tags(comments):
+    """Remove the review tags which the agent writes in its comments
+
+    The review gets its tag from the verdict, with the reviewer's identity,
+    so a tag in a comment is at best a duplicate and at worst names someone
+    else, e.g. an address the agent finds in the source tree.
+
+    Args:
+        comments (list of tuple): (hunk, comment) pairs
+
+    Returns:
+        list of tuple: (hunk, comment) pairs without the tags, leaving out
+            any which then have nothing in them
+    """
+    out = []
+    for hunk, comment in comments:
+        comment = '\n'.join(line for line in comment.splitlines()
+                            if not RE_TAG.match(line)).strip()
+        if hunk or comment:
+            out.append((hunk, comment))
+    return out
+
+
 def parse_review_output(text):
     """Parse structured review output from the agent
 
@@ -111,11 +139,11 @@ def parse_review_output(text):
     Returns:
         tuple: (greeting, verdict, comments) where greeting is the author's
             first name (or ''), verdict is 'approved' or 'changes_needed',
-            and comments is a
-            list of (hunk, comment) tuples
+            and comments is a list of (hunk, comment) tuples, without any
+            review tags
     """
     greeting, verdict = _parse_greeting_verdict(text)
-    comments = _parse_comments(text)
+    comments = _drop_tags(_parse_comments(text))
     return greeting, verdict, comments
 
 
