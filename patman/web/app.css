@@ -269,3 +269,7 @@ nav a .badge { position: absolute; top: 2px; left: 50%; margin-left: 6px;
 .traffic { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px;
            font-size: 14px; margin-top: 4px; }
 .traffic .label { color: var(--muted); }
+/* The requests of each kind: kind, today and the last 7 days */
+.traffic.kinds { grid-template-columns: 1fr max-content max-content;
+                 margin-top: 8px; font-size: 13px; }
+.traffic .num { text-align: right; font-variant-numeric: tabular-nums; }

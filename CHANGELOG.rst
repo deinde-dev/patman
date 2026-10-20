@@ -10,6 +10,10 @@ Unreleased
 
 Added
 ~~~~~
+- The patchwork traffic on the ``patman serve`` page lists the requests of
+  each kind, such as ``patch-comments`` or ``series-search``, for today and
+  the last seven days, to show what the traffic to each server is made of.
+  This needs database v17.
 - patman keeps what it reads from patchwork in a cache,
   ``~/.cache/patman/patchwork.db``, and uses it again rather than asking each
   time, for as long as suits what it is: a patch for an hour, comments for

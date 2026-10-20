@@ -676,7 +676,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
         none = {'hour': 0, 'today': 0, 'week': 0}
         self.assertEqual([{'url': 'https://pw', 'hour': [2, 500],
                            'today': [2, 500], 'week': [2, 500],
-                           'cached': none}],
+                           'cached': none, 'kinds': {}}],
                          state['traffic'])
 
         # Older counts only appear in the longer periods
@@ -685,7 +685,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
                                  {'https://pw': (10, 1000)})
         self.assertEqual(
             [{'url': 'https://pw', 'hour': [2, 500], 'today': [2, 500],
-              'week': [12, 1500], 'cached': none}],
+              'week': [12, 1500], 'cached': none, 'kinds': {}}],
             traffic.get_summary(self.cser.db, now))
 
         # Reads which the cache answers are counted too, including for a
@@ -696,11 +696,25 @@ class TestWebServer(unittest.TestCase, TestCommon):
         cache.add_hit('https://other')
         self.assertEqual(
             [{'url': 'https://other', 'hour': [0, 0], 'today': [0, 0],
-              'week': [0, 0], 'cached': {'hour': 1, 'today': 1, 'week': 1}},
+              'week': [0, 0], 'cached': {'hour': 1, 'today': 1, 'week': 1},
+              'kinds': {}},
              {'url': 'https://pw', 'hour': [2, 500], 'today': [2, 500],
               'week': [12, 1500], 'cached': {'hour': 2, 'today': 2,
-                                             'week': 2}}],
+                                             'week': 2}, 'kinds': {}}],
             traffic.get_summary(self.cser.db, now, cache))
+
+        # The requests of each kind are listed, leaving out those counted
+        # before kinds were recorded
+        self.cser.db.traffic_add(traffic.hour_key(now), {
+            ('https://pw', 'patch'): (2, 150),
+            ('https://pw', 'patch-comments'): (1, 20)})
+        summary = traffic.get_summary(self.cser.db, now)
+        self.assertEqual(([5, 670], [15, 1670]),
+                         (summary[0]['today'], summary[0]['week']))
+        self.assertEqual(
+            {'patch': {'today': [2, 150], 'week': [2, 150]},
+             'patch-comments': {'today': [1, 20], 'week': [1, 20]}},
+            summary[0]['kinds'])
 
     def test_sync(self):
         """A sync runs each command and records its output"""
@@ -1580,6 +1594,28 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(5, inbox()[0])
         self.assertEqual(5, len(reads))
 
+    def test_request_kind(self):
+        """Each request to patchwork is counted by its kind"""
+        for subpath, kind in (
+                ('patches/5/comments/', 'patch-comments'),
+                ('patches/5/', 'patch'),
+                ('covers/9/comments/', 'cover-comments'),
+                ('covers/9/', 'cover'),
+                ('series/7/mbox/', 'mbox'),
+                ('series/7/', 'series'),
+                ('patches/?series=7', 'patch-states'),
+                ('series/?project=1&q=video', 'series-search'),
+                ('series/?project=uboot&order=-date&page=1&per_page=50',
+                 'recent-series'),
+                ('patches/?project=1&q=video&order=-date&per_page=20',
+                 'patch-search'),
+                ('patches/?project=uboot&order=-date&per_page=50&page=1',
+                 'patch-list'),
+                ('projects/?page=1&per_page=100', 'projects'),
+                ('events/?project=uboot', 'events'),
+                ('users/3/', 'users')):
+            self.assertEqual(kind, patchwork.request_kind(subpath), subpath)
+
     def test_patchwork_retry(self):
         """Patchwork requests are retried when the server is slow or busy"""
         calls = []
@@ -1617,7 +1653,8 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(3, len(calls))
 
         # Each try is counted, along with what came back
-        self.assertEqual({urls[0]: (3, len('{"ok": 3}'))}, traffic.take())
+        self.assertEqual({(urls[0], 'patch'): (3, len('{"ok": 3}'))},
+                         traffic.take())
 
     def test_patchwork_connect_retry(self):
         """A failed connection is retried, but a name which fails is not"""

@@ -531,9 +531,17 @@ of the most recent sync, along with:
 - ``num_series`` (int): number of series which a sync reads, i.e. the latest
   version of each unarchived series with a patchwork link
 - ``traffic`` (list of object): requests sent to each patchwork server by
-  any patman process using this database, each with ``url`` and, as
-  ``[requests, bytes received]``, ``hour`` (this hour), ``today`` (since
-  midnight) and ``week`` (the last seven days)
+  any patman process using this database, each with:
+
+  - ``url`` (str): URL of the server
+  - ``hour``, ``today`` and ``week``: ``[requests, bytes received]`` this
+    hour, since midnight and in the last seven days
+  - ``cached`` (object): reads which the patchwork cache answered instead,
+    keyed by ``hour``, ``today`` and ``week``
+  - ``kinds`` (object): the requests of each kind, keyed by kind, e.g.
+    ``patch`` or ``patch-comments``, each with ``today`` and ``week`` as
+    ``[requests, bytes received]``; requests counted before patman recorded
+    kinds are left out
 
 Before the first sync there is no Job, so only ``queued``, ``running``,
 ``cancelled``, ``started``, ``finished`` and ``results`` are given, along with
