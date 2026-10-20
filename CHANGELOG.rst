@@ -46,6 +46,9 @@ Changed
 
 Fixed
 ~~~~~
+- The ``patman serve`` page no longer says 'offline' for good after the
+  server misses one check of the sync state, e.g. while restarting; it asks
+  again ten seconds later.
 - Settings for the options of a subcommand of a subcommand, such as
   ``keep_change_id`` or ``insert_base_commit`` for ``patman series send``,
   take effect. They were only used by ``patman send``.
