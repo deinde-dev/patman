@@ -42,6 +42,7 @@ def run_patman():
         from patman import test_checkpatch
         from patman import test_common
         from patman import test_cseries
+        from patman import test_pwcache
         from patman import test_database
         from patman import test_review
         from patman import test_send
@@ -53,6 +54,8 @@ def run_patman():
         from u_boot_pylib import test_command
 
         test_common.clear_git_env()
+        # Keep the tests away from the user's patchwork cache
+        os.environ['PATMAN_PWCACHE'] = 'off'
         to_run = args.testname if args.testname not in [None, 'test'] else None
         result = test_util.run_test_suites(
             'patman', False, args.verbose, args.no_capture,
@@ -63,6 +66,7 @@ def run_patman():
              test_upstream.TestUpstream, test_workflow.TestWorkflow,
              test_database.TestDatabase, test_review.TestReview,
              test_send.TestSend, test_settings.TestSettings,
+             test_pwcache.TestPwCache,
              test_server.TestWebServer, test_command.TestRunInteractive])
         sys.exit(0 if result.wasSuccessful() else 1)
 
