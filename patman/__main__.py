@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.join(our_path, '..'))
 # Our modules
 from patman import cmdline
 from patman import control
+from patman import lore
 from u_boot_pylib import test_util
 from u_boot_pylib import tout
 
@@ -44,6 +45,7 @@ def run_patman():
         from patman import test_cseries
         from patman import test_pwcache
         from patman import test_database
+        from patman import test_lore
         from patman import test_review
         from patman import test_send
         from patman import test_server
@@ -54,8 +56,9 @@ def run_patman():
         from u_boot_pylib import test_command
 
         test_common.clear_git_env()
-        # Keep the tests away from the user's patchwork cache
+        # Keep the tests away from the user's patchwork cache, and lore
         os.environ['PATMAN_PWCACHE'] = 'off'
+        lore.set_mode('off')
         to_run = args.testname if args.testname not in [None, 'test'] else None
         result = test_util.run_test_suites(
             'patman', False, args.verbose, args.no_capture,
@@ -66,7 +69,7 @@ def run_patman():
              test_upstream.TestUpstream, test_workflow.TestWorkflow,
              test_database.TestDatabase, test_review.TestReview,
              test_send.TestSend, test_settings.TestSettings,
-             test_pwcache.TestPwCache,
+             test_pwcache.TestPwCache, test_lore.TestLore,
              test_server.TestWebServer, test_command.TestRunInteractive])
         sys.exit(0 if result.wasSuccessful() else 1)
 
