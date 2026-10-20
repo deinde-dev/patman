@@ -286,6 +286,128 @@ class TestPwCache(unittest.TestCase):
                                  run(pwork.get_patch(None, '5'))['state'])
         self.assertEqual((2, 0), (pwork.request_count, pwork.cache_hits))
 
+    def test_follow(self):
+        """The cache records how far events are followed, and drops entries"""
+        cache = self.cache()
+        self.assertIsNone(cache.get_follow('https://pw', 'uboot'))
+        cache.set_follow('https://pw', 'uboot', 1000.0, '2026-10-20T10:00', 1005)
+        self.assertEqual((1000.0, '2026-10-20T10:00', 1005.0),
+                         cache.get_follow('https://pw', 'uboot'))
+        self.assertIsNone(cache.get_follow('https://pw', 'linux'))
+
+        # An entry read since following began is current however old
+        cache.put('https://pw', 'patches/1/', {'id': 1})
+        self.now += 10 ** 6
+        self.assertIsNone(cache.get('https://pw', 'patches/1/', 0))
+        self.assertEqual({'id': 1}, cache.get('https://pw', 'patches/1/', 0,
+                                              since=1000.0))
+        self.assertIsNone(cache.get('https://pw', 'patches/1/', 0,
+                                    since=1001.0))
+        self.assertIsNone(cache.get('https://pw', 'patches/1/', 0,
+                                    keep=lambda _: False, since=1000.0))
+        cache.drop('https://pw', 'patches/1/')
+        self.assertIsNone(cache.get('https://pw', 'patches/1/', None))
+
+    def test_follow_events(self):
+        """A sync uses patches from the cache while events say they are current"""
+        states = {1: 'new', 2: 'new'}
+        events = []
+        reads = []
+
+        def fake(subpath):
+            reads.append(subpath)
+            if subpath == 'series/7/':
+                return {'id': 7, 'received_all': True, 'cover_letter': None,
+                        'patches': [{'id': 1, 'name': 'one'},
+                                    {'id': 2, 'name': 'two'}]}
+            if subpath.startswith('events/'):
+                if 'per_page=1&' in subpath + '&':
+                    return [{'date': '2026-10-20T10:00:00'}]
+                return events
+            pid = int(subpath.split('/')[1])
+            if subpath.endswith('/comments/'):
+                return []
+            return {'id': pid, 'state': states[pid],
+                    'project': {'link_name': 'uboot'}}
+
+        pwork = Patchwork.for_testing(fake)
+        pwork.project_set(18, 'uboot')
+        pwork.cache = self.cache()
+
+        def sync():
+            reads.clear()
+            _, patches = run(pwork.series_get_state(None, '7', True, False))
+            return [p.state for p in patches], [r for r in reads if
+                                                not r.endswith('comments/')]
+
+        # Following begins, so the patches are read
+        self.assertEqual((['new', 'new'],
+                          ['series/7/', 'events/?project=uboot&per_page=1',
+                           'patches/1/', 'patches/2/']), sync())
+
+        # Soon after, the events are not checked again, and the patches are
+        # current
+        self.assertEqual((['new', 'new'], []), sync())
+
+        # Later, an event says patch 2 has changed, so only it is read
+        self.now += 61
+        states[2] = 'accepted'
+        events[:] = [{'date': '2026-10-20T10:05:00',
+                      'category': 'patch-state-changed',
+                      'payload': {'patch': {'id': 2}}},
+                     {'date': '2026-10-20T10:06:00',
+                      'category': 'series-created', 'payload': {}}]
+        self.assertEqual(
+            (['new', 'accepted'],
+             ['events/?project=uboot&since=2026-10-20T10%3A00%3A00&'
+              'per_page=100&page=1', 'patches/2/']), sync())
+        self.assertEqual('2026-10-20T10:06:00',
+                         pwork.cache.get_follow(pwork.url, 'uboot')[1])
+
+        # After too long without a check, following begins again
+        self.now += pwcache_age('EVENTS_MAX_GAP') + 1
+        events.clear()
+        self.assertEqual((['new', 'accepted'],
+                          ['events/?project=uboot&per_page=1', 'patches/1/',
+                           'patches/2/']), sync())
+
+        # So it does if there are too many events to read
+        self.now += 61
+        events[:] = [{'date': '2026-10-20T11:00:00', 'category': 'x',
+                      'payload': {}}] * pwcache_age('EVENTS_PER_PAGE')
+        with mock.patch('patman.patchwork.EVENTS_MAX_PAGES', 2):
+            _, read = sync()
+        self.assertEqual(['events/?project=uboot&since=2026-10-20T10%3A00%3A00'
+                          '&per_page=100&page=1',
+                          'events/?project=uboot&since=2026-10-20T10%3A00%3A00'
+                          '&per_page=100&page=2',
+                          'events/?project=uboot&per_page=1',
+                          'patches/1/', 'patches/2/'], read)
+
+    def test_follow_other_project(self):
+        """A patch in another project is not kept current by the events"""
+        def fake(subpath):
+            if subpath.startswith('events/'):
+                return []
+            return {'id': 5, 'state': 'new',
+                    'project': {'link_name': 'linux'}}
+
+        pwork = Patchwork.for_testing(fake)
+        pwork.project_set(18, 'uboot')
+        pwork.cache = self.cache()
+        since = run(pwork.follow_events(None))
+        run(pwork.get_patch(None, '5', max_age=0, since=since))
+        before = pwork.request_count
+        run(pwork.get_patch(None, '5', max_age=0, since=since))
+        self.assertEqual(before + 1, pwork.request_count)
+
+        # No events are followed with no project, or no cache
+        pwork.link_name = None
+        self.assertIsNone(run(pwork.follow_events(None)))
+        pwork.link_name = 'uboot'
+        pwork.cache = False
+        self.assertIsNone(run(pwork.follow_events(None)))
+
     def test_prune_daily(self):
         """Old entries are dropped when the cache is opened, once a day"""
         cache = self.cache()

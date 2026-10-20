@@ -130,13 +130,22 @@ These are never cached, so always ask patchwork:
 These are always read from patchwork, though what is read is kept for
 others to use:
 
-- the state and comments of each patch, and the comments on the cover letter,
-  in ``patman status`` and the sync, which need them to be current; these do
-  use a series from the cache once it is complete
+- the comments on each patch and on the cover letter, in ``patman status``
+  and the sync, which need them to be current; these do use a series from
+  the cache once it is complete, and patches as below
 - a series which is still arriving, when the sync reads it, so that its new
   patches are seen
 - the list of projects, when setting the project with
   ``patman patchwork set-project``, since the project may be new
+
+``patman status`` and the sync also need the current state of each patch.
+Rather than read every patch again, they follow the project's events on
+patchwork, which say when a patch's state or delegate changes: each sync
+reads the events since the last one, usually in a single request, drops the
+patches which have changed from the cache and uses the rest from it. Only
+patches read since patman began following the events are used in this way,
+and if the events are not checked for a week, following begins again, so
+everything is read once more.
 
 Entries which are not used for 90 days are dropped. If the cache cannot be
 used, e.g. because the disk is full, patman says so once and reads patchwork
