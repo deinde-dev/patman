@@ -21,6 +21,7 @@ import aiohttp
 
 from u_boot_pylib import gitutil
 from u_boot_pylib import tools
+from u_boot_pylib import tout
 
 try:
     from claude_agent_sdk import ClaudeAgentOptions
@@ -33,6 +34,13 @@ except ImportError:
 # start of do_review() from --model / the 'model' setting, then read by
 # agent_options() so every agent in the run uses the same model
 _AGENT_MODEL = None
+
+# Where Claude Code's installer puts it, which is often not on the PATH of a
+# service, such as the one running 'patman serve', or of a cron job
+LOCAL_BIN = '~/.local/bin'
+
+# Set once it is reported that only the copy bundled with the SDK is present
+_BUNDLED_WARNED = False
 
 
 def run(coro):
@@ -74,6 +82,36 @@ def set_agent_model(model):
     _AGENT_MODEL = model
 
 
+def find_claude():
+    """Find the installed Claude Code, looking in ~/.local/bin if need be
+
+    If Claude Code is not on the PATH but is in ~/.local/bin, that directory
+    is added to the end of the PATH, for this process and anything it runs.
+    This lets u_boot_pylib, which picks the binary to run and reports it,
+    find the same one, so that the old copy bundled with claude-agent-sdk is
+    not used instead.
+
+    Returns:
+        str or None: Path to Claude Code, or None if it is not installed
+    """
+    global _BUNDLED_WARNED  # pylint: disable=W0603
+    cli = shutil.which('claude')
+    if cli:
+        return cli
+    local = os.path.expanduser(LOCAL_BIN)
+    cli = shutil.which('claude', path=local)
+    if cli:
+        os.environ['PATH'] = os.pathsep.join(
+            filter(None, [os.environ.get('PATH'), local]))
+        return cli
+    if not _BUNDLED_WARNED:
+        _BUNDLED_WARNED = True
+        tout.warning(f'Claude Code is not on the PATH or in {LOCAL_BIN}, so '
+                     'the copy bundled with claude-agent-sdk is used, which '
+                     "may be old; 'claude update' does not update it")
+    return None
+
+
 def agent_options(**kwargs):
     """Create ClaudeAgentOptions with the selected review model applied
 
@@ -85,7 +123,7 @@ def agent_options(**kwargs):
     The SDK prefers the Claude Code CLI bundled with it, which may be too
     old to use the current models. Use the installed 'claude' instead, if
     there is one, so that updating Claude Code is enough to keep reviews
-    working.
+    working. See find_claude() for where it is looked for.
 
     Args:
         kwargs: Fields to pass to ClaudeAgentOptions
@@ -95,7 +133,7 @@ def agent_options(**kwargs):
     """
     if _AGENT_MODEL:
         kwargs.setdefault('model', _AGENT_MODEL)
-    cli = shutil.which('claude')
+    cli = find_claude()
     if cli:
         kwargs.setdefault('cli_path', cli)
     return ClaudeAgentOptions(**kwargs)
