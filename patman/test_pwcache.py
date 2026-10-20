@@ -92,6 +92,21 @@ class TestPwCache(unittest.TestCase):
             self.assertIsNone(
                 self.cache().get('https://pw', 'patches/1/', None))
 
+    def test_hits_size(self):
+        """A cache from before sizes were counted gains the column"""
+        os.makedirs(os.path.dirname(self.path))
+        con = sqlite3.connect(self.path)
+        con.execute('CREATE TABLE hits (hour TEXT, server TEXT, '
+                    'count INTEGER, PRIMARY KEY (hour, server))')
+        con.execute("INSERT INTO hits VALUES ('2026-10-20 09', 'https://pw', 3)")
+        con.execute(f'PRAGMA user_version = {pwcache.LAYOUT}')
+        con.commit()
+        con.close()
+        cache = self.cache()
+        self.assertEqual({'https://pw': [3, 0]}, cache.hits_since(''))
+        cache.add_hit('https://pw', 40)
+        self.assertEqual({'https://pw': [4, 40]}, cache.hits_since(''))
+
     def test_broken(self):
         """A cache which fails acts as an empty one, after saying so once"""
         cache = self.cache()
@@ -272,7 +287,10 @@ class TestPwCache(unittest.TestCase):
         pwork.cache = self.cache()
         for _ in range(3):
             run(pwork.get_patch(None, '5'))
-        self.assertEqual({pwork.url: 2}, pwork.cache.hits_since(''))
+        # Each read counts the size of the response
+        size = len('{"id": 5, "state": "new"}')
+        self.assertEqual({pwork.url: [2, 2 * size]},
+                         pwork.cache.hits_since(''))
 
     def test_get_patch_broken(self):
         """Patches are still read when the cache fails"""

@@ -673,7 +673,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.call(srv, 'GET', '/api/version')
         self.assertEqual({}, traffic.take())
         _, state = self.call(srv, 'GET', '/api/sync')
-        none = {'hour': 0, 'today': 0, 'week': 0}
+        none = {'hour': [0, 0], 'today': [0, 0], 'week': [0, 0]}
         self.assertEqual([{'url': 'https://pw', 'hour': [2, 500],
                            'today': [2, 500], 'week': [2, 500],
                            'cached': none, 'kinds': {}}],
@@ -691,16 +691,18 @@ class TestWebServer(unittest.TestCase, TestCommon):
         # Reads which the cache answers are counted too, including for a
         # server which is not otherwise read
         cache = pwcache.Cache(os.path.join(self.tmpdir, 'pwcache.db'))
-        cache.add_hit('https://pw')
-        cache.add_hit('https://pw')
-        cache.add_hit('https://other')
+        cache.add_hit('https://pw', 100)
+        cache.add_hit('https://pw', 50)
+        cache.add_hit('https://other', 7)
         self.assertEqual(
             [{'url': 'https://other', 'hour': [0, 0], 'today': [0, 0],
-              'week': [0, 0], 'cached': {'hour': 1, 'today': 1, 'week': 1},
+              'week': [0, 0],
+              'cached': {'hour': [1, 7], 'today': [1, 7], 'week': [1, 7]},
               'kinds': {}},
              {'url': 'https://pw', 'hour': [2, 500], 'today': [2, 500],
-              'week': [12, 1500], 'cached': {'hour': 2, 'today': 2,
-                                             'week': 2}, 'kinds': {}}],
+              'week': [12, 1500],
+              'cached': {'hour': [2, 150], 'today': [2, 150],
+                         'week': [2, 150]}, 'kinds': {}}],
             traffic.get_summary(self.cser.db, now, cache))
 
         # The requests of each kind are listed, leaving out those counted

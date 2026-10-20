@@ -10,6 +10,9 @@ Unreleased
 
 Added
 ~~~~~
+- The patchwork traffic on the ``patman serve`` page gives the size of the
+  reads which the cache answers, e.g. '638 from the cache (8.1 MB)', as well
+  as their number.
 - ``patman status`` and the sync read the thread of each series from
   lore.kernel.org, in one request, and read the comments on a patch from
   patchwork only if lore shows new replies to it, or they have not been read

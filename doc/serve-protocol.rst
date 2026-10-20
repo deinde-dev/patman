@@ -537,7 +537,9 @@ of the most recent sync, along with:
   - ``hour``, ``today`` and ``week``: ``[requests, bytes received]`` this
     hour, since midnight and in the last seven days
   - ``cached`` (object): reads which the patchwork cache answered instead,
-    keyed by ``hour``, ``today`` and ``week``
+    keyed by ``hour``, ``today`` and ``week``, each as ``[reads, bytes]``,
+    the bytes being the size of the responses which patchwork would
+    otherwise have sent
   - ``kinds`` (object): the requests of each kind, keyed by kind, e.g.
     ``patch`` or ``patch-comments``, each with ``today`` and ``week`` as
     ``[requests, bytes received]``; requests counted before patman recorded

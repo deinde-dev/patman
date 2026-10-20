@@ -140,8 +140,9 @@ def get_summary(db, now=None, cache=None):
             url (str): URL of the patchwork server
             hour, today, week (list of int): [requests, bytes] this hour,
                 since midnight and in the last seven days
-            cached (dict): Number of reads answered by the cache in each of
-                these periods, keyed by 'hour', 'today' and 'week'
+            cached (dict): Reads answered by the cache in each of these
+                periods, as [reads, bytes], keyed by 'hour', 'today' and
+                'week'
             kinds (dict): The requests of each kind, e.g. 'patch-comments',
                 today and in the last seven days: key (str): kind
                 value (dict): [requests, bytes] keyed by 'today' and 'week'.
@@ -158,7 +159,8 @@ def get_summary(db, now=None, cache=None):
     def item(url):
         return out.setdefault(url, {
             'url': url, 'hour': [0, 0], 'today': [0, 0], 'week': [0, 0],
-            'cached': {'hour': 0, 'today': 0, 'week': 0}, 'kinds': {}})
+            'cached': {'hour': [0, 0], 'today': [0, 0], 'week': [0, 0]},
+            'kinds': {}})
 
     for name, since in periods.items():
         for url, (requests, nbytes) in db.traffic_get(since).items():
@@ -170,6 +172,6 @@ def get_summary(db, now=None, cache=None):
                         kind, {'today': [0, 0], 'week': [0, 0]})[name] = \
                         list(counts)
         if cache:
-            for url, count in cache.hits_since(since).items():
-                item(url)['cached'][name] = count
+            for url, counts in cache.hits_since(since).items():
+                item(url)['cached'][name] = counts
     return [out[url] for url in sorted(out)]
