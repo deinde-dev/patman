@@ -8,6 +8,11 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+Changed
+~~~~~~~
+- Tapping the Inbox tab of the ``patman serve`` page shows the tab at once,
+  saying that the inbox is loading while it is read from patchwork.
+
 0.5.0 - 2026-10-19
 ------------------
 
