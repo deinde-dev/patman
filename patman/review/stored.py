@@ -21,6 +21,7 @@ from u_boot_pylib import claude as claude_mod
 from u_boot_pylib import gitutil
 from u_boot_pylib import tout
 
+from patman import cser_helper
 from patman import database
 from patman import gmail
 from patman.review import apply
@@ -195,6 +196,59 @@ def _review_label(seq):
     return f'patch {seq}' if seq else 'the cover letter'
 
 
+def _review_branch(link, ups, git_dir):
+    """Find the branch which holds the patches of a reviewed series
+
+    Args:
+        link (str): Patchwork series link/ID
+        ups (str or None): Upstream name
+        git_dir (str): Top-level dir of the main checkout
+
+    Returns:
+        str or None: Name of the branch, or None if it is not present
+    """
+    # Reviews made before patman recorded the upstream use 'pw' in the name
+    for branch in (lookup.make_review_name(link, ups),
+                   lookup.make_review_name(link)):
+        if gitutil.ref_exists(branch, git_dir):
+            return branch
+    return None
+
+
+def _open_review_worktree(git_dir, branch):
+    """Check out a review branch in its review worktree again
+
+    The agent session which wrote a review runs in the review's worktree,
+    which is removed once the review is done. Claude Code keeps each session
+    with the directory it ran in, so the session can only be resumed from
+    there. The worktree also has the patches applied, for the agent to read.
+
+    Args:
+        git_dir (str): Top-level dir of the main checkout
+        branch (str): Review branch
+
+    Returns:
+        tuple:
+            str or None: Path of the worktree, or None if the branch cannot
+                be checked out, e.g. because it is checked out elsewhere
+            bool: True if the worktree is added here, so is to be removed
+                afterwards
+    """
+    path = cser_helper.review_worktree_path(git_dir, branch)
+    if os.path.isdir(path):
+        return path, False
+    # Forget a worktree whose directory has gone, so it can be added again
+    subprocess.run(['git', 'worktree', 'prune'], cwd=git_dir, check=False)
+    result = subprocess.run(['git', 'worktree', 'add', '-q', path, branch],
+                            capture_output=True, text=True, check=False,
+                            cwd=git_dir)
+    if result.returncode:
+        tout.warning(f'Cannot check out {branch} to carry on from the '
+                     f'review: {result.stderr.strip()}')
+        return None, False
+    return path, True
+
+
 def _review_commits(args, cser, link, ups):
     """Get the commits holding the patches of a reviewed series
 
@@ -213,12 +267,8 @@ def _review_commits(args, cser, link, ups):
             or an empty list if the branch is not present
     """
     git_dir = gitutil.get_top_level()
-    # Reviews made before patman recorded the upstream use 'pw' in the name
-    for branch in (lookup.make_review_name(link, ups),
-                   lookup.make_review_name(link)):
-        if gitutil.ref_exists(branch, git_dir):
-            break
-    else:
+    branch = _review_branch(link, ups, git_dir)
+    if not branch:
         return []
     bases = [apply.get_upstream_branch(args, cser)]
     if ups:
@@ -416,6 +466,12 @@ def _do_revise(args, pwork, cser, link):
     # A single review can carry on from the session which wrote it
     session = (cser.db.review_get_session(reviews[0].idnum)
                if len(reviews) == 1 else None)
+    # Run the agent where the review ran, so that the session can be found
+    git_dir, added = ctx.repo_path, False
+    branch = session and _review_branch(link, ups, git_dir)
+    if branch:
+        wt_path, added = _open_review_worktree(git_dir, branch)
+        ctx.repo_path = wt_path or git_dir
     try:
         changed = revise_reviews_sync(
             ctx, {rev.seq: rev.body for rev in reviews}, args.revise, commits,
@@ -423,6 +479,8 @@ def _do_revise(args, pwork, cser, link):
     finally:
         if ctx.comments_path and os.path.exists(ctx.comments_path):
             os.unlink(ctx.comments_path)
+        if added:
+            gitutil.remove_worktree(git_dir, ctx.repo_path)
     if changed is None:
         tout.error('Could not revise the reviews')
         return 1

@@ -15,6 +15,11 @@ Changed
 
 Fixed
 ~~~~~
+- ``patman review --revise`` on a single review carries on from the agent
+  session which wrote it again. The session belongs to the review's worktree,
+  which is removed once the review is done, so the revision checks out the
+  review branch there again for the agent, rather than running it in the main
+  checkout, where Claude Code cannot find the session.
 - On a reviewed series in the ``patman serve`` page, the buttons at the top,
   such as 'Send 3 drafts', leave out the reviews which a job is acting on and
   change once it finishes, rather than staying as they are until the page is
