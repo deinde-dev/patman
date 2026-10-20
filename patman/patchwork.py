@@ -66,6 +66,13 @@ REQUEST_TIMEOUT = 30
 #
 # A patch's text does not change, but its state may
 PATCH_MAX_AGE = 60 * 60
+# A cover letter has no state
+COVER_MAX_AGE = 24 * 60 * 60
+# New comments may arrive at any time
+COMMENTS_MAX_AGE = 5 * 60
+# A series gains patches until patchwork has them all (received_all), then
+# does not change, so is then kept however old it is
+SERIES_MAX_AGE = 10 * 60
 
 # Maximum number of requests to send to patchwork at once. Busy servers may
 # block a client which opens a lot of connections, so keep this small
@@ -633,12 +640,15 @@ class Patchwork:
             client, f'series/?project={project}&order=-date&page={page}'
             f'&per_page={per_page}')
 
-    async def get_series(self, client, link):
+    async def get_series(self, client, link, max_age=SERIES_MAX_AGE):
         """Read information about a series
 
         Args:
             client (aiohttp.ClientSession): Session to use
             link (str): Patchwork series ID
+            max_age (float or None): Oldest cached copy to use, in seconds,
+                unless patchwork has all its patches, since it then does not
+                change; 0 to read patchwork unless so, or None to use any
 
         Returns: dict containing patchwork's series information
             id (int): series ID unique across patchwork instance, e.g. 3
@@ -684,7 +694,10 @@ class Patchwork:
                 "mbox": "https://patchwork.ozlabs.org/project/uboot/patch/
                     20170827080051.816-1-judge.packham@gmail.com/mbox/"
         """
-        return await self._request(client, f'series/{link}/')
+        # Once patchwork has all the patches, the series does not change
+        return await self._cached_request(
+            client, f'series/{link}/', max_age,
+            keep=lambda data: data.get('received_all'))
 
     async def get_series_patch_states(self, client, link):
         """Get the patchwork state of each patch in a series
@@ -831,12 +844,15 @@ class Patchwork:
         return await self._cached_request(client, self.patch_path(patch_id),
                                           max_age)
 
-    async def get_patch_comments(self, client, patch_id):
+    async def get_patch_comments(self, client, patch_id,
+                                 max_age=COMMENTS_MAX_AGE):
         """Read comments about a patch
 
         Args:
             client (aiohttp.ClientSession): Session to use
             patch_id (str): Patchwork patch ID
+            max_age (float or None): Oldest cached copy to use, in seconds; 0
+                to read patchwork, or None to use any
 
         Returns: list of dict: list of comments:
             id (int): series ID unique across patchwork instance, e.g. 3331924
@@ -859,14 +875,17 @@ class Patchwork:
                 >...'
             headers: dict: email headers, see get_cover() for an example
         """
-        return await self._request(client, f'patches/{patch_id}/comments/')
+        return await self._cached_request(
+            client, self.comments_path('patch', patch_id), max_age)
 
-    async def get_cover(self, client, cover_id):
+    async def get_cover(self, client, cover_id, max_age=COVER_MAX_AGE):
         """Read information about a cover letter
 
         Args:
             client (aiohttp.ClientSession): Session to use
             cover_id (int): Patchwork cover-letter ID
+            max_age (float or None): Oldest cached copy to use, in seconds; 0
+                to read patchwork, or None to use any
 
         Returns: dict containing patchwork's cover-letter information:
             id (int): cover-letter ID unique across patchwork instance
@@ -906,14 +925,18 @@ class Patchwork:
             content (str): Email content, e.g. 'This series adds a cover-coverage check to CI for Binman. The iMX8 tests
 are still not completed,...'
         """
-        return await self._request(client, f'covers/{cover_id}/')
+        return await self._cached_request(client, f'covers/{cover_id}/',
+                                          max_age)
 
-    async def get_cover_comments(self, client, cover_id):
+    async def get_cover_comments(self, client, cover_id,
+                                 max_age=COMMENTS_MAX_AGE):
         """Read comments about a cover letter
 
         Args:
             client (aiohttp.ClientSession): Session to use
             cover_id (str): Patchwork cover-letter ID
+            max_age (float or None): Oldest cached copy to use, in seconds; 0
+                to read patchwork, or None to use any
 
         Returns: list of dict: list of comments, each:
             id (int): series ID unique across patchwork instance, e.g. 3472068
@@ -940,7 +963,8 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
 > This '...
             headers: dict: email headers, see get_cover() for an example
         """
-        return await self._request(client, f'covers/{cover_id}/comments/')
+        return await self._cached_request(
+            client, self.comments_path('cover', cover_id), max_age)
 
     async def get_series_url(self, link):
         """Get the URL for a series
@@ -969,7 +993,8 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
         # The state is wanted, so read it from patchwork
         data = await self.get_patch(client, patch_id, max_age=0)
         state = data['state']
-        comment_data = await self.get_patch_comments(client, patch_id)
+        comment_data = await self.get_patch_comments(client, patch_id,
+                                                     max_age=0)
 
         return Patch(patch_id, state, data, comment_data)
 
@@ -989,7 +1014,7 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
         cover_id = None
         if cover:
             cover_id = cover['id']
-            info = await self.get_cover_comments(client, cover_id)
+            info = await self.get_cover_comments(client, cover_id, max_age=0)
             cover = COVER(cover_id, len(info), cover['name'], info)
         return cover
 
@@ -1056,7 +1081,9 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
             COVER object, or None if none or not read_cover_comments
             list of PATCH objects
         """
-        data = await self.get_series(client, link)
+        # A complete series does not change, but one which is still arriving
+        # is read again, to see its new patches
+        data = await self.get_series(client, link, max_age=0)
         patch_list = list(data['patches'])
 
         count = len(patch_list)

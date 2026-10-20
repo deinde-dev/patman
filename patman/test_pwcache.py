@@ -175,6 +175,62 @@ class TestPwCache(unittest.TestCase):
         self.assertEqual('state4', get())
         self.assertEqual('state5', get())
 
+    def test_get_series(self):
+        """A series is kept once it is complete, but not before"""
+        reads = []
+
+        def fake(subpath):
+            reads.append(subpath)
+            return {'id': 7, 'received_all': len(reads) > 1}
+
+        pwork = Patchwork.for_testing(fake)
+        pwork.cache = self.cache()
+
+        def get(**kwargs):
+            return run(pwork.get_series(None, '7', **kwargs))
+
+        # Still arriving: kept for a while, but sync reads it again
+        self.assertFalse(get()['received_all'])
+        self.assertFalse(get()['received_all'])
+        self.assertEqual(1, len(reads))
+        self.assertTrue(get(max_age=0)['received_all'])
+        self.assertEqual(2, len(reads))
+
+        # Complete: kept however old it is, even for sync
+        self.now += 365 * 86400
+        self.assertTrue(get(max_age=0)['received_all'])
+        self.assertTrue(get()['received_all'])
+        self.assertEqual(2, len(reads))
+
+    def test_comments(self):
+        """Comments are kept for a few minutes"""
+        reads = []
+
+        def fake(subpath):
+            reads.append(subpath)
+            return [{'id': len(reads)}]
+
+        pwork = Patchwork.for_testing(fake)
+        pwork.cache = self.cache()
+        def get(**kwargs):
+            return run(
+                pwork.get_patch_comments(None, '5', **kwargs))[0]['id']
+
+        self.assertEqual(1, get())
+        self.assertEqual(1, get())
+        self.now += pwcache_age('COMMENTS_MAX_AGE') + 1
+        self.assertEqual(2, get())
+        self.assertEqual(3, get(max_age=0))
+        self.assertEqual(['patches/5/comments/'] * 3, reads)
+
+        def get_cover():
+            return run(
+                pwork.get_cover_comments(None, '9'))[0]['id']
+
+        self.assertEqual(4, get_cover())
+        self.assertEqual(4, get_cover())
+        self.assertEqual('covers/9/comments/', reads[-1])
+
     def test_hits(self):
         """Reads which the cache answers are counted for each server"""
         pwork = Patchwork.for_testing(lambda _: {'id': 5, 'state': 'new'})
@@ -211,3 +267,10 @@ class TestPwCache(unittest.TestCase):
         # A day after the last prune, it does
         self.now += pwcache.KEEP_DAYS * 86400 + 1
         self.assertIsNone(self.cache().get('https://pw', 'patches/1/', None))
+
+
+def pwcache_age(name):
+    """Get one of the cache lifetimes set in patchwork"""
+    # pylint: disable=C0415
+    from patman import patchwork
+    return getattr(patchwork, name)
