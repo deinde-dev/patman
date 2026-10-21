@@ -14,6 +14,7 @@ import ipaddress
 import os
 import re
 import subprocess
+import time
 from datetime import datetime, timedelta
 
 import aiohttp
@@ -48,6 +49,14 @@ INBOX_PAGE = 50
 # Seconds for which the inbox read from patchwork is kept, so that showing it
 # again does not read it again
 INBOX_KEEP = 10 * 60
+
+# Seconds after which the inbox fetches the upstream again, so that it can
+# show which patches have been applied since
+FETCH_MAX_AGE = 60 * 60
+
+# Seconds for which the inbox waits for a fetch to finish; after that it
+# shows the branches as they are, and the fetch carries on
+FETCH_WAIT = 20
 
 
 # Arguments of 'patman review' which act on stored reviews rather than review
@@ -110,7 +119,15 @@ class Server(jobs.JobRunner):
         self.own_emails = None
         self._pworks = {}
         self._sleep = asyncio.sleep
+        self._clock = time.time
         self._sync_task = None
+
+        # Fetches of each upstream started by the inbox: key (str): upstream
+        # name; value: dict with 'started' (time the last fetch began, or
+        # None to fetch at once),
+        # 'task' (asyncio.Task running it) and 'done' (time the last one
+        # which worked finished, or None)
+        self._fetches = {}
 
         # patman's version, found when first asked for, or '' if not known
         self._version_str = None
@@ -786,6 +803,9 @@ class Server(jobs.JobRunner):
         first = pwork.recent_series_path(proj[2], 1, INBOX_PAGE)
         if request.query.get('refresh') == '1':
             max_age = 0
+            # Fetch the upstream too, to see what has been applied
+            if ups in self._fetches:
+                self._fetches[ups]['started'] = None
         elif page == 1:
             max_age = INBOX_KEEP
         else:
@@ -808,6 +828,7 @@ class Server(jobs.JobRunner):
             'ups': ups, 'page': page, 'per_page': INBOX_PAGE,
             'fetched': (times.to_str(datetime.fromtimestamp(read)) if read
                         else times.now_str()),
+            'upstream_fetched': self._fetched_str(ups),
             'series': series})
 
     async def _upstream_commits(self, ups, series_list):
@@ -815,8 +836,8 @@ class Server(jobs.JobRunner):
 
         These are the commits on the upstream's main and next branches since
         the oldest series, so that the inbox can show which patches have
-        been applied. The branches are as of the last fetch, which the sync
-        does.
+        been applied. The upstream is fetched first if the inbox has not
+        done so for FETCH_MAX_AGE (see _fetch_upstream()).
 
         Args:
             ups (str): Upstream name, which is also the git remote
@@ -831,8 +852,84 @@ class Server(jobs.JobRunner):
         # Allow for the time zone, since patchwork gives the date in UTC
         since = (datetime.fromisoformat(min(dates)[:10]) -
                  timedelta(days=1)).strftime('%Y-%m-%d')
+        await self._fetch_upstream(ups)
         refs = [apply.main_branch(ups, self.cser.topdir), f'{ups}/next']
         return await info.get_upstream_commits(self.cser.topdir, refs, since)
+
+    async def _git(self, *args):
+        """Run git in the server's repo
+
+        Args:
+            args (list of str): Arguments for git
+
+        Return:
+            tuple:
+                int: Return code
+                str: What git wrote to stderr
+                str: What git wrote to stdout
+        """
+        proc = await asyncio.create_subprocess_exec(
+            'git', *args, cwd=self.cser.topdir, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE)
+        out, err = await proc.communicate()
+        return (proc.returncode, err.decode('utf-8', 'replace').strip(),
+                out.decode('utf-8', 'replace'))
+
+    async def _run_fetch(self, ups):
+        """Fetch an upstream, noting when it is done
+
+        Args:
+            ups (str): Upstream name, which is also the git remote
+        """
+        code, err, _ = await self._git('fetch', '-q', ups)
+        if code:
+            tout.warning(f"Cannot fetch upstream '{ups}': {err}")
+        else:
+            self._fetches[ups]['done'] = self._clock()
+
+    async def _fetch_upstream(self, ups):
+        """Fetch an upstream, if the inbox has not done so for a while
+
+        This keeps its branches current, so that the inbox can show which
+        patches have been applied, without a sync. It sends nothing to
+        patchwork. The inbox waits for the fetch for up to FETCH_WAIT
+        seconds, then shows what it has while the fetch carries on.
+        'Refresh' sets 'started' to None, so that it fetches at once.
+
+        Args:
+            ups (str): Upstream name, which is only fetched if it is a git
+                remote
+        """
+        fetch = self._fetches.get(ups)
+        now = self._clock()
+        if not fetch or (fetch['task'].done() and (
+                fetch['started'] is None or
+                now - fetch['started'] >= FETCH_MAX_AGE)):
+            code, _, remotes = await self._git('remote')
+            if code or ups not in remotes.split():
+                return
+            fetch = self._fetches.setdefault(ups, {'done': None})
+            fetch['started'] = now
+            fetch['task'] = asyncio.ensure_future(self._run_fetch(ups))
+        if not fetch['task'].done():
+            try:
+                await asyncio.wait_for(asyncio.shield(fetch['task']),
+                                       FETCH_WAIT)
+            except asyncio.TimeoutError:
+                pass
+
+    def _fetched_str(self, ups):
+        """Get when the inbox last fetched an upstream
+
+        Args:
+            ups (str): Upstream name
+
+        Return:
+            str or None: Time it finished, as in the database, or None if it
+                has not fetched it since the server started
+        """
+        done = (self._fetches.get(ups) or {}).get('done')
+        return times.to_str(datetime.fromtimestamp(done)) if done else None
 
     def _job_state(self, job):
         """Get the state of a job, with the reviewed series it acts on

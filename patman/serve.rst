@@ -145,8 +145,11 @@ A series whose patches are applied upstream is marked 'applied', or e.g.
 it. patman finds these in the upstream's main and next branches, e.g.
 ``us/main`` and ``us/next``, by the subject of each patch, as patchwork's patch
 states are often not updated when a patch is applied. This uses the git repo
-which the server runs in, as of its last fetch, which the sync does, so it
-sends nothing to patchwork. An older version of a series whose patches came in
+which the server runs in, so it sends nothing to patchwork. The inbox fetches
+the upstream when it is shown, if it has not done so for an hour, and the top
+of the inbox says when it last did; 'Refresh' fetches it at once. The inbox
+waits up to 20 seconds for the fetch, then shows what it has while the fetch
+carries on. An older version of a series whose patches came in
 a newer version is marked 'later version applied' instead.
 
 A patch which is accepted on patchwork counts as applied too, since a
@@ -164,7 +167,7 @@ The inbox is read from patchwork with one request for the 50 newest series.
 The server keeps what it reads for ten minutes, so going back to the Inbox tab,
 opening it on another device or starting the server again does not read it
 again; the top of the inbox says when it was read, and 'Refresh' reads it again
-at once. Nothing more is read until you tap 'Load more' at the bottom, which
+at once, and fetches the upstream. Nothing more is read until you tap 'Load more' at the bottom, which
 reads the next 50; the button goes once patchwork has no more. Tapping a series
 uses what was read already. A patch read in the last hour, and its comments
 read in the last five minutes, are shown from patman's cache of patchwork (see

@@ -205,7 +205,8 @@ Caching in patman serve
 The server uses the same cache, and says when what it shows was read:
 
 - the inbox says when it was read from patchwork, and 'Refresh' reads it
-  again at once; 'Load more' uses a later page from the cache only if it is
+  again at once, and fetches the upstream to see which patches are applied;
+  'Load more' uses a later page from the cache only if it is
   no older than the first page, so the pages follow on from each other
 - a patch or cover letter which you read on the page says when it was read,
   and its 'Refresh' reads it and its comments again, e.g. to see its current
