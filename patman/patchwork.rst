@@ -114,6 +114,8 @@ How long something is used from the cache depends on whether it can change:
 - a series' mbox, used to apply a series for a review: an hour, since
   patchwork adds review tags to it as they arrive
 - the list of projects: a day
+- a page of the inbox in ``patman serve``: ten minutes. Each series on it is
+  also kept as a series, as above, so reviewing one needs no request
 
 These are never cached, so always ask patchwork:
 

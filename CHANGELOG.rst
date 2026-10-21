@@ -10,6 +10,9 @@ Unreleased
 
 Added
 ~~~~~
+- Reviewing a series from the inbox on the ``patman serve`` page no longer
+  reads the series from patchwork again, since the inbox keeps each series
+  it reads in the cache under its ID.
 - ``patman review`` can review a series which patchwork has not received in
   full, as happens when it misses a patch, taking the missing patches from
   the thread on lore.kernel.org and applying the series from lore's copy.

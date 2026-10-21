@@ -36,7 +36,7 @@ def run(coro):
         loop.close()
 
 
-class TestPwCache(unittest.TestCase):
+class TestPwCache(unittest.TestCase):  # pylint: disable=R0904
     """Test the patchwork cache"""
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix='patman.')
@@ -216,6 +216,36 @@ class TestPwCache(unittest.TestCase):
         self.assertTrue(get(max_age=0)['received_all'])
         self.assertTrue(get()['received_all'])
         self.assertEqual(2, len(reads))
+
+    def test_recent_series(self):
+        """Each series in the inbox is kept under its own ID too"""
+        reads = []
+
+        def fake(subpath):
+            reads.append(subpath)
+            if subpath.startswith('series/?'):
+                return [{'id': 7, 'received_all': True},
+                        {'id': 8, 'received_all': False}]
+            return {'id': int(subpath.split('/')[1]), 'received_all': True}
+
+        pwork = Patchwork.for_testing(fake)
+        pwork.cache = self.cache()
+        page = run(pwork.get_recent_series(None, 'uboot', max_age=None))
+        self.assertEqual([7, 8], [series['id'] for series in page])
+
+        # Reviewing a series from the inbox needs no request
+        self.assertEqual(page[0], run(pwork.get_series(None, '7')))
+        self.assertEqual(page[1], run(pwork.get_series(None, '8')))
+        self.assertEqual(1, len(reads))
+
+        # A page from the cache leaves the series alone, so one which is
+        # still arriving is read again once it is old, but a complete one
+        # is not
+        self.now += pwcache_age('SERIES_MAX_AGE') + 1
+        run(pwork.get_recent_series(None, 'uboot', max_age=None))
+        run(pwork.get_series(None, '7'))
+        self.assertTrue(run(pwork.get_series(None, '8'))['received_all'])
+        self.assertEqual(['series/8/'], reads[1:])
 
     def test_comments(self):
         """Comments are kept for a few minutes"""

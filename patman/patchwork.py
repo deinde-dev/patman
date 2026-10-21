@@ -574,6 +574,11 @@ class Patchwork:
         return f'patches/{patch_id}/'
 
     @staticmethod
+    def series_path(link):
+        """Get the request path for a series, e.g. for read_time()"""
+        return f'series/{link}/'
+
+    @staticmethod
     def comments_path(kind, item_id):
         """Get the request path for the comments on a patch or cover letter
 
@@ -801,6 +806,10 @@ class Patchwork:
                                 max_age=0):
         """Read the most recent series in a project, newest first
 
+        Each series read from patchwork is also kept in the cache under its
+        own ID, as patchwork gives the same information as get_series(), so
+        that reviewing one of them does not read it again.
+
         Args:
             client (aiohttp.ClientSession): Session to use
             project (str): Project link name, e.g. 'uboot'
@@ -812,8 +821,14 @@ class Patchwork:
         Returns:
             list of dict: Series information, as for get_series()
         """
-        return await self._cached_request(
-            client, self.recent_series_path(project, page, per_page), max_age)
+        subpath = self.recent_series_path(project, page, per_page)
+        data = self._from_cache(subpath, max_age)
+        if data is None:
+            data = await self._request(client, subpath)
+            self._to_cache(subpath, data)
+            for series in data:
+                self._to_cache(self.series_path(series['id']), series)
+        return data
 
     async def get_series(self, client, link, max_age=SERIES_MAX_AGE):
         """Read information about a series
@@ -871,7 +886,7 @@ class Patchwork:
         """
         # Once patchwork has all the patches, the series does not change
         return await self._cached_request(
-            client, f'series/{link}/', max_age,
+            client, self.series_path(link), max_age,
             keep=lambda data: data.get('received_all'))
 
     async def get_series_patch_states(self, client, link):
