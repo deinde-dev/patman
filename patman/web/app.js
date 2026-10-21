@@ -1761,7 +1761,9 @@ function inboxDetails(s, ups, jobBox) {
       h('span', { class: 'seq' }, i + 1),
       h('div', { class: 'grow' },
         h('a', { href: mailHref('patch', p.id, ups),
-                 title: 'Read the patch and its comments' }, p.name))))),
+                 title: 'Read the patch and its comments' }, p.name)),
+      p.commit && h('span', { class: 'chip st-accepted',
+                              title: `Applied as ${p.commit.slice(0, 12)}` }, p.branch)))),
     h('div', { class: 'actions' },
       jobId && !inboxDone.has(jobId) ? busyLink(jobId) : reviewBtn,
       s.web_url && h('a', { class: 'btn light small', href: s.web_url,
@@ -1769,6 +1771,42 @@ function inboxDetails(s, ups, jobBox) {
                             title: 'Open the series on patchwork, in a new tab' },
         'patchwork ↗')),
     reviewBox);
+}
+
+// Say how much of each series in the inbox is applied upstream. A commit
+// whose subject is in more than one version of a series belongs to the
+// newest, which comes first, so the older versions show that a later one
+// was applied rather than claiming the commits themselves
+function inboxApplied(list) {
+  const owner = new Map();
+  list.forEach((s, i) => s.patches.forEach((p) => {
+    if (p.commit && !owner.has(p.commit)) owner.set(p.commit, i);
+  }));
+  list.forEach((s, i) => {
+    const mine = s.patches.filter((p) => p.commit && owner.get(p.commit) === i);
+    s.applied = {
+      count: mine.length,
+      all: mine.length > 0 && mine.length >= (s.total || s.patches.length),
+      later: !mine.length && s.patches.some((p) => p.commit),
+      branches: [...new Set(mine.map((p) => p.branch))].join(', '),
+    };
+  });
+}
+
+// A chip saying how much of a series is applied upstream, if any
+function appliedChip(s) {
+  const a = s.applied;
+  if (!a) return null;
+  if (a.later) {
+    return h('span', { class: 'chip st-other',
+                       title: 'Its patches are upstream from a later version' },
+             'later version applied');
+  }
+  if (!a.count) return null;
+  const total = s.total || s.patches.length;
+  return h('span', { class: `chip ${a.all ? 'st-accepted' : 'st-under-review'}`,
+                     title: `${a.count} of its ${npatches(total)} are on ${a.branches}` },
+           a.all ? 'applied' : `applied ${a.count}/${total}`);
 }
 
 function inboxCard(s, ups, pw) {
@@ -1787,6 +1825,7 @@ function inboxCard(s, ups, pw) {
                             title: 'Show your reviews of an earlier version' },
                      'earlier version reviewed'),
       s.mine && h('span', { class: 'chip st-other' }, 'yours'),
+      appliedChip(s),
       !s.received_all && h('span', { class: 'chip st-changes-requested' }, 'incomplete'),
       jobBox));
   if (s.job) inboxJobs.set(s.id, s.job);
@@ -1799,8 +1838,10 @@ function inboxCard(s, ups, pw) {
     card.append(box);
   });
   const groups = ['all'];
-  if (!s.reviewed && !s.mine) groups.push('todo');
+  const applied = s.applied && (s.applied.all || s.applied.later);
+  if (!s.reviewed && !s.mine && !applied) groups.push('todo');
   if (s.earlier) groups.push('newver');
+  if (s.applied && (s.applied.count || s.applied.later)) groups.push('applied');
   return { card, text: `${s.name} ${s.submitter || ''}`, groups };
 }
 
@@ -1831,6 +1872,7 @@ async function viewInbox(more, refresh) {
   inbox.page = data.page;
   inbox.series.push(...data.series);
   inbox.done = data.series.length < data.per_page;
+  inboxApplied(inbox.series);
 
   const upsTabs = upstreams.length > 1 && h('div', { class: 'tabs' },
     upstreams.map((u) => h('button', { class: u.name === ups ? 'on' : '',
@@ -1857,6 +1899,7 @@ async function viewInbox(more, refresh) {
                     [['todo', 'To review',
                       'Series which you have not reviewed and are not yours'],
                      ['newver', 'New versions', 'New versions of series you reviewed earlier'],
+                     ['applied', 'Applied', 'Series with patches applied upstream'],
                      ['all', 'All', 'All the series listed']]),
     loadMore);
 }

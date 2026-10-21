@@ -470,17 +470,85 @@ def _norm_title(title):
     return re.sub(r'^(\[[^]]*\]\s*)+', '', title or '').strip().lower()
 
 
-def get_inbox(cser, rcser, series_list):
+def norm_subject(subject):
+    """Normalise the subject of a patch, so that it can be found upstream
+
+    Args:
+        subject (str): Subject, as patchwork gives it, e.g.
+            '[v2,3/5] video: Add a driver', or as a commit has it
+
+    Return:
+        str: Normalised subject, e.g. 'video: add a driver'
+    """
+    return ' '.join(_norm_title(subject).split())
+
+
+async def get_upstream_commits(topdir, refs, since):
+    """Get the commits on upstream branches since a date, by their subject
+
+    This finds the patches which have been applied, without asking patchwork,
+    whose patch states are often not updated when a patch is applied.
+
+    Args:
+        topdir (str): Top directory of the git repo
+        refs (list of str): Branches to look at, e.g. ['us/main', 'us/next'];
+            a commit on more than one is given with the first
+        since (str): Earliest commit date to look at, e.g. '2026-10-01'
+
+    Return:
+        dict: key (str): Normalised subject of the commit (see norm_subject())
+            value (tuple): Newest commit with that subject:
+                str: Hash of the commit
+                str: Branch it is on
+    """
+    out = {}
+    for ref in refs:
+        proc = await asyncio.create_subprocess_exec(
+            'git', 'log', '--no-merges', '--format=%H %s', f'--since={since}',
+            ref, '--', cwd=topdir, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL)
+        data, _ = await proc.communicate()
+        if proc.returncode:
+            continue
+        for line in data.decode('utf-8', 'replace').splitlines():
+            commit, _, subject = line.partition(' ')
+            out.setdefault(norm_subject(subject), (commit, ref))
+    return out
+
+
+def _inbox_patch(pat, commits):
+    """Get information about a patch in a series in the inbox
+
+    Args:
+        pat (dict): Patch, as patchwork lists it in the series
+        commits (dict): Commits upstream, by subject (see
+            get_upstream_commits())
+
+    Return:
+        dict: Patch, with its 'id', 'name' and the 'commit' and 'branch'
+            upstream which have its subject, or None
+    """
+    commit, branch = commits.get(norm_subject(pat.get('name')), (None, None))
+    return {'id': pat['id'], 'name': pat.get('name'), 'commit': commit,
+            'branch': branch}
+
+
+def get_inbox(cser, rcser, series_list, commits=None):
     """Get information about recent series on patchwork, for review
 
     Args:
         cser (Cseries): Open cseries instance with your own series
         rcser (Cseries): Open cseries instance with the reviews
         series_list (list of dict): Series from patchwork, newest first
+        commits (dict or None): Commits upstream, by subject, as returned by
+            get_upstream_commits(), to find the patches which are applied
 
     Return:
-        list of dict: One item for each series
+        list of dict: One item for each series. Each of its 'patches' has
+            the 'commit' and 'branch' which have a patch's subject upstream,
+            or None if none does
     """
+    commits = commits or {}
     reviews = rcser.db.series_get_dict(include_archived=True,
                                        reviews_only=True).values()
     review_ids = {ser.idnum for ser in reviews}
@@ -493,7 +561,6 @@ def get_inbox(cser, rcser, series_list):
         found = rcser.db.series_find_by_link(link)
         reviewed = found[0] if found and found[0] in review_ids else None
         own = cser.db.series_find_by_link(link)
-        cover = data.get('cover_letter')
         submitter = data.get('submitter') or {}
         out.append({
             'id': data['id'],
@@ -504,8 +571,8 @@ def get_inbox(cser, rcser, series_list):
             'total': data.get('total'),
             'received_all': data.get('received_all'),
             'web_url': data.get('web_url'),
-            'cover_id': cover['id'] if cover else None,
-            'patches': [{'id': pat['id'], 'name': pat.get('name')}
+            'cover_id': (data.get('cover_letter') or {}).get('id'),
+            'patches': [_inbox_patch(pat, commits)
                         for pat in data.get('patches') or []],
             'reviewed': reviewed,
             'earlier': (None if reviewed else

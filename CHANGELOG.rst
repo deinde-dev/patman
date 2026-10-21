@@ -54,6 +54,11 @@ Added
   which a coding assistant adds, such as ``Co-developed-by: ...
   <noreply@...>``, in the patches sent, for projects which want them. Set it
   in a repo's ``.patman`` or ``.patman-defaults`` for one project.
+- The inbox on the ``patman serve`` page marks a series whose patches are
+  applied upstream, on the main or next branch, as 'applied', or e.g.
+  'applied 2/5', with an 'Applied' filter, finding the patches in git by their
+  subjects rather than asking patchwork. An older version whose patches came
+  in a newer one is marked 'later version applied'.
 
 Changed
 ~~~~~~~

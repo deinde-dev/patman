@@ -13,6 +13,7 @@ page has these tabs:
 - **Reviews**: series you have reviewed with ``patman review``, showing the
   review of each patch and whether it has been drafted, sent or replied to
 - **Inbox**: recent series on patchwork, showing which you have reviewed
+  and which are applied upstream
 - **Jobs**: reviews and other commands started from the page, and the syncs,
   with their output
 - **Todo**: series marked with ``patman workflow todo``, due ones first
@@ -138,6 +139,17 @@ The Inbox tab lists the most recent series on patchwork for each upstream.
 Series which you have reviewed, or which are your own, are marked, as are new
 versions of series you reviewed earlier, so it is easy to see what needs a
 review. Tap a series to see its patches and start a review.
+
+A series whose patches are applied upstream is marked 'applied', or e.g.
+'applied 2/5' if only some are, and each such patch shows the branch which has
+it. patman finds these in the upstream's main and next branches, e.g.
+``us/main`` and ``us/next``, by the subject of each patch, as patchwork's patch
+states are often not updated when a patch is applied. This uses the git repo
+which the server runs in, as of its last fetch, which the sync does, so it
+sends nothing to patchwork. An older version of a series whose patches came in
+a newer version is marked 'later version applied' instead. Series which are
+fully applied are left out of 'To review', and 'Applied' shows each series
+with a patch applied.
 
 The inbox is read from patchwork with one request for the 50 newest series.
 The server keeps what it reads for ten minutes, so going back to the Inbox tab,

@@ -1518,7 +1518,8 @@ class TestWebServer(unittest.TestCase, TestCommon):
                          (items[400]['reviewed'], items[400]['earlier'],
                           items[400]['mine']))
         self.assertEqual('Fred', items[400]['submitter'])
-        self.assertEqual([{'id': 4000, 'name': 'net: Something new'}],
+        self.assertEqual([{'id': 4000, 'name': 'net: Something new',
+                           'commit': None, 'branch': None}],
                          items[400]['patches'])
 
         status, data = self.call(srv, 'GET', '/api/inbox?ups=xx')
@@ -1546,6 +1547,55 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(
             f'Series 400 is already being reviewed, by job {reviewing.idnum}',
             data['error'])
+
+    def test_inbox_applied(self):
+        """The inbox says which patches are applied upstream"""
+        def git(*args, date='2026-10-05T10:00:00'):
+            env = dict(os.environ, GIT_COMMITTER_DATE=date,
+                       GIT_AUTHOR_DATE=date)
+            return subprocess.run(
+                ['git', '-c', 'user.name=T', '-c', 'user.email=t@e', *args],
+                cwd=self.tmpdir, env=env, capture_output=True, text=True,
+                check=True).stdout.strip()
+
+        git('init', '-q')
+        git('commit', '-q', '--allow-empty', '-m', 'video: Old change',
+            date='2026-09-01T10:00:00')
+        git('commit', '-q', '--allow-empty', '-m', 'video: Add a  driver')
+        main = git('rev-parse', 'HEAD')
+        git('update-ref', 'refs/remotes/us/main', main)
+        git('commit', '-q', '--allow-empty', '-m', 'video: Add a test')
+        git('commit', '-q', '--allow-empty', '-m', 'Merge something')
+        nxt = git('rev-parse', 'HEAD')
+        git('update-ref', 'refs/remotes/us/next', nxt)
+        test_commit = git('rev-parse', 'HEAD~1')
+
+        db = self.cser.db
+        db.upstream_add('us', 'https://us', 'https://pw.us')
+        db.upstream_set_default('us')
+        db.patchwork_update('U-Boot', 6, 'uboot', 'us')
+        db.commit()
+        names = ['[v2,1/3] Video: add a driver', '[v2,2/3] video: Add a test',
+                 '[v2,3/3] video: Old change']
+        pages = {
+            'series/?project=uboot&order=-date&page=1&per_page=50': [{
+                'id': 300, 'name': 'video: Add a driver', 'version': 2,
+                'date': '2026-10-01T10:00:00', 'total': 3,
+                'received_all': True, 'cover_letter': None,
+                'patches': [{'id': 30 + seq, 'name': name}
+                            for seq, name in enumerate(names)]}],
+        }
+        srv = self.make_server()
+        srv.pwork_for_testing.fake_request = pages.get
+        _, data = self.call(srv, 'GET', '/api/inbox')
+
+        # Case and spacing do not matter, a commit on both branches is given
+        # with the main one, and commits from before the series are not
+        # looked at
+        self.assertEqual(
+            [(main, 'us/main'), (test_commit, 'us/next'), (None, None)],
+            [(pat['commit'], pat['branch'])
+             for pat in data['series'][0]['patches']])
 
     def test_inbox_keep(self):
         """The inbox is kept for a while, rather than read each time"""
