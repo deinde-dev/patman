@@ -1889,6 +1889,7 @@ async function viewInbox(more, refresh) {
   // Leave alone whatever screen was chosen while waiting
   if (location.hash !== hash) return;
   if (inbox.page === 0) inbox.fetched = data.fetched;
+  inbox.upstreamFetched = data.upstream_fetched || inbox.upstreamFetched;
   inbox.page = data.page;
   inbox.series.push(...data.series);
   inbox.done = data.series.length < data.per_page;
@@ -1908,8 +1909,15 @@ async function viewInbox(more, refresh) {
       viewInbox(true).catch((err) => showError(err, 'inbox'));
     } }, 'Load more'));
   const fetched = h('div', { class: 'row fetched' },
-    h('span', { class: 'grow ver' }, `Read from patchwork ${ago(parseTime(inbox.fetched))}`),
-    h('button', { class: 'btn light small', title: 'Read the newest series from patchwork again',
+    h('span', { class: 'grow ver',
+                title: 'When the series were read from patchwork, and when the upstream was ' +
+                       'fetched, to see which patches are applied' },
+      `Read from patchwork ${ago(parseTime(inbox.fetched))}` +
+      (inbox.upstreamFetched ? `; ${ups} fetched ${ago(parseTime(inbox.upstreamFetched))}`
+                             : '')),
+    h('button', { class: 'btn light small',
+                  title: 'Read the newest series from patchwork again, and fetch the ' +
+                         'upstream to see which patches are applied',
                   onclick: (ev) => {
       ev.target.disabled = true;
       viewInbox(false, true).catch((err) => showError(err, 'inbox'));
@@ -2110,8 +2118,8 @@ function viewSync() {
   const st = syncState || { results: [] };
   const active = st.running || st.queued;
   // Without a periodic sync, a sync is unusual, so make sure it is wanted
-  const tip = `Gather the review tags for all ${st.num_series} series ` +
-              'from patchwork now';
+  const tip = 'Fetch the upstreams, then gather the patch states and review tags ' +
+              `of your ${st.num_series} series from patchwork now`;
   const btn = active || st.interval
     ? h('button', { class: 'btn', disabled: active, title: tip,
                     onclick: () => { btn.disabled = true; startSync(); } },

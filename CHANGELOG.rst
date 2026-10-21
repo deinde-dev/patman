@@ -10,6 +10,10 @@ Unreleased
 
 Added
 ~~~~~
+- The inbox on the ``patman serve`` page fetches the upstream when it is
+  shown, if it has not done so for an hour, and 'Refresh' fetches it at once,
+  so that it shows which series are applied without a sync. The top of the
+  inbox says when the upstream was fetched.
 - ``patman patchwork cache`` shows what the patchwork cache holds for each
   server, the requests sent to it and the reads which the cache answered,
   and which projects' events are followed.

@@ -1653,6 +1653,73 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(['series/?project=uboot&order=-date&page=2'
                           '&per_page=50'], reads)
 
+    def test_inbox_fetch(self):
+        """The inbox fetches the upstream, to see what has been applied"""
+        upstream = os.path.join(self.tmpdir, 'upstream')
+
+        def git(*args, cwd=self.tmpdir):
+            return subprocess.run(
+                ['git', '-c', 'user.name=T', '-c', 'user.email=t@e', *args],
+                cwd=cwd, capture_output=True, text=True, check=True).stdout
+
+        os.mkdir(upstream)
+        git('init', '-q', '-b', 'main', cwd=upstream)
+        git('commit', '-q', '--allow-empty', '-m', 'video: Add a driver',
+            cwd=upstream)
+        git('init', '-q')
+        git('remote', 'add', 'us', upstream)
+
+        db = self.cser.db
+        db.upstream_add('us', 'https://us', 'https://pw.us')
+        db.upstream_set_default('us')
+        db.patchwork_update('U-Boot', 6, 'uboot', 'us')
+        db.commit()
+        pages = {
+            'series/?project=uboot&order=-date&page=1&per_page=50': [{
+                'id': 300, 'name': 'video', 'version': 1,
+                'date': '2026-10-01T10:00:00', 'total': 2,
+                'received_all': True, 'cover_letter': None,
+                'patches': [{'id': 1, 'name': '[1/2] video: Add a driver'},
+                            {'id': 2, 'name': '[2/2] video: Add a test'}]}],
+        }
+        srv = self.make_server()
+        srv.pwork_for_testing.fake_request = pages.get
+        now = [1000.0]
+        srv._clock = lambda: now[0]
+
+        def at(when):
+            return times.to_str(datetime.fromtimestamp(when))
+
+        def applied(args=''):
+            _, data = self.call(srv, 'GET', f'/api/inbox{args}')
+            return ([pat['branch'] for pat in data['series'][0]['patches']],
+                    data['upstream_fetched'])
+
+        # The first time, the upstream is fetched
+        self.assertEqual((['us/main', None], at(1000)), applied())
+
+        # Not again within the hour, so a new commit is not seen
+        git('commit', '-q', '--allow-empty', '-m', 'video: Add a test',
+            cwd=upstream)
+        now[0] += server.app.FETCH_MAX_AGE - 1
+        self.assertEqual((['us/main', None], at(1000)), applied())
+
+        # 'Refresh' fetches it at once
+        self.assertEqual((['us/main', 'us/main'], at(now[0])),
+                         applied('?refresh=1'))
+
+        # An upstream which is not a git remote is not fetched; removing the
+        # remote drops its branches too
+        srv._fetches.clear()
+        git('remote', 'remove', 'us')
+        self.assertEqual(([None, None], None), applied())
+
+        # A fetch which fails says so, and the inbox is still shown
+        git('remote', 'add', 'us', os.path.join(self.tmpdir, 'missing'))
+        with terminal.capture() as (_, err):
+            self.assertEqual(([None, None], None), applied())
+        self.assertIn("Cannot fetch upstream 'us'", err.getvalue())
+
     def test_inbox_keep(self):
         """The inbox is kept for a while, rather than read each time"""
         db = self.cser.db
