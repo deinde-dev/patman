@@ -143,6 +143,10 @@ patch's state or delegate changes. Each sync reads the events since the last
 one, usually in a single request, drops the patches which have changed from
 the cache and uses the rest from it, however old they are.
 
+The inbox in ``patman serve`` reads them too, so that it can show the state
+of each patch. Each event's new state is recorded, as is the state of each
+patch which patman reads, and kept for 90 days after it was last seen.
+
 The events are read at most once a minute. Only patches read since patman
 began following the events are used in this way, so the first sync still
 reads every patch. If the events are not checked for a week, or there are too

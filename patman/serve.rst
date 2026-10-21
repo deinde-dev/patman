@@ -147,9 +147,18 @@ it. patman finds these in the upstream's main and next branches, e.g.
 states are often not updated when a patch is applied. This uses the git repo
 which the server runs in, as of its last fetch, which the sync does, so it
 sends nothing to patchwork. An older version of a series whose patches came in
-a newer version is marked 'later version applied' instead. Series which are
-fully applied are left out of 'To review', and 'Applied' shows each series
-with a patch applied.
+a newer version is marked 'later version applied' instead.
+
+A patch which is accepted on patchwork counts as applied too, since a
+custodian may accept it into their own tree well before it reaches the
+upstream's branches. Other states, such as 'superseded' or
+'changes-requested', are shown beside each patch, and on the series when all
+its patches have the same one. patman learns these states from the patches it
+reads and from the project's events (see :ref:`the cache <patchwork_cache>`),
+which the inbox reads at most once a minute, so a patch which has not changed
+since patman began following the events shows no state. Series which are fully
+applied, or whose patches are all superseded or rejected, are left out of 'To
+review', and 'Applied' shows each series with a patch applied.
 
 The inbox is read from patchwork with one request for the 50 newest series.
 The server keeps what it reads for ten minutes, so going back to the Inbox tab,

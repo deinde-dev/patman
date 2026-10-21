@@ -1519,7 +1519,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
                           items[400]['mine']))
         self.assertEqual('Fred', items[400]['submitter'])
         self.assertEqual([{'id': 4000, 'name': 'net: Something new',
-                           'commit': None, 'branch': None}],
+                           'commit': None, 'branch': None, 'state': None}],
                          items[400]['patches'])
 
         status, data = self.call(srv, 'GET', '/api/inbox?ups=xx')
@@ -1597,6 +1597,62 @@ class TestWebServer(unittest.TestCase, TestCommon):
             [(pat['commit'], pat['branch'])
              for pat in data['series'][0]['patches']])
 
+    def test_inbox_states(self):
+        """The inbox gives the state of each patch, as last seen"""
+        db = self.cser.db
+        db.upstream_add('us', 'https://us', 'https://pw.us')
+        db.upstream_set_default('us')
+        db.patchwork_update('U-Boot', 6, 'uboot', 'us')
+        db.commit()
+
+        events = []
+        reads = []
+        def read(subpath):
+            reads.append(subpath)
+            if subpath.startswith('events/'):
+                if 'per_page=1&' in subpath + '&':
+                    return [{'date': '2026-10-20T10:00:00'}]
+                return events
+            return [{'id': 7, 'name': 'video: Add a driver', 'version': 1,
+                     'patches': [{'id': pid, 'name': f'patch {pid}'}
+                                 for pid in (1, 2, 3)]}]
+
+        srv = self.make_server()
+        pwork = srv.pwork_for_testing
+        pwork.fake_request = read
+        now = [1000.0]
+        pwork.cache = pwcache.Cache(os.path.join(self.tmpdir, 'pwcache.db'),
+                                    clock=lambda: now[0])
+        # A patch which has been read gives its state
+        pwork.cache.put(pwork.url, 'patches/1/', {'id': 1, 'state': 'new'})
+        pwork._to_cache('patches/2/', {'id': 2, 'state': 'under-review'})
+
+        def states(args=''):
+            _, data = self.call(srv, 'GET', f'/api/inbox{args}')
+            return [pat['state'] for pat in data['series'][0]['patches']]
+
+        # Following the events begins; patch 1 was put in the cache without
+        # its state, so it is not known
+        self.assertEqual([None, 'under-review', None], states())
+        self.assertIn('events/?project=uboot&per_page=1', reads)
+
+        # An event gives the new state of a patch, the latest winning
+        now[0] += server.app.INBOX_KEEP + 1
+        events[:] = [
+            {'date': '2026-10-20T10:07:00', 'category': 'patch-state-changed',
+             'payload': {'patch': {'id': 3}, 'current_state': 'accepted'}},
+            {'date': '2026-10-20T10:05:00', 'category': 'patch-state-changed',
+             'payload': {'patch': {'id': 3}, 'current_state': 'superseded'}},
+            {'date': '2026-10-20T10:06:00', 'category': 'patch-delegated',
+             'payload': {'patch': {'id': 2}, 'delegate': None}}]
+        self.assertEqual([None, 'under-review', 'accepted'], states())
+
+        # The events are not read again within a minute
+        reads.clear()
+        self.assertEqual([None, 'under-review', 'accepted'], states('?page=2'))
+        self.assertEqual(['series/?project=uboot&order=-date&page=2'
+                          '&per_page=50'], reads)
+
     def test_inbox_keep(self):
         """The inbox is kept for a while, rather than read each time"""
         db = self.cser.db
@@ -1607,6 +1663,9 @@ class TestWebServer(unittest.TestCase, TestCommon):
 
         reads = []
         def read(subpath):
+            # The events are covered by test_inbox_states()
+            if subpath.startswith('events/'):
+                return []
             reads.append(subpath)
             return [{'id': len(reads), 'name': 'video: Add a driver',
                      'version': 1, 'patches': []}]

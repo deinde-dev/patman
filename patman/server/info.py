@@ -516,39 +516,52 @@ async def get_upstream_commits(topdir, refs, since):
     return out
 
 
-def _inbox_patch(pat, commits):
-    """Get information about a patch in a series in the inbox
+# What is known about a patch in the inbox when nothing is
+UNKNOWN_STATUS = {'commit': None, 'branch': None, 'state': None}
+
+
+def get_patch_status(series_list, commits, states):
+    """Get what is known about the patches in the inbox, other than their names
 
     Args:
-        pat (dict): Patch, as patchwork lists it in the series
+        series_list (list of dict): Series from patchwork
         commits (dict): Commits upstream, by subject (see
             get_upstream_commits())
+        states (dict): key (int): Patch ID
+            value (str): State on patchwork, as last seen, e.g. 'accepted'
 
     Return:
-        dict: Patch, with its 'id', 'name' and the 'commit' and 'branch'
-            upstream which have its subject, or None
+        dict: key (int): Patch ID
+            value (dict): 'commit' and 'branch' upstream which have the
+                patch's subject, or None, and its 'state', or None if it is
+                not known
     """
-    commit, branch = commits.get(norm_subject(pat.get('name')), (None, None))
-    return {'id': pat['id'], 'name': pat.get('name'), 'commit': commit,
-            'branch': branch}
+    out = {}
+    for ser in series_list:
+        for pat in ser.get('patches') or []:
+            commit, branch = commits.get(norm_subject(pat.get('name')),
+                                         (None, None))
+            out[pat['id']] = {'commit': commit, 'branch': branch,
+                              'state': states.get(pat['id'])}
+    return out
 
 
-def get_inbox(cser, rcser, series_list, commits=None):
+def get_inbox(cser, rcser, series_list, status=None):
     """Get information about recent series on patchwork, for review
 
     Args:
         cser (Cseries): Open cseries instance with your own series
         rcser (Cseries): Open cseries instance with the reviews
         series_list (list of dict): Series from patchwork, newest first
-        commits (dict or None): Commits upstream, by subject, as returned by
-            get_upstream_commits(), to find the patches which are applied
+        status (dict or None): What is known about each patch, as returned
+            by get_patch_status(), or None if nothing is
 
     Return:
         list of dict: One item for each series. Each of its 'patches' has
-            the 'commit' and 'branch' which have a patch's subject upstream,
-            or None if none does
+            its 'id' and 'name', with the 'commit', 'branch' and 'state' from
+            'status', or None
     """
-    commits = commits or {}
+    status = status or {}
     reviews = rcser.db.series_get_dict(include_archived=True,
                                        reviews_only=True).values()
     review_ids = {ser.idnum for ser in reviews}
@@ -572,7 +585,8 @@ def get_inbox(cser, rcser, series_list, commits=None):
             'received_all': data.get('received_all'),
             'web_url': data.get('web_url'),
             'cover_id': (data.get('cover_letter') or {}).get('id'),
-            'patches': [_inbox_patch(pat, commits)
+            'patches': [{'id': pat['id'], 'name': pat.get('name'),
+                         **status.get(pat['id'], UNKNOWN_STATUS)}
                         for pat in data.get('patches') or []],
             'reviewed': reviewed,
             'earlier': (None if reviewed else
