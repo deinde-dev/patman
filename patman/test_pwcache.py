@@ -431,12 +431,18 @@ class TestPwCache(unittest.TestCase):  # pylint: disable=R0904
         self.assertEqual('2026-10-20T10:06:00',
                          pwork.cache.get_follow(pwork.url, 'uboot')[1])
 
-        # After too long without a check, following begins again
+        # After too long without a check, following begins again, dropping
+        # the states which may have changed meanwhile
+        pwork.cache.set_states(pwork.url, {5: 'new', 6: 'superseded'})
         self.now += pwcache_age('EVENTS_MAX_GAP') + 1
         events.clear()
-        self.assertEqual((['new', 'accepted'],
-                          ['events/?project=uboot&per_page=1', 'patches/1/',
-                           'patches/2/']), sync())
+        reads.clear()
+        self.assertIsNotNone(run(pwork.follow_events(None)))
+        self.assertEqual(['events/?project=uboot&per_page=1'], reads)
+        self.assertEqual({6: 'superseded'},
+                         pwork.cache.get_states(pwork.url, [5, 6]))
+        self.assertEqual((['new', 'accepted'], ['patches/1/', 'patches/2/']),
+                         sync())
 
         # So it does if there are too many events to read
         self.now += 61
@@ -519,6 +525,17 @@ class TestPwCache(unittest.TestCase):  # pylint: disable=R0904
         cache.prune()
         self.assertEqual({2: 'accepted'},
                          cache.get_states('https://pw', [1, 2, 1000]))
+
+        # States can be dropped, keeping some
+        cache.set_states('https://other', {2: 'rejected'})
+        cache.set_states('https://pw', {1: 'new', 3: 'superseded'})
+        cache.drop_states('https://pw', ('accepted', 'superseded'))
+        self.assertEqual({2: 'accepted', 3: 'superseded'},
+                         cache.get_states('https://pw', [1, 2, 3]))
+        cache.drop_states('https://pw')
+        self.assertEqual({}, cache.get_states('https://pw', [1, 2, 3]))
+        self.assertEqual({2: 'rejected'},
+                         cache.get_states('https://other', [2]))
         cache.close()
 
     def test_fill_states(self):

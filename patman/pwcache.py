@@ -418,6 +418,20 @@ class Cache:
                 'VALUES (?, ?, ?, ?)',
                 [(server, pid, state, now) for pid, state in states.items()])
 
+    @_safe(None)
+    def drop_states(self, server, keep=()):
+        """Drop the recorded states of patches, e.g. when they may be wrong
+
+        Args:
+            server (str): URL of the patchwork server
+            keep (tuple of str): States to keep, e.g. ('accepted',)
+        """
+        cond = (f"AND state NOT IN ({', '.join('?' * len(keep))})" if keep
+                else '')
+        with self.con:
+            self.con.execute(f'DELETE FROM states WHERE server = ? {cond}',
+                             (server, *keep))
+
     @_safe({})
     def get_states(self, server, patch_ids):
         """Get the last seen states of patches
