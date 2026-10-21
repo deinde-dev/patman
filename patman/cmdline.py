@@ -209,6 +209,9 @@ def add_patchwork_subparser(subparsers):
         ['set-project', 'U-Boot', 'us'],
     ]
     patchwork_subparsers = patchwork.add_subparsers(dest='subcmd')
+    patchwork_subparsers.add_parser(
+        'cache',
+        help='Show what the patchwork cache holds and how much it saves')
     gproj = patchwork_subparsers.add_parser(
         'get-project', help='Show the patchwork project for a remote')
     gproj.add_argument(
