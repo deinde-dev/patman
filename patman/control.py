@@ -478,6 +478,8 @@ def patchwork(args, test_db=None, pwork=None):
             tout.notice(f'Deleted patchwork project{ups_str}')
         elif args.subcmd == 'ls':
             cser.project_list()
+        elif args.subcmd == 'cache':
+            cser.cache_show()
         else:
             raise ValueError(f"Unknown patchwork subcommand '{args.subcmd}'")
     finally:

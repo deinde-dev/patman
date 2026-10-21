@@ -22,15 +22,48 @@ from u_boot_pylib import tools
 from u_boot_pylib import tout
 
 from patman import patchstream
-from patman.patchwork import Patchwork
+from patman.patchwork import Patchwork, request_kind
 from patman import cser_helper
 from patman.cser_helper import AUTOLINK, oid
 from patman import send
+from patman import pwcache
 from patman import status
+from patman import traffic
 from patman import workflow
 
 
 _TRAILER_RE = re.compile(r'^[A-Za-z][A-Za-z0-9-]*:\s')
+
+
+def _fmt_bytes(nbytes):
+    """Show a number of bytes in a short form
+
+    Args:
+        nbytes (int): Number of bytes
+
+    Return:
+        str: Size, e.g. '1.2 MB'
+    """
+    if nbytes < 1000:
+        return f'{nbytes} B'
+    if nbytes < 1e6:
+        return f'{nbytes / 1e3:.1f} KB'
+    return f'{nbytes / 1e6:.1f} MB'
+
+
+def _fmt_age(secs):
+    """Show how long ago something happened, in a short form
+
+    Args:
+        secs (float): Seconds since it happened
+
+    Return:
+        str: Age in the largest whole unit, e.g. '5m' or '3d'
+    """
+    for unit, size in (('d', 86400), ('h', 3600), ('m', 60)):
+        if secs >= size:
+            return f'{int(secs // size)}{unit}'
+    return f'{max(int(secs), 0)}s'
 
 
 def _add_change_tag(message, version, text, cover=False):
@@ -103,6 +136,35 @@ def _describe_error(exc):
     if isinstance(exc, asyncio.TimeoutError):
         return 'Timed out'
     return f'{type(exc).__name__}: {exc}'
+
+
+def _show_cache_server(kinds, item, now):
+    """Show what the patchwork cache holds for a server, and its traffic
+
+    Args:
+        kinds (list of tuple): Entries of each kind in the cache:
+            str: Kind, e.g. 'patch'
+            int: Number of entries
+            int: Bytes they hold
+            float: Time when the newest was read
+        item (dict or None): Traffic to the server, as returned by
+            traffic.get_summary(), or None if there is none
+        now (float): Current time, in seconds since the epoch
+    """
+    if kinds:
+        print(f"  {'Kind':16} {'Entries':>7} {'Size':>9}  Newest")
+        for kind, count, nbytes, newest in kinds:
+            print(f'  {kind:16} {count:7} {_fmt_bytes(nbytes):>9}  '
+                  f'{_fmt_age(now - newest)} ago')
+    if item:
+        print(f"  {'Period':16} {'Requests':>8} {'Received':>9}  "
+              f"{'Cache hits':>10} {'Saved':>9}")
+        for key, label in (('hour', 'This hour'), ('today', 'Today'),
+                           ('week', 'Last 7 days')):
+            requests, nbytes = item[key]
+            hits, saved = item['cached'][key]
+            print(f'  {label:16} {requests:8} {_fmt_bytes(nbytes):>9}  '
+                  f'{hits:10} {_fmt_bytes(saved):>9}')
 
 
 class Cseries(cser_helper.CseriesHelper):
@@ -911,6 +973,40 @@ class Cseries(cser_helper.CseriesHelper):
             rlist = ' '.join(sorted(remotes))
             print(f'{name:20}  {proj_id:4}  {link_name:15}  {rlist}')
         print(border)
+
+    def cache_show(self):
+        """Show what the patchwork cache holds and how much it saves
+
+        For each server this lists the entries of each kind and when the
+        newest was read, then the requests sent to it and the reads which
+        the cache answered this hour, today and in the last seven days.
+        """
+        cache = pwcache.get()
+        if not cache:
+            print('The patchwork cache is not in use')
+            return
+        size = sum(os.path.getsize(fname)
+                   for fname in (cache.path, f'{cache.path}-wal')
+                   if os.path.exists(fname))
+        print(f'Cache: {cache.path}, {_fmt_bytes(size)}')
+        now = cache.now()
+
+        servers = defaultdict(list)
+        for (server, kind), counts in sorted(
+                cache.contents(request_kind).items()):
+            servers[server].append((kind, *counts))
+        summary = {item['url']: item
+                   for item in traffic.get_summary(self.db, cache=cache)}
+        for server in sorted(set(servers) | set(summary)):
+            print(f'\n{server}')
+            _show_cache_server(servers[server], summary.get(server), now)
+
+        follows = cache.follow_list()
+        print('\nEvents followed:' + ('' if follows else ' none'))
+        for server, project, started, checked in follows:
+            print(f"  {server} '{project}': since "
+                  f'{_fmt_age(now - started)} ago, checked '
+                  f'{_fmt_age(now - checked)} ago')
 
     def remove(self, name, dry_run=False):
         """Remove a series from the database

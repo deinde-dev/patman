@@ -5,20 +5,23 @@
 """Tests for upstreams and patchwork projects"""
 
 import os
+import time
 import types
-
+from unittest import mock
 
 from u_boot_pylib import command
 from u_boot_pylib import terminal
 from patman import control
 from patman import database
+from patman import pwcache
+from patman import traffic
 from patman.patchwork import Patchwork
 from patman.test_common import CseriesTester
 
 #pylint: disable=protected-access
 
 
-class TestUpstream(CseriesTester):
+class TestUpstream(CseriesTester):  # pylint: disable=R0904
     """Tests for 'patman upstream' and 'patman patchwork'"""
     def test_upstream_add(self):
         """Test adding an upsream"""
@@ -361,6 +364,50 @@ class TestUpstream(CseriesTester):
             f"Project 'U-Boot' patchwork-ID {self.PROJ_ID} "
             f"link-name 'uboot' remote 'us'",
             out.getvalue().strip())
+
+    def test_patchwork_cache(self):
+        """Test showing what the patchwork cache holds"""
+        self.get_cser()
+        now = time.time()
+        cache = pwcache.Cache(os.path.join(self.tmpdir, 'patchwork.db'),
+                              clock=lambda: now)
+        cache.put('https://pw', 'patches/1/', {'name': 'one'})
+        cache.put('https://pw', 'patches/2/', {'name': 'two'})
+        cache.put('https://pw', 'series/3/', {'id': 3})
+        cache.add_hit('https://pw', 1500)
+        cache.set_follow('https://pw', 'uboot', now - 7200, '', now - 120)
+
+        self.db_open()
+        self.cser.db.traffic_add(traffic.hour_key(), {
+            ('https://pw', 'patch'): (4, 2500000),
+            ('https://other', 'series'): (1, 300)})
+        self.cser.db.commit()
+
+        with mock.patch.object(pwcache, '_cache', cache), \
+                terminal.capture() as (out, _):
+            self.run_args('patchwork', 'cache')
+        lines = out.getvalue().splitlines()
+        self.assertRegex(lines[0], r'^Cache: .*patchwork.db, [0-9.]+ KB$')
+        self.assertEqual('https://other', lines[2])
+        self.assertEqual(
+            '  This hour               1     300 B           0       0 B',
+            lines[4])
+        self.assertEqual('https://pw', lines[8])
+        self.assertEqual(['patch', '2'], lines[10].split()[:2])
+        self.assertEqual(['series', '1'], lines[11].split()[:2])
+        self.assertTrue(lines[11].endswith('  0s ago'))
+        self.assertEqual(
+            '  This hour               4    2.5 MB           1    1.5 KB',
+            lines[13])
+        self.assertEqual("  https://pw 'uboot': since 2h ago, checked 2m ago",
+                         lines[-1])
+        cache.close()
+
+        with mock.patch.object(pwcache, '_cache', False), \
+                terminal.capture() as (out, _):
+            self.run_args('patchwork', 'cache')
+        self.assertEqual('The patchwork cache is not in use',
+                         out.getvalue().strip())
 
     def test_patchwork_default_remote(self):
         """Test choosing the remote when 'set-project' is not given one"""

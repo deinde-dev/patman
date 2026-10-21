@@ -369,6 +369,43 @@ class Cache:
                     'SELECT server, SUM(count), SUM(bytes) FROM hits '
                     'WHERE hour >= ? GROUP BY server', (since,))}
 
+    @_safe({})
+    def contents(self, kind_of):
+        """Get what the cache holds, for each server and kind of entry
+
+        Args:
+            kind_of (callable): Function which takes the path of an entry and
+                returns its kind, e.g. 'patch'
+
+        Returns:
+            dict: key (tuple): (server URL, kind)
+                value (list): [number of entries, bytes they hold (compressed),
+                    time when the newest was read]
+        """
+        out = {}
+        for server, path, nbytes, fetched in self.con.execute(
+                'SELECT server, path, LENGTH(data), fetched FROM objects'):
+            item = out.setdefault((server, kind_of(path)), [0, 0, 0])
+            item[0] += 1
+            item[1] += nbytes
+            item[2] = max(item[2], fetched)
+        return out
+
+    @_safe([])
+    def follow_list(self):
+        """Get the projects whose events are followed
+
+        Returns:
+            list of tuple: One for each project, ordered by server and project:
+                str: URL of the patchwork server
+                str: Project link name, e.g. 'uboot'
+                float: Time when following began
+                float: Time when the events were last checked
+        """
+        return self.con.execute(
+            'SELECT server, project, started, checked FROM follow '
+            'ORDER BY server, project').fetchall()
+
     def close(self):
         """Close the cache"""
         self.con.close()

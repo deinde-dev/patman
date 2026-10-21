@@ -15,7 +15,7 @@ from unittest import mock
 from u_boot_pylib import terminal
 from patman import cmdline
 from patman import pwcache
-from patman.patchwork import Patchwork
+from patman.patchwork import Patchwork, request_kind
 
 
 def run(coro):
@@ -474,6 +474,31 @@ class TestPwCache(unittest.TestCase):  # pylint: disable=R0904
         pwork.link_name = 'uboot'
         pwork.cache = False
         self.assertIsNone(run(pwork.follow_events(None)))
+
+    def test_contents(self):
+        """The cache says what it holds, by server and kind of entry"""
+        cache = self.cache()
+        cache.put('https://pw', 'patches/1/', {'name': 'one'})
+        self.now = 1100.0
+        cache.put('https://pw', 'patches/2/', {'name': 'two'})
+        cache.put('https://pw', 'patches/2/comments/', [])
+        cache.put('https://other', 'patches/3/', {'name': 'three'})
+        contents = cache.contents(request_kind)
+        self.assertEqual({('https://pw', 'patch'),
+                          ('https://pw', 'patch-comments'),
+                          ('https://other', 'patch')}, set(contents))
+        count, nbytes, newest = contents[('https://pw', 'patch')]
+        self.assertEqual(2, count)
+        self.assertGreater(nbytes, 0)
+        self.assertEqual(1100.0, newest)
+
+        self.assertEqual([], cache.follow_list())
+        cache.set_follow('https://pw', 'uboot', 900.0, '', 1000.0)
+        cache.set_follow('https://other', 'linux', 800.0, '', 1050.0)
+        self.assertEqual([('https://other', 'linux', 800.0, 1050.0),
+                          ('https://pw', 'uboot', 900.0, 1000.0)],
+                         cache.follow_list())
+        cache.close()
 
     def test_prune_daily(self):
         """Old entries are dropped when the cache is opened, once a day"""

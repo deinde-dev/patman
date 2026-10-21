@@ -51,6 +51,38 @@ or set it to the path of another file to use that instead.
 If the cache cannot be used, e.g. because the disk is full or the file is
 read-only, patman says so once and reads patchwork instead.
 
+Seeing what the cache holds
+---------------------------
+
+``patman patchwork cache`` shows what the cache holds for each server: how
+many entries of each kind, how much space they take and how long ago the
+newest was read. It then shows the requests sent to the server and the reads
+which the cache answered, this hour, today and in the last seven days, and
+lists the projects whose events are followed (see `Following events`_)::
+
+    $ patman patchwork cache
+    Cache: /home/me/.cache/patman/patchwork.db, 15.2 MB
+
+    https://patchwork.ozlabs.org
+      Kind             Entries      Size  Newest
+      cover-comments        42  415.9 KB  17h ago
+      patch                538    3.0 MB  17h ago
+      patch-comments       538  927.1 KB  17h ago
+      recent-series          5   75.4 KB  3m ago
+      series               188  130.6 KB  3m ago
+      Period           Requests  Received  Cache hits     Saved
+      This hour               2   80.1 KB           4  585.1 KB
+      Today                   8    1.1 MB           5  709.9 KB
+      Last 7 days          3698   56.3 MB         650    1.5 MB
+
+    Events followed:
+      https://patchwork.ozlabs.org 'uboot': since 2d ago, checked 5m ago
+
+The kinds are those which the traffic table on the ``patman serve`` page
+uses, e.g. ``recent-series`` for a page of the inbox. The requests are those
+counted in the database which the command uses, so run it where you run
+``patman serve`` to see the server's traffic.
+
 What is kept, and for how long
 ------------------------------
 

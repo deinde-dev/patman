@@ -10,6 +10,9 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman patchwork cache`` shows what the patchwork cache holds for each
+  server, the requests sent to it and the reads which the cache answered,
+  and which projects' events are followed.
 - ``--no-cache`` reads everything from patchwork rather than from the cache,
   e.g. to check whether the cache is the cause of a problem. With
   ``patman --no-cache serve``, the jobs which the server starts do not use
