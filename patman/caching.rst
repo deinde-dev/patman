@@ -157,6 +157,11 @@ began following the events are used in this way, so the first sync still
 reads every patch. If the events are not checked for a week, or there are too
 many to read, following begins again and everything is read once more.
 
+When following begins, the recorded states may have changed without patman
+seeing it, so all but those which a patch rarely leaves, 'accepted',
+'superseded' and 'rejected', are dropped, to be learned again as patches are
+read or change.
+
 Patchwork before version 3.1, which includes patchwork.ozlabs.org, has no
 events for new comments, so these are found with lore instead (see
 `Patchwork versions`_).

@@ -85,6 +85,10 @@ PROJECTS_MAX_AGE = 24 * 60 * 60
 # cache is out of date
 PATCH_EVENTS = ('patch-state-changed', 'patch-delegated')
 
+# States which a patch rarely leaves, so which are kept when events may have
+# been missed
+FINAL_STATES = ('accepted', 'superseded', 'rejected')
+
 # Seconds within which the events of a project are not checked again, so
 # that a sync of many series checks them once
 EVENTS_RECHECK = 60
@@ -484,7 +488,9 @@ class Patchwork:
         so those are dropped from the cache and the rest are current, which
         saves reading each patch again to see its state. Comments have no
         events on some servers, so are not covered. The new state of each
-        patch is recorded too (see pwcache.Cache.set_states()).
+        patch is recorded too (see pwcache.Cache.set_states()). When
+        following begins, recorded states other than FINAL_STATES are
+        dropped, since changes to them may have been missed.
 
         Following begins with the first check, so only patches read since
         then are covered. If the events have not been checked for
@@ -520,11 +526,14 @@ class Patchwork:
                         cache.set_follow(self.url, project, started, last, now)
                         return started
 
-            # Begin following, from the newest event
+            # Begin following, from the newest event. Changes since the
+            # recorded states were seen may have been missed, so drop those
+            # which may since have changed
             newest = await self._request(
                 client, f'events/?project={project}&per_page=1')
             last = newest[0]['date'] if newest else ''
             cache.set_follow(self.url, project, now, last, now)
+            cache.drop_states(self.url, FINAL_STATES)
             return now
 
     def _use_events(self, cache, events):

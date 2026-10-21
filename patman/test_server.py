@@ -1623,18 +1623,21 @@ class TestWebServer(unittest.TestCase, TestCommon):
         now = [1000.0]
         pwork.cache = pwcache.Cache(os.path.join(self.tmpdir, 'pwcache.db'),
                                     clock=lambda: now[0])
-        # A patch which has been read gives its state
-        pwork.cache.put(pwork.url, 'patches/1/', {'id': 1, 'state': 'new'})
-        pwork._to_cache('patches/2/', {'id': 2, 'state': 'under-review'})
-
         def states(args=''):
             _, data = self.call(srv, 'GET', f'/api/inbox{args}')
             return [pat['state'] for pat in data['series'][0]['patches']]
 
-        # Following the events begins; patch 1 was put in the cache without
-        # its state, so it is not known
-        self.assertEqual([None, 'under-review', None], states())
+        # Following the events begins, dropping a state seen before then,
+        # since it may have changed
+        pwork._to_cache('patches/2/', {'id': 2, 'state': 'under-review'})
+        self.assertEqual([None, None, None], states())
         self.assertIn('events/?project=uboot&per_page=1', reads)
+
+        # A patch which has been read gives its state; patch 1 was put in the
+        # cache without its state, so it is not known
+        pwork.cache.put(pwork.url, 'patches/1/', {'id': 1, 'state': 'new'})
+        pwork._to_cache('patches/2/', {'id': 2, 'state': 'under-review'})
+        self.assertEqual([None, 'under-review', None], states())
 
         # An event gives the new state of a patch, the latest winning
         now[0] += server.app.INBOX_KEEP + 1

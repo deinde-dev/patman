@@ -67,7 +67,8 @@ Added
   the other states of patches, such as 'superseded', taken from the
   project's events and the patches patman reads, at most one request a
   minute. Series whose patches are all superseded or rejected leave 'To
-  review'.
+  review'. When patman begins following the events again, e.g. after a week
+  without a check, it drops the states which may have changed meanwhile.
 
 Changed
 ~~~~~~~
