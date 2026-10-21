@@ -33,6 +33,9 @@ your repos, by each patman command and by ``patman serve``, so a review job
 started from the server finds what the server has just read, and the cache
 survives a restart of the server.
 
+``patman patchwork cache`` shows what the cache holds and how much it saves
+(see `Seeing what the cache holds`_).
+
 The cache holds nothing which cannot be read again, so it is safe to delete,
 e.g. if you suspect it holds something wrong; patman makes a new one. Entries
 which are not used for 90 days are dropped, so the file does not keep
@@ -50,6 +53,8 @@ or set it to the path of another file to use that instead.
 
 If the cache cannot be used, e.g. because the disk is full or the file is
 read-only, patman says so once and reads patchwork instead.
+
+.. _patchwork_cache_show:
 
 Seeing what the cache holds
 ---------------------------
