@@ -390,6 +390,20 @@ def default_path():
     return os.path.join(base, 'patman', 'patchwork.db')
 
 
+def disable():
+    """Use no cache, in this process and in the patman commands it starts
+
+    The commands which 'patman serve' starts, such as a sync or a review,
+    are told through PATMAN_PWCACHE, as they run in processes of their own.
+    """
+    global _cache  # pylint: disable=W0603
+
+    os.environ['PATMAN_PWCACHE'] = 'off'
+    if _cache:
+        _cache.close()
+    _cache = False
+
+
 def get():
     """Get the cache to use, opening it the first time
 

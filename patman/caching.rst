@@ -38,10 +38,15 @@ e.g. if you suspect it holds something wrong; patman makes a new one. Entries
 which are not used for 90 days are dropped, so the file does not keep
 growing.
 
-To use another file, set ``PATMAN_PWCACHE`` to its path, or set it to ``off``
-to use no cache at all::
+To use no cache at all, use ``--no-cache``, e.g. to check that the cache is
+not the cause of a problem::
 
-    PATMAN_PWCACHE=off patman status
+    patman --no-cache status
+
+This reads everything from patchwork and leaves the cache as it is. With
+``patman --no-cache serve``, the syncs and reviews which the server starts do
+not use the cache either. Setting ``PATMAN_PWCACHE`` to ``off`` does the same,
+or set it to the path of another file to use that instead.
 
 If the cache cannot be used, e.g. because the disk is full or the file is
 read-only, patman says so once and reads patchwork instead.

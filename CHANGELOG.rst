@@ -10,6 +10,10 @@ Unreleased
 
 Added
 ~~~~~
+- ``--no-cache`` reads everything from patchwork rather than from the cache,
+  e.g. to check whether the cache is the cause of a problem. With
+  ``patman --no-cache serve``, the jobs which the server starts do not use
+  it either.
 - Reviewing a series from the inbox on the ``patman serve`` page no longer
   reads the series from patchwork again, since the inbox keeps each series
   it reads in the cache under its ID.

@@ -966,6 +966,10 @@ def setup_parser():
         '--no-lore', action='store_const', const='off', dest='lore',
         help="Do not use lore.kernel.org, the same as '--lore off'")
     parser.add_argument(
+        '--no-cache', action='store_true',
+        help='Do not use the patchwork cache, but read everything from '
+             'patchwork, the same as setting PATMAN_PWCACHE=off')
+    parser.add_argument(
         '-T', '--thread', action='store_true', dest='thread',
         default=False, help='Create patches as a single thread')
     parser.add_argument(
