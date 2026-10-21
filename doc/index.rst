@@ -16,6 +16,7 @@
    sending
    tags
    patchwork
+   caching
    series
    review
    serve
