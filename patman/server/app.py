@@ -775,7 +775,9 @@ class Server(jobs.JobRunner):
         """Handle 'GET /api/inbox': list recent series on patchwork
 
         The 'ups' query parameter selects the upstream, defaulting to the
-        default one, and 'page' selects the page of results.
+        default one, and 'page' selects the page of results. For a later
+        page, 'cached=1' uses the copy in the cache however old it is, so
+        that the page can show again the pages it showed before.
 
         What is read from patchwork is kept in the cache (see pwcache) for
         INBOX_KEEP seconds, so that showing the inbox again, from this page
@@ -808,6 +810,9 @@ class Server(jobs.JobRunner):
                 self._fetches[ups]['started'] = None
         elif page == 1:
             max_age = INBOX_KEEP
+        elif request.query.get('cached') == '1':
+            # The page shows again what it showed before, however old
+            max_age = None
         else:
             max_age = pwork.read_age(first) or 0
         async with aiohttp.ClientSession() as client:

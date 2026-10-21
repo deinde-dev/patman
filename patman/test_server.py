@@ -1765,9 +1765,11 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual([query.format(1), query.format(2)], reads)
 
         # Once it is too old, it is read again, and so is the next page,
-        # which is now older than the first
+        # which is now older than the first, unless the page is showing
+        # again what it showed before
         now[0] += 1
         self.assertEqual((3, at(now[0])), inbox())
+        self.assertEqual(2, inbox('?page=2&cached=1')[0])
         self.assertEqual(4, inbox('?page=2')[0])
 
         # A refresh reads it at once
