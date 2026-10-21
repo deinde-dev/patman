@@ -81,18 +81,22 @@ not your own.
 Tap the sync indicator at the top of the page to follow the output of a sync as
 it runs, to start one or to cancel one.
 
-A sync reads every patch of every series, along with its comments, so with a
-lot of series it sends thousands of requests to patchwork. A busy server may
-then block your machine. To avoid this, leave out ``--sync`` and sync just the
-series you are interested in: tap 'Sync' on a series to run ``patman series
-gather -G`` for the version shown. Without ``--sync``, 'Sync now' on the sync
-page needs a second tap, since it reads all the series.
+The first sync reads every patch of every series, along with its comments, so
+with a lot of series it sends thousands of requests to patchwork. Later syncs
+read much less, since patman keeps what it reads in a cache, follows the
+project's events and reads the replies from lore (see
+:doc:`the Caching chapter </caching>`). Even so, a busy server may block your
+machine. To avoid this, leave out ``--sync`` and sync just the series you are
+interested in: tap 'Sync' on a series to run ``patman series gather -G`` for
+the version shown. Without ``--sync``, 'Sync now' on the sync page needs a
+second tap, since it reads all the series.
 
 The sync page also shows how many requests patman has sent to each patchwork
-server this hour, today and in the last seven days, and how much data came
-back. This counts every patman command using the same database, not just the
-server, so it shows whether patman is sending more than a busy server may
-like.
+server, and to lore, this hour, today and in the last seven days, how much
+data came back and how many reads the cache answered, with the requests
+broken down by kind. This counts every patman command using the same
+database, not just the server, so it shows whether patman is sending more
+than a busy server may like.
 
 Reading patches
 ---------------
