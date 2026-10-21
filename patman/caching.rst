@@ -111,8 +111,9 @@ began following the events are used in this way, so the first sync still
 reads every patch. If the events are not checked for a week, or there are too
 many to read, following begins again and everything is read once more.
 
-Patchwork has no events for new comments, so these are found with lore
-instead.
+Patchwork before version 3.1, which includes patchwork.ozlabs.org, has no
+events for new comments, so these are found with lore instead (see
+`Patchwork versions`_).
 
 Reading replies from lore
 -------------------------
@@ -171,3 +172,25 @@ saved. A table below breaks the requests down by kind, such as
 ``patch-comments`` or ``series-search``, to show what the traffic is made of.
 This counts every patman command using the same database, not just the
 server.
+
+Patchwork versions
+------------------
+
+What patman can do to read less depends on the version of patchwork which
+the server runs:
+
+- patman uses version 1.2 of patchwork's REST API, so it needs Patchwork 2.2
+  or later. https://patchwork.ozlabs.org runs Patchwork 2.2.0
+- the events which patman follows, for a patch's state and delegate, came
+  with the REST API in Patchwork 2.0, and the comments on a patch or cover
+  letter with Patchwork 2.1 (API 1.1), so every server which patman can use
+  has them
+- Patchwork 3.1 (API 1.3) adds events for new comments,
+  'patch-comment-created' and 'cover-comment-created', which would show which
+  patches have new comments without lore. patman does not use them yet:
+  patchwork.ozlabs.org does not have them, and an older server gives no error
+  for a category which it does not know, but returns no events, which looks
+  the same as no new comments
+- patchwork.ozlabs.org sends no ETag or Last-Modified headers, so patman
+  cannot ask whether something has changed since it was read, only read it
+  again
