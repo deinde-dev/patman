@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.join(HERE, '..', '..'))
 # pylint: disable=C0413
 from patman.database import Database, Pcommit, SerVer
 from patman.patchwork import Patchwork
+from patman import pwcache
 
 PW_URL = 'https://patchwork.example.org'
 UPSTREAM = 'us'
@@ -51,6 +52,17 @@ def _patch(pid, name):
 
 # The series which the demo reviews
 TARGET = 600214
+
+# Patches which the upstream has, so that the inbox shows them as applied:
+# (branch, subject)
+APPLIED = [
+    ('main', 'doc: Fix typos in the build guide'),
+    ('next', 'arm: Add a device tree for the Demo board'),
+    ('next', 'arm: Add a defconfig for the Demo board'),
+]
+
+# The state of some patches on patchwork, as patman last saw them
+STATES = {9001: 'changes-requested', 9002: 'changes-requested'}
 
 # Made-up series on patchwork, newest first: (id, name, version, hours ago,
 #     (submitter name, email), cover-letter ID, patches)
@@ -314,6 +326,8 @@ def _fake_patchwork(subpath):
                  'patches': patches}
                 for sid, name, ver, hours, who, cover, patches in SERIES
                 if page]
+    if subpath.startswith('events/'):
+        return []
     if subpath.endswith('/comments/'):
         kind, item_id = subpath.split('/')[:2]
         return [{**com, 'date': _ago(com['hours'])}
@@ -392,6 +406,36 @@ def _add_review(db, link, desc, version, patches, reviews, sent, hours=0):
     return svid
 
 
+def _setup_upstream(topdir):
+    """Create the upstream's git repo, with some of the series applied
+
+    The inbox fetches it, as it would a real upstream, and finds the patches
+    in APPLIED on its branches
+
+    Args:
+        topdir (str): Directory which holds the demo's git repo
+    """
+    upstream = os.path.join(topdir, 'upstream')
+
+    def git(*args):
+        subprocess.run(['git', '-c', 'user.name=Demo', '-c',
+                        'user.email=demo@example.com', *args], cwd=upstream,
+                       check=True, capture_output=True)
+
+    os.mkdir(upstream)
+    git('init', '-q', '-b', 'main')
+    git('commit', '-q', '--allow-empty', '-m', 'Prepare the release')
+    for branch, subject in APPLIED:
+        if branch == 'main':
+            git('commit', '-q', '--allow-empty', '-m', subject)
+    git('checkout', '-q', '-b', 'next')
+    for branch, subject in APPLIED:
+        if branch == 'next':
+            git('commit', '-q', '--allow-empty', '-m', subject)
+    subprocess.run(['git', 'remote', 'add', UPSTREAM, upstream], cwd=topdir,
+                   check=True)
+
+
 def setup(topdir):
     """Create the database, with an upstream and some earlier reviews
 
@@ -399,6 +443,7 @@ def setup(topdir):
         topdir (str): Directory to hold the git repo and database
     """
     subprocess.run(['git', 'init', '-q', topdir], check=True)
+    _setup_upstream(topdir)
     db = Database(os.path.join(topdir, '.patman.db'))
     db.start()
     db.upstream_add(UPSTREAM, 'https://source.example.org/u-boot.git',
@@ -635,6 +680,12 @@ def _serve(topdir, port):
     srv = Server(cser, pw_url=PW_URL)
     pwork = Patchwork.for_testing(_fake_patchwork)
     pwork.url = PW_URL
+    # A cache of its own, which already follows the project's events, so
+    # that the inbox shows the states in STATES
+    pwork.cache = pwcache.Cache(os.path.join(topdir, 'patchwork.db'))
+    now = pwork.cache.now()
+    pwork.cache.set_follow(PW_URL, 'uboot', now, '', now)
+    pwork.cache.set_states(PW_URL, STATES)
     srv.pwork_for_testing = pwork
     # Jobs run 'python -m patman', which finds the stand-in package first
     fake = os.path.join(topdir, 'fake')

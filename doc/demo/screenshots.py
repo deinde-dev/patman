@@ -147,6 +147,16 @@ def run(shots):
     card = page.locator('.card.patch', has_text='Ample AB1234')
     card.wait_for()
     shots.screen('serve-inbox')
+
+    # The series which are applied, one opened to show its patches
+    page.get_by_role('button', name='Applied', exact=True).click()
+    applied = page.locator('.card.patch', has_text='Demo board')
+    applied.locator('.name').click()
+    applied.locator('.chip', has_text='us/next').first.wait_for()
+    shots.crop(applied, 'serve-inbox-applied')
+    applied.locator('.name').click()
+    page.get_by_role('button', name='To review', exact=True).click()
+
     card.locator('.name').click()
     card.get_by_role('button', name='Review', exact=True).click()
     card.locator('textarea').fill(

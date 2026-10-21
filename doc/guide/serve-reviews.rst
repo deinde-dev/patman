@@ -54,13 +54,39 @@ Choosing a series
 The Inbox tab lists the newest series on patchwork. 'To review' shows those
 which you have not reviewed and which are not yours, and 'New versions' those
 for which you reviewed an earlier version, such as the Ethernet driver here.
-The server reads the list from patchwork at most every ten minutes, and
-fetches the upstream at most every hour, to show which series are applied,
-unless you tap 'Refresh':
+Each series also says how far it has got: the board support is partly applied
+upstream, and changes have been requested to the bootflow series:
 
 .. image:: images/serve-inbox.png
    :width: 660px
-   :alt: The Inbox tab, listing five series to review
+   :alt: The Inbox tab, listing four series to review, one marked 'applied
+         2/3' and one 'changes-requested'
+
+The server reads the list from patchwork at most every ten minutes, and
+fetches the upstream at most every hour, unless you tap 'Refresh'; the top of
+the inbox says when it did each. 'Load more' at the bottom reads the next 50
+series, and going to another tab and back keeps them.
+
+A series is 'applied' once all its patches are on the upstream's main or next
+branch, found by their subjects in the git repo which the server runs in, or
+are accepted on patchwork, e.g. into a custodian's tree. A series which is
+fully applied leaves 'To review', as the build-guide fix has here; 'Applied'
+lists every series with a patch applied. Tap one to see which of its patches
+are applied, and where:
+
+.. image:: images/serve-inbox-applied.png
+   :width: 644px
+   :alt: The board series opened under 'Applied', with two of its three
+         patches on us/next
+
+An older version of a series whose patches came in a newer one is marked
+'later version applied'. Other states on patchwork, such as
+'changes-requested' or 'superseded', show beside each patch, and on the series
+when all its patches have the same one; a series whose patches are all
+superseded or rejected leaves 'To review' too. patman learns these states
+from the patches it reads and from the project's events, so a patch which has
+not changed since patman began following them shows no state (see
+:doc:`the Caching chapter </caching>`).
 
 Starting the review
 -------------------

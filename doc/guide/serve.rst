@@ -48,7 +48,8 @@ Reviews
     The series you have reviewed with ``patman review``
 
 Inbox
-    The most recent series on patchwork, marking those you have reviewed
+    The most recent series on patchwork, marking those you have reviewed and
+    those which are applied upstream
 
 Jobs
     Commands started from the page, with their output
