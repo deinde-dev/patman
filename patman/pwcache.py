@@ -26,8 +26,10 @@ server, for showing with the patchwork traffic (see traffic).
 The cache also records how far it has followed the events of a project on
 a server, e.g. a patch's state changing, so that a patch read since it began
 following them can be used however old it is, being dropped when an event
-says that it has changed (see Patchwork.follow_events()). Entries which
-are not used for KEEP_DAYS are dropped, which is checked once a day.
+says that it has changed (see Patchwork.follow_events()). It records the
+state of each patch, as last seen in a patch or an event, for the inbox in
+'patman serve'. Entries which are not used for KEEP_DAYS are dropped, which
+is checked once a day.
 
 If the cache stops working, e.g. because the disk is full or the file is
 damaged, this is reported once and the cache is then left alone, so that
@@ -118,7 +120,8 @@ class Cache:
         layout = self.con.execute('PRAGMA user_version').fetchone()[0]
         if layout != LAYOUT:
             with self.con:
-                for table in ('objects', 'hits', 'follow', 'meta'):
+                for table in ('objects', 'hits', 'follow', 'meta',
+                              'states'):
                     self.con.execute(f'DROP TABLE IF EXISTS {table}')
                 self.con.execute(f'PRAGMA user_version = {LAYOUT}')
         with self.con:
@@ -143,6 +146,34 @@ class Cache:
             self.con.execute(
                 'CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, '
                 'value REAL)')
+            new_states = not self.con.execute(
+                "SELECT 1 FROM sqlite_master WHERE name = 'states'").fetchone()
+            self.con.execute(
+                'CREATE TABLE IF NOT EXISTS states (server TEXT, '
+                'patch INTEGER, state TEXT, updated REAL, '
+                'PRIMARY KEY (server, patch))')
+            if new_states:
+                self._fill_states()
+
+    def _fill_states(self):
+        """Record the states of the patches which a new cache holds
+
+        A cache made before states were recorded holds patches whose states
+        would otherwise not be known until they change.
+        """
+        rows = []
+        for server, blob, fetched in self.con.execute(
+                "SELECT server, data, fetched FROM objects WHERE path GLOB "
+                "'patches/[0-9]*/' AND path NOT GLOB 'patches/*/*/'"):
+            try:
+                data = json.loads(zlib.decompress(blob))
+            except CACHE_ERRORS:
+                continue
+            if isinstance(data, dict) and data.get('state'):
+                rows.append((server, data['id'], data['state'], fetched))
+        self.con.executemany(
+            'INSERT OR REPLACE INTO states (server, patch, state, updated) '
+            'VALUES (?, ?, ?, ?)', rows)
 
     def _prune_if_due(self):
         """Drop old entries, if this has not been done for a while"""
@@ -324,6 +355,8 @@ class Cache:
                                    (now - keep_days * 86400,))
             self.con.execute('DELETE FROM hits WHERE hour < ?', (self._hour(
                 now - keep_days * 86400),))
+            self.con.execute('DELETE FROM states WHERE updated < ?',
+                             (now - keep_days * 86400,))
         return cur.rowcount
 
     def _hour(self, when):
@@ -368,6 +401,44 @@ class Cache:
                 self.con.execute(
                     'SELECT server, SUM(count), SUM(bytes) FROM hits '
                     'WHERE hour >= ? GROUP BY server', (since,))}
+
+    @_safe(None)
+    def set_states(self, server, states):
+        """Record the states of patches, as last seen
+
+        Args:
+            server (str): URL of the patchwork server
+            states (dict): key (int): Patch ID
+                value (str): State, e.g. 'accepted'
+        """
+        now = self._clock()
+        with self.con:
+            self.con.executemany(
+                'INSERT OR REPLACE INTO states (server, patch, state, updated) '
+                'VALUES (?, ?, ?, ?)',
+                [(server, pid, state, now) for pid, state in states.items()])
+
+    @_safe({})
+    def get_states(self, server, patch_ids):
+        """Get the last seen states of patches
+
+        Args:
+            server (str): URL of the patchwork server
+            patch_ids (list of int): Patch IDs
+
+        Returns:
+            dict: key (int): Patch ID, for each patch whose state is known
+                value (str): State, e.g. 'accepted'
+        """
+        out = {}
+        ids = list(patch_ids)
+        # Keep within SQLite's limit on the number of parameters
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            out.update(self.con.execute(
+                'SELECT patch, state FROM states WHERE server = ? AND patch '
+                f"IN ({', '.join('?' * len(chunk))})", (server, *chunk)))
+        return out
 
     @_safe({})
     def contents(self, kind_of):

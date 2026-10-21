@@ -793,9 +793,15 @@ class Server(jobs.JobRunner):
         async with aiohttp.ClientSession() as client:
             series_list = await pwork.get_recent_series(
                 client, proj[2], page, INBOX_PAGE, max_age=max_age)
+            # Learn which patches have changed state since the last check
+            await pwork.follow_events(client, proj[2])
         read = pwork.read_time(first)
         commits = await self._upstream_commits(ups, series_list)
-        series = info.get_inbox(self.cser, self.rcser, series_list, commits)
+        states = pwork.get_states([pat['id'] for ser in series_list
+                                   for pat in ser.get('patches') or []])
+        series = info.get_inbox(
+            self.cser, self.rcser, series_list,
+            info.get_patch_status(series_list, commits, states))
         for item in series:
             item['job'] = self._reviewing(item['id'])
         return web.json_response({

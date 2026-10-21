@@ -59,6 +59,11 @@ Added
   'applied 2/5', with an 'Applied' filter, finding the patches in git by their
   subjects rather than asking patchwork. An older version whose patches came
   in a newer one is marked 'later version applied'.
+- The inbox also counts a patch accepted on patchwork as applied, and shows
+  the other states of patches, such as 'superseded', taken from the
+  project's events and the patches patman reads, at most one request a
+  minute. Series whose patches are all superseded or rejected leave 'To
+  review'.
 
 Changed
 ~~~~~~~

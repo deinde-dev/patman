@@ -121,6 +121,9 @@ REQUEST_KINDS = [
     ('events', re.compile(r'events/')),
 ]
 
+# Path of a request for a patch, whose response gives the patch's state
+RE_PATCH_PATH = re.compile(r'patches/\d+/$')
+
 # Patches which are part of a multi-patch series are shown with a prefix like
 # [prefix, version, sequence], for example '[RFC, v2, 3/5]'. All but the last
 # part is optional. This decodes the string into groups. For single patches
@@ -440,6 +443,9 @@ class Patchwork:
         cache = self._get_cache()
         if cache:
             cache.put(self.url, subpath, data)
+            if RE_PATCH_PATH.match(subpath) and isinstance(data, dict) and \
+                    data.get('state'):
+                cache.set_states(self.url, {data['id']: data['state']})
 
     # pylint: disable-next=R0913
     async def _cached_request(self, client, subpath, max_age, keep=None,
@@ -469,7 +475,7 @@ class Patchwork:
             self._to_cache(subpath, data)
         return data
 
-    async def follow_events(self, client):
+    async def follow_events(self, client, project=None):
         """Follow the events of the project, to keep patches in the cache
         current
 
@@ -477,7 +483,8 @@ class Patchwork:
         Reading these since the last check says which patches have changed,
         so those are dropped from the cache and the rest are current, which
         saves reading each patch again to see its state. Comments have no
-        events on some servers, so are not covered.
+        events on some servers, so are not covered. The new state of each
+        patch is recorded too (see pwcache.Cache.set_states()).
 
         Following begins with the first check, so only patches read since
         then are covered. If the events have not been checked for
@@ -486,6 +493,8 @@ class Patchwork:
 
         Args:
             client (aiohttp.ClientSession): Session to use
+            project (str or None): Project link name, e.g. 'uboot', or None
+                to use the one set by project_set()
 
         Returns:
             float or None: Time from which patches in the cache are kept
@@ -493,7 +502,7 @@ class Patchwork:
                 there is no cache or no project
         """
         cache = self._get_cache()
-        project = self.link_name
+        project = project or self.link_name
         if not cache or not project:
             return None
         async with self._events_lock:
@@ -506,10 +515,7 @@ class Patchwork:
                 if now - checked <= EVENTS_MAX_GAP:
                     events = await self._read_events(client, project, last)
                     if events is not None:
-                        for event in events:
-                            if event['category'] in PATCH_EVENTS:
-                                cache.drop(self.url, self.patch_path(
-                                    event['payload']['patch']['id']))
+                        self._use_events(cache, events)
                         last = max([last] + [ev['date'] for ev in events])
                         cache.set_follow(self.url, project, started, last, now)
                         return started
@@ -520,6 +526,23 @@ class Patchwork:
             last = newest[0]['date'] if newest else ''
             cache.set_follow(self.url, project, now, last, now)
             return now
+
+    def _use_events(self, cache, events):
+        """Drop the patches which events say have changed, and record states
+
+        Args:
+            cache (pwcache.Cache): Cache to update
+            events (list of dict): Events, as patchwork gives them
+        """
+        states = {}
+        # Patchwork gives the newest first, but the latest state must win
+        for event in sorted(events, key=lambda ev: ev['date']):
+            if event['category'] in PATCH_EVENTS:
+                pid = event['payload']['patch']['id']
+                cache.drop(self.url, self.patch_path(pid))
+                if event['payload'].get('current_state'):
+                    states[pid] = event['payload']['current_state']
+        cache.set_states(self.url, states)
 
     async def _read_events(self, client, project, since):
         """Read the events of a project since a date
@@ -542,6 +565,19 @@ class Patchwork:
             if len(res) < EVENTS_PER_PAGE:
                 return events
         return None
+
+    def get_states(self, patch_ids):
+        """Get the states of patches, as last seen
+
+        Args:
+            patch_ids (list of int): Patch IDs
+
+        Returns:
+            dict: key (int): Patch ID, for each patch whose state is known
+                value (str): State, e.g. 'accepted'
+        """
+        cache = self._get_cache()
+        return cache.get_states(self.url, patch_ids) if cache else {}
 
     def read_time(self, subpath):
         """Get when the cached copy of a response was read from patchwork

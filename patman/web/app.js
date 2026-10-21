@@ -1762,8 +1762,11 @@ function inboxDetails(s, ups, jobBox) {
       h('div', { class: 'grow' },
         h('a', { href: mailHref('patch', p.id, ups),
                  title: 'Read the patch and its comments' }, p.name)),
-      p.commit && h('span', { class: 'chip st-accepted',
-                              title: `Applied as ${p.commit.slice(0, 12)}` }, p.branch)))),
+      p.commit ? h('span', { class: 'chip st-accepted',
+                             title: `Applied as ${p.commit.slice(0, 12)}` }, p.branch)
+        : p.state && p.state !== 'new' &&
+          h('span', { class: `chip ${stClass(p.state)}`, title: 'Its state on patchwork' },
+            p.state)))),
     h('div', { class: 'actions' },
       jobId && !inboxDone.has(jobId) ? busyLink(jobId) : reviewBtn,
       s.web_url && h('a', { class: 'btn light small', href: s.web_url,
@@ -1773,27 +1776,36 @@ function inboxDetails(s, ups, jobBox) {
     reviewBox);
 }
 
-// Say how much of each series in the inbox is applied upstream. A commit
-// whose subject is in more than one version of a series belongs to the
-// newest, which comes first, so the older versions show that a later one
-// was applied rather than claiming the commits themselves
+// Say how much of each series in the inbox is applied, either upstream or
+// as accepted on patchwork, e.g. into a custodian's tree. A commit whose
+// subject is in more than one version of a series belongs to the newest,
+// which comes first, so the older versions show that a later one was applied
+// rather than claiming the commits themselves
 function inboxApplied(list) {
   const owner = new Map();
   list.forEach((s, i) => s.patches.forEach((p) => {
     if (p.commit && !owner.has(p.commit)) owner.set(p.commit, i);
   }));
   list.forEach((s, i) => {
-    const mine = s.patches.filter((p) => p.commit && owner.get(p.commit) === i);
+    const upstream = s.patches.filter((p) => p.commit && owner.get(p.commit) === i);
+    const mine = s.patches.filter((p) => upstream.includes(p) || p.state === 'accepted');
+    const where = upstream.map((p) => p.branch);
+    if (mine.length > upstream.length) where.push('accepted on patchwork');
+    // A state which all the patches share, e.g. 'superseded'
+    const states = new Set(s.patches.map((p) => p.state));
+    const [state] = states;
     s.applied = {
       count: mine.length,
       all: mine.length > 0 && mine.length >= (s.total || s.patches.length),
       later: !mine.length && s.patches.some((p) => p.commit),
-      branches: [...new Set(mine.map((p) => p.branch))].join(', '),
+      where: [...new Set(where)].join(', '),
+      state: states.size === 1 && state && state !== 'new' ? state : null,
     };
   });
 }
 
-// A chip saying how much of a series is applied upstream, if any
+// A chip saying how much of a series is applied, if any, or else the state
+// which all its patches have on patchwork
 function appliedChip(s) {
   const a = s.applied;
   if (!a) return null;
@@ -1802,12 +1814,19 @@ function appliedChip(s) {
                        title: 'Its patches are upstream from a later version' },
              'later version applied');
   }
-  if (!a.count) return null;
+  if (!a.count) {
+    return a.state && h('span', { class: `chip ${stClass(a.state)}`,
+                                  title: 'The state of its patches on patchwork' },
+                        a.state);
+  }
   const total = s.total || s.patches.length;
   return h('span', { class: `chip ${a.all ? 'st-accepted' : 'st-under-review'}`,
-                     title: `${a.count} of its ${npatches(total)} are on ${a.branches}` },
+                     title: `${a.count} of its ${npatches(total)} are applied: ${a.where}` },
            a.all ? 'applied' : `applied ${a.count}/${total}`);
 }
+
+// States in which a series needs no review
+const DONE_STATES = ['accepted', 'superseded', 'rejected', 'not-applicable'];
 
 function inboxCard(s, ups, pw) {
   const jobBox = h('span', {});
@@ -1838,7 +1857,8 @@ function inboxCard(s, ups, pw) {
     card.append(box);
   });
   const groups = ['all'];
-  const applied = s.applied && (s.applied.all || s.applied.later);
+  const applied = s.applied && (s.applied.all || s.applied.later ||
+                                DONE_STATES.includes(s.applied.state));
   if (!s.reviewed && !s.mine && !applied) groups.push('todo');
   if (s.earlier) groups.push('newver');
   if (s.applied && (s.applied.count || s.applied.later)) groups.push('applied');

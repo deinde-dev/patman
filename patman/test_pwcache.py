@@ -500,6 +500,46 @@ class TestPwCache(unittest.TestCase):  # pylint: disable=R0904
                          cache.follow_list())
         cache.close()
 
+    def test_states(self):
+        """The cache records the states of patches"""
+        cache = self.cache()
+        self.assertEqual({}, cache.get_states('https://pw', [1, 2]))
+        cache.set_states('https://pw', {1: 'new', 2: 'accepted'})
+        cache.set_states('https://pw', {1: 'superseded'})
+        cache.set_states('https://other', {2: 'rejected'})
+        self.assertEqual({1: 'superseded', 2: 'accepted'},
+                         cache.get_states('https://pw', [1, 2, 3]))
+        many = {pid: 'new' for pid in range(1000, 2200)}
+        cache.set_states('https://pw', many)
+        self.assertEqual(many, cache.get_states('https://pw', list(many)))
+
+        # States not updated for a while are dropped
+        self.now += pwcache.KEEP_DAYS * 86400 + 1
+        cache.set_states('https://pw', {2: 'accepted'})
+        cache.prune()
+        self.assertEqual({2: 'accepted'},
+                         cache.get_states('https://pw', [1, 2, 1000]))
+        cache.close()
+
+    def test_fill_states(self):
+        """A cache from before states were recorded gains its patches' states"""
+        cache = self.cache()
+        cache.put('https://pw', 'patches/1/', {'id': 1, 'state': 'accepted'})
+        cache.put('https://pw', 'patches/1/comments/', [{'id': 5}])
+        cache.put('https://pw', 'patches/2/', {'id': 2})
+        cache.put('https://pw', 'series/3/', {'id': 3, 'state': 'x'})
+        cache.con.execute('DROP TABLE states')
+        cache.con.execute(
+            "INSERT INTO objects VALUES ('https://pw', 'patches/4/', "
+            "x'00', 0, 0)")
+        cache.con.commit()
+        cache.close()
+
+        cache = self.cache()
+        self.assertEqual({1: 'accepted'},
+                         cache.get_states('https://pw', [1, 2, 3, 4]))
+        cache.close()
+
     def test_prune_daily(self):
         """Old entries are dropped when the cache is opened, once a day"""
         cache = self.cache()
