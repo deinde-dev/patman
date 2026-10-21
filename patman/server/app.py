@@ -14,7 +14,7 @@ import ipaddress
 import os
 import re
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import aiohttp
 from aiohttp import web
@@ -29,6 +29,7 @@ from patman import pwcache
 from patman import times
 from patman import traffic
 from patman.patchwork import Patchwork
+from patman.review import apply
 from patman.server import info
 from patman.server import jobs
 from patman.server import params
@@ -793,7 +794,8 @@ class Server(jobs.JobRunner):
             series_list = await pwork.get_recent_series(
                 client, proj[2], page, INBOX_PAGE, max_age=max_age)
         read = pwork.read_time(first)
-        series = info.get_inbox(self.cser, self.rcser, series_list)
+        commits = await self._upstream_commits(ups, series_list)
+        series = info.get_inbox(self.cser, self.rcser, series_list, commits)
         for item in series:
             item['job'] = self._reviewing(item['id'])
         return web.json_response({
@@ -801,6 +803,30 @@ class Server(jobs.JobRunner):
             'fetched': (times.to_str(datetime.fromtimestamp(read)) if read
                         else times.now_str()),
             'series': series})
+
+    async def _upstream_commits(self, ups, series_list):
+        """Get the commits upstream which may be patches in the inbox
+
+        These are the commits on the upstream's main and next branches since
+        the oldest series, so that the inbox can show which patches have
+        been applied. The branches are as of the last fetch, which the sync
+        does.
+
+        Args:
+            ups (str): Upstream name, which is also the git remote
+            series_list (list of dict): Series from patchwork
+
+        Return:
+            dict: Commits by subject (see info.get_upstream_commits())
+        """
+        dates = [ser['date'] for ser in series_list if ser.get('date')]
+        if not dates:
+            return {}
+        # Allow for the time zone, since patchwork gives the date in UTC
+        since = (datetime.fromisoformat(min(dates)[:10]) -
+                 timedelta(days=1)).strftime('%Y-%m-%d')
+        refs = [apply.main_branch(ups, self.cser.topdir), f'{ups}/next']
+        return await info.get_upstream_commits(self.cser.topdir, refs, since)
 
     def _job_state(self, job):
         """Get the state of a job, with the reviewed series it acts on
