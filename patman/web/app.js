@@ -1881,7 +1881,10 @@ async function viewInbox(more, refresh) {
     ups = (upstreams.find((u) => u.default) || upstreams[0] || {}).name || '';
   }
   const pw = (upstreams.find((u) => u.name === ups) || {}).patchwork_url;
+  // Going back to the inbox keeps the pages read already
+  let kept = null;
   if (!more || !inbox || inbox.ups !== ups) {
+    if (!more && !refresh && inbox && inbox.ups === ups && inbox.page > 1) kept = inbox;
     inbox = { ups, page: 0, series: [], done: false };
   }
   const data = await api(`inbox?ups=${encodeURIComponent(ups)}&page=${inbox.page + 1}` +
@@ -1891,8 +1894,25 @@ async function viewInbox(more, refresh) {
   if (inbox.page === 0) inbox.fetched = data.fetched;
   inbox.upstreamFetched = data.upstream_fetched || inbox.upstreamFetched;
   inbox.page = data.page;
-  inbox.series.push(...data.series);
+  // New series move the others down, so a later page may repeat some
+  const ids = new Set(inbox.series.map((s) => s.id));
+  inbox.series.push(...data.series.filter((s) => !ids.has(s.id)));
   inbox.done = data.series.length < data.per_page;
+  if (kept) {
+    // Show the later pages again, as the server has them however old they
+    // are, so that patchwork is only read for the first. The series in
+    // them come after the first page's, in the order they were shown
+    const rest = await Promise.all(Array.from({ length: kept.page - 1 }, (_, i) =>
+      api(`inbox?ups=${encodeURIComponent(ups)}&page=${i + 2}&cached=1`)));
+    if (location.hash !== hash) return;
+    const fresh = new Map(rest.flatMap((d) => d.series).map((s) => [s.id, s]));
+    const have = new Set(inbox.series.map((s) => s.id));
+    for (const s of kept.series) {
+      if (!have.has(s.id)) inbox.series.push(fresh.get(s.id) || s);
+    }
+    inbox.page = kept.page;
+    inbox.done = kept.done;
+  }
   inboxApplied(inbox.series);
 
   const upsTabs = upstreams.length > 1 && h('div', { class: 'tabs' },

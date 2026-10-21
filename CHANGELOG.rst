@@ -79,6 +79,10 @@ Changed
 
 Fixed
 ~~~~~
+- Going back to the Inbox tab on the ``patman serve`` page keeps the pages
+  loaded with 'Load more', rather than showing only the first 50 series
+  again. Only the first page is read from patchwork again, if it is more than
+  ten minutes old.
 - An AI review no longer carries a second Reviewed-by tag, with an address
   which the agent guesses; patman drops any tag which the agent writes and
   adds the reviewer's own.
