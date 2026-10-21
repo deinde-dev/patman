@@ -38,6 +38,10 @@ only remote. ``patman patchwork get-project`` shows the project for a remote,
 
 With no remote, ``rm`` removes the project which has no upstream.
 
+``patman patchwork cache`` shows what patman's cache of patchwork holds, and
+how many requests it saves (see :ref:`Seeing what the cache holds
+<patchwork_cache_show>`).
+
 Checking the review status
 --------------------------
 
