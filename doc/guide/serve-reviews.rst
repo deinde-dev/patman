@@ -195,6 +195,11 @@ As each review is sent, its status turns green. A review which you decide
 not to send can be deleted, with its Gmail draft, with 'Delete', which also
 needs a second tap.
 
+To find the reviews you have not finished with, use the filters at the top of
+the Reviews tab: 'To send' lists the series with a Gmail draft waiting to be
+sent, and 'Not drafted' those with a review which has no draft yet. Both
+include hidden series, so a forgotten draft still turns up.
+
 Answering replies
 -----------------
 
