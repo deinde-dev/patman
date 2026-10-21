@@ -13,6 +13,7 @@ import unittest
 from unittest import mock
 
 from u_boot_pylib import terminal
+from patman import cmdline
 from patman import pwcache
 from patman.patchwork import Patchwork
 
@@ -49,6 +50,24 @@ class TestPwCache(unittest.TestCase):  # pylint: disable=R0904
     def cache(self):
         """Open the cache, with a clock which the test controls"""
         return pwcache.Cache(self.path, clock=lambda: self.now)
+
+    def test_disable(self):
+        """--no-cache stops this process, and those it starts, using it"""
+        with mock.patch.dict(os.environ, {'PATMAN_PWCACHE': self.path}), \
+                mock.patch.object(pwcache, '_cache', None):
+            cache = pwcache.get()
+            self.assertIsNotNone(cache)
+            with mock.patch.object(cache, 'close') as close:
+                pwcache.disable()
+            close.assert_called_once()
+            self.assertIsNone(pwcache.get())
+            self.assertEqual('off', os.environ['PATMAN_PWCACHE'])
+            cache.close()
+
+        self.assertTrue(cmdline.parse_args(['--no-cache', 'status'],
+                                           config_fname=False).no_cache)
+        self.assertFalse(cmdline.parse_args(['status'],
+                                            config_fname=False).no_cache)
 
     def test_get_put(self):
         """Responses are kept until they are too old for the caller"""
