@@ -840,6 +840,11 @@ const REVIEW_STATUS_TIP = {
 // created again when it is sent
 const hasDraft = (r) => r.status === 'draft' || r.status === 'edited';
 
+// The statuses of reviews which are waiting to be sent, and of those which
+// have no Gmail draft to send, for the filters on the list of reviews
+const TO_SEND = ['draft', 'edited'];
+const UNDRAFTED = ['new', 'deleted'];
+
 // Start a job and show it
 async function startJob(path, data, msg) {
   try {
@@ -895,7 +900,9 @@ async function viewReviewList() {
           ...filteredList('reviews', list.map((r) => ({
     text: `${r.name} ${r.desc || ''}`,
     groups: ['all', r.hidden ? 'hidden' : 'active',
-             ...(r.replies_waiting ? ['replies'] : [])],
+             ...(r.replies_waiting ? ['replies'] : []),
+             ...(TO_SEND.some((st) => r.statuses[st]) ? ['send'] : []),
+             ...(UNDRAFTED.some((st) => r.statuses[st]) ? ['undrafted'] : [])],
     card: h('a', { class: 'card', href: `#/reviews/${r.id}`,
                    title: 'Show the reviews of this series' },
       h('div', { class: 'row' },
@@ -920,6 +927,10 @@ async function viewReviewList() {
     [['active', 'Active', 'Reviews which you have not hidden'],
      ['replies', 'Needs reply', 'Reviews with replies waiting for your response, ' +
                                 'including hidden ones'],
+     ['send', 'To send', 'Reviews with a Gmail draft waiting to be sent, ' +
+                         'including hidden ones'],
+     ['undrafted', 'Not drafted', 'Reviews which are not sent and have no Gmail ' +
+                                  'draft, including hidden ones'],
      ['hidden', 'Hidden', 'Reviews which you have hidden, e.g. once you have ' +
                           'finished with them'],
      ['all', 'All', 'All your reviews']]));

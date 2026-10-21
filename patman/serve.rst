@@ -121,7 +121,11 @@ Reviewing from the page
 The Reviews tab shows the active reviews: tap 'hide' on a series once you have
 finished with it, or 'Hide' at the top of its reviews, to move it to the
 Hidden list. 'All' shows them all, and 'Needs reply' shows those with replies
-waiting, hidden or not. A hidden series becomes active again when a new
+waiting, hidden or not. 'To send' shows those with a Gmail draft waiting to be
+sent, including one which is out of date, and 'Not drafted' those with a
+review which is not sent and has no draft, e.g. because the review was run
+without drafts or its draft was deleted from Gmail; both include hidden
+series. A hidden series becomes active again when a new
 version of it is reviewed or someone replies to a review of it.
 
 On the Reviews tab, 'Review a series' takes a patchwork series ID, the URL of a

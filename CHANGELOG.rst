@@ -10,6 +10,9 @@ Unreleased
 
 Added
 ~~~~~
+- The Reviews tab on the ``patman serve`` page has 'To send' and 'Not
+  drafted' filters, listing the series with a Gmail draft waiting to be sent
+  and those with a review which has no draft.
 - The inbox on the ``patman serve`` page fetches the upstream when it is
   shown, if it has not done so for an hour, and 'Refresh' fetches it at once,
   so that it shows which series are applied without a sync. The top of the
