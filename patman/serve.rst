@@ -168,7 +168,10 @@ The server keeps what it reads for ten minutes, so going back to the Inbox tab,
 opening it on another device or starting the server again does not read it
 again; the top of the inbox says when it was read, and 'Refresh' reads it again
 at once, and fetches the upstream. Nothing more is read until you tap 'Load more' at the bottom, which
-reads the next 50; the button goes once patchwork has no more. Tapping a series
+reads the next 50; the button goes once patchwork has no more. Going back to
+the Inbox tab keeps the pages already loaded: only the first is read from
+patchwork again, if it is more than ten minutes old, and the others are shown
+as they were. Tapping a series
 uses what was read already. A patch read in the last hour, and its comments
 read in the last five minutes, are shown from patman's cache of patchwork (see
 :ref:`the cache <patchwork_cache>`); the page says when the patch was read,
