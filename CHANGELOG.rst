@@ -80,6 +80,9 @@ Changed
   pipx where pip cannot install into the system's Python.
 - Tapping the Inbox tab of the ``patman serve`` page shows the tab at once,
   saying that the inbox is loading while it is read from patchwork.
+- The inbox on the ``patman serve`` page fetches the upstream while it
+  reads patchwork, rather than afterwards, so it shows sooner when both are
+  needed.
 
 Fixed
 ~~~~~

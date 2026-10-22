@@ -1698,8 +1698,22 @@ class TestWebServer(unittest.TestCase, TestCommon):
             return ([pat['branch'] for pat in data['series'][0]['patches']],
                     data['upstream_fetched'])
 
-        # The first time, the upstream is fetched
-        self.assertEqual((['us/main', None], at(1000)), applied())
+        # The first time, the upstream is fetched, while patchwork is read
+        pwork = srv.pwork_for_testing
+        get_recent_series = pwork.get_recent_series
+        fetching = []
+
+        async def reading(*args, **kwargs):
+            for _ in range(100):
+                if 'us' in srv._fetches:
+                    break
+                await asyncio.sleep(.01)
+            fetching.append('us' in srv._fetches)
+            return await get_recent_series(*args, **kwargs)
+
+        with mock.patch.object(pwork, 'get_recent_series', reading):
+            self.assertEqual((['us/main', None], at(1000)), applied())
+        self.assertEqual([True], fetching)
 
         # Not again within the hour, so a new commit is not seen
         git('commit', '-q', '--allow-empty', '-m', 'video: Add a test',

@@ -815,13 +815,18 @@ class Server(jobs.JobRunner):
             max_age = None
         else:
             max_age = pwork.read_age(first) or 0
-        async with aiohttp.ClientSession() as client:
-            series_list = await pwork.get_recent_series(
-                client, proj[2], page, INBOX_PAGE, max_age=max_age)
-            # Learn which patches have changed state since the last check
-            await pwork.follow_events(client, proj[2])
+        # Fetch the upstream while reading patchwork, since neither needs the
+        # other
+        fetching = asyncio.ensure_future(self._fetch_upstream(ups))
+        try:
+            series_list = await self._read_inbox(pwork, proj[2], page,
+                                                 max_age)
+        except BaseException:
+            # The fetch carries on; this only stops waiting for it
+            fetching.cancel()
+            raise
         read = pwork.read_time(first)
-        commits = await self._upstream_commits(ups, series_list)
+        commits = await self._upstream_commits(series_list, ups, fetching)
         states = pwork.get_states([pat['id'] for ser in series_list
                                    for pat in ser.get('patches') or []])
         series = info.get_inbox(
@@ -836,28 +841,52 @@ class Server(jobs.JobRunner):
             'upstream_fetched': self._fetched_str(ups),
             'series': series})
 
-    async def _upstream_commits(self, ups, series_list):
+    @staticmethod
+    async def _read_inbox(pwork, project, page, max_age):
+        """Read a page of the inbox from patchwork, with the latest events
+
+        Args:
+            pwork (Patchwork): Patchwork for the upstream
+            project (str): Patchwork project's link name
+            page (int): Page to read, from 1
+            max_age (float or None): Oldest copy in seconds to use from the
+                cache, or None for any
+
+        Return:
+            list of dict: Series from patchwork
+        """
+        async with aiohttp.ClientSession() as client:
+            series_list = await pwork.get_recent_series(
+                client, project, page, INBOX_PAGE, max_age=max_age)
+            # Learn which patches have changed state since the last check
+            await pwork.follow_events(client, project)
+        return series_list
+
+    async def _upstream_commits(self, series_list, ups, fetching):
         """Get the commits upstream which may be patches in the inbox
 
         These are the commits on the upstream's main and next branches since
         the oldest series, so that the inbox can show which patches have
-        been applied. The upstream is fetched first if the inbox has not
-        done so for FETCH_MAX_AGE (see _fetch_upstream()).
+        been applied. They are read once the upstream is fetched, if the
+        inbox has not done so for FETCH_MAX_AGE (see _fetch_upstream()).
 
         Args:
-            ups (str): Upstream name, which is also the git remote
             series_list (list of dict): Series from patchwork
+            ups (str): Upstream name, which is also the git remote
+            fetching (asyncio.Future): Completes when the fetch is done, or
+                the inbox stops waiting for it
 
         Return:
             dict: Commits by subject (see info.get_upstream_commits())
         """
         dates = [ser['date'] for ser in series_list if ser.get('date')]
         if not dates:
+            fetching.cancel()
             return {}
         # Allow for the time zone, since patchwork gives the date in UTC
         since = (datetime.fromisoformat(min(dates)[:10]) -
                  timedelta(days=1)).strftime('%Y-%m-%d')
-        await self._fetch_upstream(ups)
+        await fetching
         refs = [apply.main_branch(ups, self.cser.topdir), f'{ups}/next']
         return await info.get_upstream_commits(self.cser.topdir, refs, since)
 
@@ -897,8 +926,9 @@ class Server(jobs.JobRunner):
 
         This keeps its branches current, so that the inbox can show which
         patches have been applied, without a sync. It sends nothing to
-        patchwork. The inbox waits for the fetch for up to FETCH_WAIT
-        seconds, then shows what it has while the fetch carries on.
+        patchwork. The inbox reads patchwork meanwhile, and waits for the
+        fetch for up to FETCH_WAIT seconds in all, then shows what it has
+        while the fetch carries on.
         'Refresh' sets 'started' to None, so that it fetches at once.
 
         Args:
