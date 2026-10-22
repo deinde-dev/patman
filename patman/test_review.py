@@ -1771,6 +1771,114 @@ class TestReview(CseriesTester):
             self.assertEqual('us/main', base(f'base-commit: {on_main}'))
             self.assertEqual('us/main', base('Based on master'))
 
+    def test_review_checkout(self):
+        """A series is checked out in the tree, to try it"""
+        def git(cwd, *args):
+            return subprocess.run(
+                ['git', '-c', 'user.name=T', '-c', 'user.email=t@x', *args],
+                cwd=cwd, check=True, capture_output=True,
+                text=True).stdout.strip()
+
+        # An upstream with a file, and a tree which uses it
+        work = os.path.join(self.tmpdir, 'work')
+        os.mkdir(work)
+        git(work, 'init', '-q', '-b', 'master')
+        tools.write_file(os.path.join(work, 'file'), b'one\n')
+        git(work, 'add', 'file')
+        git(work, 'commit', '-q', '-m', 'first')
+        bare = os.path.join(self.tmpdir, 'up.git')
+        git(self.tmpdir, 'clone', '-q', '--bare', work, bare)
+        git(work, 'remote', 'add', 'us', bare)
+        git(work, 'fetch', '-q', 'us')
+
+        # Patches which change the file, as patchwork's mbox gives them
+        def mbox(text, subject):
+            other = os.path.join(self.tmpdir, 'other')
+            if not os.path.exists(other):
+                git(self.tmpdir, 'clone', '-q', bare, other)
+            git(other, 'checkout', '-q', '-B', 'tmp', 'origin/master')
+            tools.write_file(os.path.join(other, 'file'), text)
+            git(other, 'commit', '-q', '-a', '-m', subject)
+            return git(other, 'format-patch', '--stdout', '-1')
+
+        mboxes = {'500': mbox(b'two\n', 'file: Say two'),
+                  '502': mbox(b'three\n', 'file: Say three')}
+
+        async def fetch_mbox(_pwork, link, _data):
+            path = os.path.join(self.tmpdir, f'{link}.mbox')
+            tools.write_file(path, mboxes[link], binary=False)
+            return path
+
+        pwork = types.SimpleNamespace(upstream='us')
+        cser = mock.Mock()
+        args = Namespace(base_branch=None, upstream=None)
+        fetch = mock.Mock(return_value=({}, 'name', 1, 1))
+
+        def checkout(link, base='us/master'):
+            with mock.patch.object(review.checkout.gitutil, 'get_top_level',
+                                   return_value=work), \
+                    mock.patch.object(review.lookup, 'fetch_series', fetch), \
+                    mock.patch.object(review.apply, 'fetch_mbox', fetch_mbox), \
+                    mock.patch.object(review.apply, 'get_upstream_branch',
+                                      return_value=base), \
+                    mock.patch.object(review.apply, 'series_base',
+                                      return_value=None), \
+                    mock.patch.dict(os.environ, {
+                        'GIT_COMMITTER_NAME': 'T',
+                        'GIT_COMMITTER_EMAIL': 't@x'}), \
+                    terminal.capture() as (out, _):
+                review.checkout.do_checkout(args, pwork, cser, link)
+            return out.getvalue()
+
+        # A tree with changes is left alone
+        tools.write_file(os.path.join(work, 'file'), b'changed\n')
+        with self.assertRaises(ValueError) as exc:
+            checkout('500')
+        self.assertIn('uncommitted changes', str(exc.exception))
+        git(work, 'checkout', '-q', 'file')
+
+        # A series with no branch is applied to one
+        self.assertIn("Checked out 'us-500-review', with 1 patch on "
+                      'us/master', checkout('500'))
+        self.assertEqual('us-500-review',
+                         git(work, 'branch', '--show-current'))
+        self.assertEqual('file: Say two', git(work, 'log', '-1', '--format=%s'))
+
+        # Once it has a branch, that is checked out, without patchwork
+        git(work, 'checkout', '-q', 'master')
+        fetch.reset_mock()
+        self.assertIn('from the review', checkout('500'))
+        self.assertEqual('us-500-review',
+                         git(work, 'branch', '--show-current'))
+        fetch.assert_not_called()
+
+        # So is a branch from the review database
+        git(work, 'branch', 'pw-501-review', 'master')
+        checkout('501')
+        self.assertEqual('pw-501-review',
+                         git(work, 'branch', '--show-current'))
+
+        # A series which does not apply leaves the tree as it was
+        tools.write_file(os.path.join(work, 'file'), b'local\n')
+        git(work, 'commit', '-q', '-a', '-m', 'local')
+        with self.assertRaises(ValueError) as exc:
+            checkout('502', 'pw-501-review')
+        self.assertIn('does not apply to pw-501-review', str(exc.exception))
+        self.assertEqual('pw-501-review',
+                         git(work, 'branch', '--show-current'))
+        self.assertEqual('', git(work, 'branch', '--list', 'us-502-review'))
+        self.assertEqual('', git(work, 'status', '--porcelain',
+                                 '--untracked-files=no'))
+
+    def test_review_checkout_cmd(self):
+        """'patman review --checkout' checks out the series"""
+        self.get_cser()
+        pwork = self._review_pwork()
+        with mock.patch.object(review.checkout, 'do_checkout',
+                               return_value=0) as do_checkout:
+            self.run_review('-s', '500', '--checkout', pwork=pwork)
+        self.assertEqual('500', do_checkout.call_args.args[3])
+
     def test_review_reply_recent(self):
         """Only recent replies get a suggested response"""
         now = datetime.now().astimezone()

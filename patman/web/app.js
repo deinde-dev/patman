@@ -1174,6 +1174,8 @@ async function viewReview(id, wantVer) {
     refreshJobCount();
     location.hash = `#/jobs/${job.id}`;
   };
+  const [tryBtn, tryBox] = sv.link ? tryButton(sv.link, ser.upstream, sv.review_branch)
+                                   : [null, null];
   const [againBtn, againBox] = reviewButton(
     'Review again', 'btn light small',
     'Have the agent review this version of the series again, replacing its reviews',
@@ -1197,6 +1199,7 @@ async function viewReview(id, wantVer) {
                                   'Send the Gmail drafts of the reviews, first drafting again ' +
                                   'any which are out of date'),
       againBtn,
+      tryBtn,
       h('button', { class: 'btn light small', onclick: () => setHidden(id, !ser.hidden),
                     title: ser.hidden ? 'Show this series in the list of active reviews'
                                       : 'Hide this series from the list of active reviews, ' +
@@ -1216,7 +1219,7 @@ async function viewReview(id, wantVer) {
         h('span', {}, `v${sv.version}`),
         ser.upstream && h('span', {}, ser.upstream),
         sv.link && h('span', {}, `series ${sv.link}`)),
-      actions, sv.link && againBox),
+      actions, sv.link && againBox, tryBox),
     reviseAll,
     tabs,
     sv.notes && h('div', { class: 'section' }, 'Notes'),
@@ -1234,6 +1237,51 @@ async function viewReview(id, wantVer) {
 // give the agent, e.g. 'this is an RFC, so ignore style'. 'start(context)'
 // starts it, throwing an error to show if it cannot. Returns the button and
 // the box which holds the form, to go below the row of buttons
+// Copy some text to the clipboard. The page is often served over plain
+// http, where the browser has no clipboard API, so fall back to selecting it
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const area = h('textarea', { style: 'position:fixed;opacity:0' });
+  area.value = text;
+  document.body.append(area);
+  area.select();
+  const ok = document.execCommand('copy');
+  area.remove();
+  if (!ok) throw new Error('Cannot copy; select the command instead');
+}
+
+// A button which shows the command to check out a series in the tree, to
+// try it, with a button to copy it. 'branch' is its review branch, if any
+function tryButton(link, ups, branch) {
+  const box = h('div', {});
+  const cmd = `patman review -U ${ups} -s ${link} --checkout`;
+  const btn = h('button', { class: 'btn light small',
+                            title: 'Show the command which checks out this series in ' +
+                                   'your tree, to try it', onclick: () => {
+    if (box.firstChild) { fill(box); return; }
+    const msg = h('span', {});
+    const copy = h('button', { class: 'btn small', onclick: async () => {
+      try {
+        await copyText(cmd);
+        msg.textContent = 'Copied';
+      } catch (err) {
+        msg.textContent = err.message;
+      }
+    } }, 'Copy');
+    fill(box, h('div', { class: 'form' },
+      h('div', { class: 'meta' }, branch
+        ? `This checks out ${branch}, which has the series from its review:`
+        : `This applies the series with git am to a new branch, ${ups}-${link}-review, ` +
+          'and checks it out:'),
+      h('div', { class: 'trycmd' }, cmd),
+      h('div', { class: 'actions' }, copy, msg)));
+  } }, 'Try it');
+  return [btn, box];
+}
+
 function reviewButton(label, cls, tip, start) {
   const box = h('div', {});
   const btn = h('button', { class: cls, title: tip, onclick: () => {
@@ -1767,6 +1815,7 @@ function inboxDetails(s, ups, jobBox) {
       trackInboxJob(jobBox, job.id);
       reviewBtn.replaceWith(busyLink(job.id));
     });
+  const [tryBtn, tryBox] = tryButton(s.id, ups, s.review_branch);
   return h('div', { class: 'comments' },
     h('div', { class: 'list' }, cover, s.patches.map((p, i) => h('div', { class: 'row' },
       h('span', { class: 'seq' }, i + 1),
@@ -1780,11 +1829,13 @@ function inboxDetails(s, ups, jobBox) {
             p.state)))),
     h('div', { class: 'actions' },
       jobId && !inboxDone.has(jobId) ? busyLink(jobId) : reviewBtn,
+      tryBtn,
       s.web_url && h('a', { class: 'btn light small', href: s.web_url,
                             target: '_blank', rel: 'noopener',
                             title: 'Open the series on patchwork, in a new tab' },
         'patchwork ↗')),
-    reviewBox, s.earlier && s.earlier.parts.length > 0 && earlierDetails(s.earlier, ups));
+    reviewBox, tryBox,
+    s.earlier && s.earlier.parts.length > 0 && earlierDetails(s.earlier, ups));
 }
 
 // Show your review of an earlier version of a series in the inbox, which is

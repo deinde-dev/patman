@@ -32,6 +32,7 @@ from patman import database
 from patman import patchstream
 from patman import workflow
 from patman.review import apply
+from patman.review import checkout
 from patman.review import common
 from patman.review import drafts
 from patman.review import emails
@@ -931,6 +932,9 @@ def do_review(args, pwork, cser):
     elif not link:
         link = lookup.search_series(
             pwork, args.title, getattr(args, 'version', None))
+
+    if getattr(args, 'checkout', False):
+        return checkout.do_checkout(args, pwork, cser, link)
 
     if getattr(args, 'respond_comment', None):
         return replies.respond_to_comment(args, pwork, cser, link)

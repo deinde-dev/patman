@@ -756,6 +756,11 @@ def add_review_subparser(subparsers):
         '--apply-only', action='store_true',
         help='Only download and apply patches, skip the review')
     review.add_argument(
+        '--checkout', action='store_true',
+        help='Check out the series in this tree, to try it: its review '
+             'branch if it has one, else apply it with git am to a new '
+             'branch (needs a clean tree)')
+    review.add_argument(
         '--coverity', action='store_true',
         help='Run Coverity on the base and the series, and feed the new '
              'defects into the review (needs the cov-* tools on PATH)')

@@ -166,6 +166,13 @@ def run(shots):
     page.get_by_role('button', name='To review', exact=True).click()
 
     card.locator('.name').click()
+
+    # The command to try the series in your tree
+    card.get_by_role('button', name='Try it', exact=True).click()
+    card.locator('.trycmd').wait_for()
+    shots.crop(card, 'serve-try')
+    card.get_by_role('button', name='Try it', exact=True).click()
+
     card.get_by_role('button', name='Review', exact=True).click()
     card.locator('textarea').fill(
         'Focus on the driver; the docs patch is minor')

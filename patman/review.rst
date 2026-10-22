@@ -164,6 +164,33 @@ To see the aliases ``--model`` accepts::
 The aliases (``opus``, ``sonnet``, ``haiku``) each select the latest
 model in their tier; a full model id works too.
 
+.. _review_checkout:
+
+Trying a series
+~~~~~~~~~~~~~~~
+
+To try a series in your tree, e.g. to build it and run it on a board, use
+``--checkout``::
+
+    patman review -U us -s 528812 --checkout
+
+A series which you have reviewed already has a branch from the review,
+named after its patchwork ID, e.g. ``us-528812-review``, so that branch is
+checked out. Otherwise the series is applied with ``git am`` to a new branch
+of that name, from the base which a review would use (see below), and
+checked out; a later review uses the same name. The tree must have no
+uncommitted changes.
+
+Nothing is recorded in the database and no agent is used, so this is quick,
+but a series which does not apply cleanly is left alone and the tree is put
+back as it was. Use ``-b`` to choose another base, or ``--apply-only``, which
+has the agent deal with any conflicts. ``-S``, ``-p`` and ``-P`` find the
+series as they do for a review.
+
+On the ``patman serve`` page, 'Try it' on a series in the inbox, or on a
+reviewed series, shows this command with a button to copy it, and says
+which branch it checks out.
+
 Choosing the base branch
 ~~~~~~~~~~~~~~~~~~~~~~~~
 

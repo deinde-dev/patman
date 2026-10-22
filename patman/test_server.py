@@ -294,6 +294,18 @@ class TestWebServer(unittest.TestCase, TestCommon):
              'status': 'draft', 'msgid': None, 'replies': [], 'job': None},
             latest['reviews'][1])
 
+        # Outside a git repo there are no review branches; once there is one,
+        # the page can say that 'patman review --checkout' uses it
+        self.assertIsNone(latest['review_branch'])
+        for args in (['init', '-q'],
+                     ['commit', '-q', '--allow-empty', '-m', 'first'],
+                     ['branch', 'pw-200-review']):
+            subprocess.run(['git', '-c', 'user.name=T', '-c', 'user.email=t@e',
+                            *args], cwd=self.tmpdir, check=True)
+        _, data = self.call(srv, 'GET', f'/api/reviews/{ser_id}')
+        self.assertEqual(['pw-200-review', None],
+                         [ver['review_branch'] for ver in data['versions']])
+
         # A review with its headers gives the message it replies to, which
         # locates the patch on the list
         db.review_set_envelope(rid, {'in_reply_to': '<p1@x>'})
@@ -1733,6 +1745,12 @@ class TestWebServer(unittest.TestCase, TestCommon):
         with mock.patch.object(pwork, 'get_recent_series', reading):
             self.assertEqual((['us/main', None], at(1000)), applied())
         self.assertEqual([True], fetching)
+
+        # A series with a review branch says so, so that the page can say
+        # what 'patman review --checkout' does
+        git('branch', 'us-300-review', 'us/main')
+        _, data = self.call(srv, 'GET', '/api/inbox')
+        self.assertEqual('us-300-review', data['series'][0]['review_branch'])
 
         # Not again within the hour, so a new commit is not seen
         git('commit', '-q', '--allow-empty', '-m', 'video: Add a test',
