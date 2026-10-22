@@ -1474,15 +1474,18 @@ class TestWebServer(unittest.TestCase, TestCommon):
 
     def test_inbox(self):
         """The inbox lists recent series, marking those already reviewed"""
-        rev_id, svids = self.add_series('rev', 'video: Add a driver',
-                                        {2: [('a', 'new', 6, 0)]},
-                                        source='review')
+        rev_id, svids = self.add_series(
+            'rev', 'video: Add a driver',
+            {2: [('a', 'new', 6, 0), ('b', 'new', 8, 0)]}, source='review')
         self.add_series('mine', 'My series', {1: [('x', 'new', 7, 0)]})
         db = self.cser.db
 
-        # Someone has replied to the review of v2
+        # Someone has replied to the review of v2's first patch; the cover
+        # letter is approved but not drafted, and the second patch has no
+        # review
         rid = db.review_add(svids[2], 1, 'Please fix', False,
                             '2026-10-01 10:00:00')
+        db.review_add(svids[2], 0, 'Looks good', True, '2026-10-01 09:00:00')
         db.review_set_sent(rid, 'Please fix', 'm1', 't1')
         db.reply_add(rid, 'm2', '<a2@x>', '<r1@me>', 'Fred <f@x>', 'me@x', '',
                      'Re: [PATCH] a', 'today', 'Why?', '2026-10-02 10:00:00')
@@ -1515,9 +1518,16 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual([300, 200, 100, 400], list(items))
 
         # A new version of a reviewed series is linked to the review, with
-        # the version reviewed and the replies waiting
-        self.assertEqual((None, {'id': rev_id, 'version': 2, 'replies': 1},
-                          False),
+        # the version reviewed, its parts and the replies waiting
+        part = {'approved': False, 'status': None, 'replies': 0}
+        self.assertEqual((None, {
+            'id': rev_id, 'version': 2, 'link': '200',
+            'date': '2026-10-01 10:00:00', 'replies': 1, 'parts': [
+                {**part, 'seq': 0, 'name': 'Cover letter', 'mail_id': None,
+                 'approved': True, 'status': 'new'},
+                {**part, 'seq': 1, 'name': 'a', 'mail_id': 6, 'status': 'sent',
+                 'replies': 1},
+                {**part, 'seq': 2, 'name': 'b', 'mail_id': 8}]}, False),
                          (items[300]['reviewed'], items[300]['earlier'],
                           items[300]['mine']))
         self.assertEqual((rev_id, None), (items[200]['reviewed'],

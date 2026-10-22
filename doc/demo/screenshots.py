@@ -155,6 +155,14 @@ def run(shots):
     applied.locator('.chip', has_text='us/next').first.wait_for()
     shots.crop(applied, 'serve-inbox-applied')
     applied.locator('.name').click()
+
+    # A new version, opened to show the review of the earlier one
+    page.get_by_role('button', name='New versions', exact=True).click()
+    newver = page.locator('.card.patch', has_text='Example SoC Ethernet')
+    newver.locator('.name').click()
+    newver.locator('.section', has_text='Earlier version').wait_for()
+    shots.crop(newver, 'serve-inbox-earlier')
+    newver.locator('.name').click()
     page.get_by_role('button', name='To review', exact=True).click()
 
     card.locator('.name').click()

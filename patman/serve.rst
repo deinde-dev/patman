@@ -144,7 +144,10 @@ Series which you have reviewed, or which are your own, are marked, as are new
 versions of series you reviewed earlier, so it is easy to see what needs a
 review. A new version says which version you reviewed, e.g. 'v2 reviewed', and
 how many replies to that review are waiting for your response; tap either to
-see the review. Tap a series to see its patches and start a review.
+see the review. Tap a series to see its patches and start a review. A new
+version also shows your review of the earlier one below its patches: each
+part with the status of your review and any replies waiting, taken from the
+database, so that the earlier version need not be among the pages loaded.
 
 A series whose patches are applied upstream is marked 'applied', or e.g.
 'applied 2/5' if only some are, and each such patch shows the branch which has

@@ -10,6 +10,10 @@ Unreleased
 
 Added
 ~~~~~
+- Tapping a new version of a series in the inbox on the ``patman serve``
+  page shows your review of the earlier version below its patches, with the
+  status of each part and the replies waiting, even when the earlier version
+  is too old to be among the pages loaded.
 - The Reviews tab on the ``patman serve`` page has 'To send' and 'Not
   drafted' filters, listing the series with a Gmail draft waiting to be sent
   and those with a review which has no draft.
