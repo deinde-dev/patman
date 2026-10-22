@@ -204,6 +204,9 @@ a.card:active { background: var(--code-bg); }
 .inline-mail:not(:empty) { margin-top: 10px; border-top: 1px solid var(--border);
                            padding-top: 4px; }
 .notes { background: var(--code-bg); border-radius: 8px; padding: 10px 12px; }
+.trycmd { font: 13px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+          background: var(--code-bg); border-radius: 8px; padding: 8px 10px;
+          overflow-wrap: anywhere; user-select: all; margin: 6px 0; }
 
 .empty, .error { text-align: center; color: var(--muted); padding: 40px 16px; }
 .error { color: var(--st-rejected); }

@@ -13,6 +13,7 @@ modules are:
   common: the review context and helpers which all the modules use
   lookup: finding and reading the series on patchwork
   apply: applying the series to a local branch
+  checkout: checking out a series in the tree, to try it
   prompts: the prompts given to the agents
   emails: parsing the agents' reviews and formatting them as emails
   drafts: Gmail drafts of the reviews, and syncing what was sent
@@ -26,6 +27,7 @@ example, review.drafts.create_drafts() after 'from patman import review'
 """
 
 from patman.review import apply
+from patman.review import checkout
 from patman.review import common
 from patman.review import core
 from patman.review import drafts

@@ -104,7 +104,15 @@ Starting the review
 -------------------
 
 Tap a series to see its cover letter and patches; tap one of them to read
-it. 'Review' opens a box for anything the agent should know, such as what to
+it. To try the series first, 'Try it' shows the command which checks it out
+in your tree, ready to copy (see :ref:`review_checkout`):
+
+.. image:: images/serve-try.png
+   :width: 644px
+   :alt: The series opened in the inbox, with the command which checks it
+         out and a button to copy it
+
+'Review' opens a box for anything the agent should know, such as what to
 look at closely, or that the series is an RFC. This is passed to ``patman
 review`` with ``-c``, and can be left empty:
 

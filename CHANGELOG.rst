@@ -10,6 +10,10 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman review --checkout`` checks out a series in the tree, to try it:
+  its branch from the review if it has one, or else a new branch with the
+  series applied by ``git am``. On the ``patman serve`` page, 'Try it' on a
+  series in the inbox or on the reviews shows the command, to copy.
 - Tapping a new version of a series in the inbox on the ``patman serve``
   page shows your review of the earlier version below its patches, with the
   status of each part and the replies waiting, even when the earlier version

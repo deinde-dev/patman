@@ -31,6 +31,7 @@ from patman import times
 from patman import traffic
 from patman.patchwork import Patchwork
 from patman.review import apply
+from patman.review import checkout
 from patman.server import info
 from patman.server import jobs
 from patman.server import params
@@ -580,6 +581,8 @@ class Server(jobs.JobRunner):
         # a series reviewed that way is on its patchwork server
         data['upstream'] = (data['upstream'] or
                             self.cser.db.upstream_get_default())
+        await self._set_review_branches(data['versions'], data['upstream'],
+                                        'link')
         await self._find_covers(data)
         data['patchwork_url'] = self.get_pw_url(data['upstream'])
         proj = self.cser.project_get(data['upstream'])
@@ -834,6 +837,7 @@ class Server(jobs.JobRunner):
             info.get_patch_status(series_list, commits, states))
         for item in series:
             item['job'] = self._reviewing(item['id'])
+        await self._set_review_branches(series, ups, 'id')
         return web.json_response({
             'ups': ups, 'page': page, 'per_page': INBOX_PAGE,
             'fetched': (times.to_str(datetime.fromtimestamp(read)) if read
@@ -908,6 +912,25 @@ class Server(jobs.JobRunner):
         out, err = await proc.communicate()
         return (proc.returncode, err.decode('utf-8', 'replace').strip(),
                 out.decode('utf-8', 'replace'))
+
+    async def _set_review_branches(self, items, ups, key):
+        """Note the review branch of each series, from the server's repo
+
+        This lets the page say which branch 'patman review --checkout'
+        checks out, or that there is none yet
+
+        Args:
+            items (list of dict): Series or versions, each of which gains a
+                'review_branch', or None if it has none
+            ups (str or None): Upstream name
+            key (str): Key in each item which holds the patchwork link
+        """
+        code, _, out = await self._git(
+            'for-each-ref', '--format=%(refname:short)', 'refs/heads/*-review')
+        branches = set() if code else set(out.split())
+        for item in items:
+            item['review_branch'] = checkout.find_branch_in(item[key], ups,
+                                                            branches)
 
     async def _run_fetch(self, ups):
         """Fetch an upstream, noting when it is done
