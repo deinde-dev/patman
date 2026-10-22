@@ -1851,9 +1851,15 @@ function inboxCard(s, ups, pw) {
       h('span', {}, npatches(s.total || s.patches.length)),
       s.reviewed && h('a', { class: 'chip st-accepted', href: `#/reviews/${s.reviewed}`,
                              title: 'Show your reviews of this series' }, 'reviewed'),
-      s.earlier && h('a', { class: 'chip st-under-review', href: `#/reviews/${s.earlier}`,
+      s.earlier && h('a', { class: 'chip st-under-review', href: `#/reviews/${s.earlier.id}`,
                             title: 'Show your reviews of an earlier version' },
-                     'earlier version reviewed'),
+                     s.earlier.version ? `v${s.earlier.version} reviewed`
+                                       : 'earlier version reviewed'),
+      s.earlier && s.earlier.replies > 0 && h('a', {
+        class: 'chip st-changes-requested', href: `#/reviews/${s.earlier.id}`,
+        title: 'Show the replies to your reviews of the earlier version, which ' +
+               'are waiting for your response' },
+        `${s.earlier.replies} ${s.earlier.replies === 1 ? 'reply' : 'replies'}`),
       s.mine && h('span', { class: 'chip st-other' }, 'yours'),
       appliedChip(s),
       !s.received_all && h('span', { class: 'chip st-changes-requested' }, 'incomplete'),

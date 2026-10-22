@@ -546,6 +546,29 @@ def get_patch_status(series_list, commits, states):
     return out
 
 
+def _reviews_by_title(rcser, reviews):
+    """Get the reviewed series by title, to find new versions of them
+
+    Args:
+        rcser (Cseries): Open cseries instance with the reviews
+        reviews (list of Series): Reviewed series
+
+    Return:
+        dict: key (str): Normalised title (see _norm_title())
+            value (dict): The series 'id', the latest 'version' reviewed and
+                the number of 'replies' waiting for a response
+    """
+    latest = _latest_versions(rcser)
+    waiting = rcser.db.reply_count_waiting()
+    by_title = {}
+    for ser in reviews:
+        svr = latest.get(ser.idnum)
+        by_title.setdefault(_norm_title(ser.desc), {
+            'id': ser.idnum, 'version': svr.version if svr else None,
+            'replies': waiting.get(ser.idnum, 0)})
+    return by_title
+
+
 def get_inbox(cser, rcser, series_list, status=None):
     """Get information about recent series on patchwork, for review
 
@@ -559,15 +582,15 @@ def get_inbox(cser, rcser, series_list, status=None):
     Return:
         list of dict: One item for each series. Each of its 'patches' has
             its 'id' and 'name', with the 'commit', 'branch' and 'state' from
-            'status', or None
+            'status', or None. 'earlier' is None, or the review of an earlier
+            version, with its series 'id', the 'version' reviewed and the
+            number of 'replies' waiting for a response
     """
     status = status or {}
     reviews = rcser.db.series_get_dict(include_archived=True,
                                        reviews_only=True).values()
     review_ids = {ser.idnum for ser in reviews}
-    by_title = {}
-    for ser in reviews:
-        by_title.setdefault(_norm_title(ser.desc), ser.idnum)
+    by_title = _reviews_by_title(rcser, reviews)
     out = []
     for data in series_list:
         link = str(data['id'])

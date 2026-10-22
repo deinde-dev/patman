@@ -75,6 +75,10 @@ Added
 
 Changed
 ~~~~~~~
+- A new version of a series in the inbox on the ``patman serve`` page says
+  which version you reviewed, e.g. 'v2 reviewed', rather than 'earlier
+  version reviewed', and shows the replies to that review which are waiting
+  for your response.
 - The installation instructions say how to install the latest code from
   GitHub, to try changes before they are released, and how to install with
   pipx where pip cannot install into the system's Python.
