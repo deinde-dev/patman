@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 
+from patman import database
 from patman.server.params import BadRequest
 from patman.workflow import Wtype
 
@@ -555,18 +556,70 @@ def _reviews_by_title(rcser, reviews):
 
     Return:
         dict: key (str): Normalised title (see _norm_title())
-            value (dict): The series 'id', the latest 'version' reviewed and
-                the number of 'replies' waiting for a response
+            value (tuple):
+                int: Series ID
+                SerVer or None: Latest version reviewed
+                int: Number of replies waiting for a response
     """
     latest = _latest_versions(rcser)
     waiting = rcser.db.reply_count_waiting()
     by_title = {}
     for ser in reviews:
-        svr = latest.get(ser.idnum)
-        by_title.setdefault(_norm_title(ser.desc), {
-            'id': ser.idnum, 'version': svr.version if svr else None,
-            'replies': waiting.get(ser.idnum, 0)})
+        by_title.setdefault(_norm_title(ser.desc), (
+            ser.idnum, latest.get(ser.idnum), waiting.get(ser.idnum, 0)))
     return by_title
+
+
+def _earlier_info(rcser, found):
+    """Get your review of an earlier version of a series in the inbox
+
+    This comes from the database, so that the inbox can show the earlier
+    version without reading it from patchwork
+
+    Args:
+        rcser (Cseries): Open cseries instance with the reviews
+        found (tuple or None): Reviewed series, as from _reviews_by_title()
+
+    Return:
+        dict or None: None if not found, else the series 'id', the 'version'
+            reviewed, its patchwork 'link', the 'date' of the latest review,
+            the number of 'replies' waiting for a response and its 'parts'.
+            Each part has its 'seq' (0 for the cover letter), 'name', the
+            patchwork 'mail_id' of the patch or cover letter, the 'status'
+            of your review of it (None if there is none), whether it is
+            'approved' and the number of 'replies' waiting
+    """
+    if not found:
+        return None
+    idnum, svr, replies = found
+    out = {'id': idnum, 'version': svr.version if svr else None,
+           'link': None, 'date': None, 'replies': replies, 'parts': []}
+    if not svr:
+        return out
+    reviews = {rev.seq: rev for rev in
+               rcser.db.review_get_for_version(svr.idnum)}
+    waiting = Counter(rp.seq for rp in rcser.db.reply_get_comments(svr.idnum)
+                      if rp.status in database.REPLY_WAITING)
+    for rev in reviews.values():
+        waiting[rev.seq] += sum(
+            rp.status in database.REPLY_WAITING
+            for rp in rcser.db.reply_get_for_review(rev.idnum))
+    parts = {pcm.seq + 1: (pcm.subject, pcm.patch_id)
+             for pcm in rcser.db.pcommit_get_list(svr.idnum)}
+    if svr.cover_id or 0 in reviews:
+        parts[0] = ('Cover letter', svr.cover_id)
+    for seq in sorted(set(parts) | set(reviews)):
+        name, mail_id = parts.get(seq, (f'Patch {seq}', None))
+        rev = reviews.get(seq)
+        out['parts'].append({
+            'seq': seq, 'name': name, 'mail_id': mail_id,
+            'status': (rev.status or 'new') if rev else None,
+            'approved': bool(rev and rev.approved),
+            'replies': waiting[seq]})
+    out['link'] = svr.link
+    out['date'] = max((rev.timestamp for rev in reviews.values()
+                       if rev.timestamp), default=None)
+    return out
 
 
 def get_inbox(cser, rcser, series_list, status=None):
@@ -582,9 +635,8 @@ def get_inbox(cser, rcser, series_list, status=None):
     Return:
         list of dict: One item for each series. Each of its 'patches' has
             its 'id' and 'name', with the 'commit', 'branch' and 'state' from
-            'status', or None. 'earlier' is None, or the review of an earlier
-            version, with its series 'id', the 'version' reviewed and the
-            number of 'replies' waiting for a response
+            'status', or None. 'earlier' is None, or your review of an
+            earlier version (see _earlier_info())
     """
     status = status or {}
     reviews = rcser.db.series_get_dict(include_archived=True,
@@ -612,8 +664,8 @@ def get_inbox(cser, rcser, series_list, status=None):
                          **status.get(pat['id'], UNKNOWN_STATUS)}
                         for pat in data.get('patches') or []],
             'reviewed': reviewed,
-            'earlier': (None if reviewed else
-                        by_title.get(_norm_title(data.get('name')))),
+            'earlier': (None if reviewed else _earlier_info(
+                rcser, by_title.get(_norm_title(data.get('name'))))),
             'mine': bool(own) and (rcser is not cser or
                                    own[0] not in review_ids),
         })

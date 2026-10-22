@@ -1784,7 +1784,35 @@ function inboxDetails(s, ups, jobBox) {
                             target: '_blank', rel: 'noopener',
                             title: 'Open the series on patchwork, in a new tab' },
         'patchwork ↗')),
-    reviewBox);
+    reviewBox, s.earlier && s.earlier.parts.length > 0 && earlierDetails(s.earlier, ups));
+}
+
+// Show your review of an earlier version of a series in the inbox, which is
+// often too old to be among the pages loaded
+function earlierDetails(e, ups) {
+  const replies = (n) => n > 0 && h('a', {
+    class: 'chip st-changes-requested', href: `#/reviews/${e.id}`,
+    title: 'Show the replies, which are waiting for your response' },
+    `${n} ${n === 1 ? 'reply' : 'replies'}`);
+  return h('div', {},
+    h('div', { class: 'section' },
+      `Earlier version: v${e.version}` +
+      (e.date ? `, reviewed ${ago(parseTime(e.date))}` : '')),
+    h('div', { class: 'list' }, e.parts.map((p) => h('div', { class: 'row' },
+      h('span', { class: 'seq' }, p.seq),
+      h('div', { class: 'grow' },
+        p.mail_id ? h('a', { href: mailHref(p.seq ? 'patch' : 'cover', p.mail_id, ups),
+                             title: 'Read it and its comments' }, p.name)
+          : p.name),
+      p.approved && h('span', { class: 'chip st-accepted',
+                                title: 'Your review approves it' }, 'approved'),
+      p.status && h('span', { class: REVIEW_STATUS_CLASS[p.status],
+                              title: REVIEW_STATUS_TIP[p.status] },
+                    REVIEW_STATUS[p.status] || p.status),
+      replies(p.replies)))),
+    h('div', { class: 'actions' },
+      h('a', { class: 'btn light small', href: `#/reviews/${e.id}`,
+               title: 'Show your reviews of the earlier version' }, 'Your reviews')));
 }
 
 // Say how much of each series in the inbox is applied, either upstream or
