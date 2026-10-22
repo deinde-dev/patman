@@ -88,6 +88,18 @@ from the patches it reads and from the project's events, so a patch which has
 not changed since patman began following them shows no state (see
 :doc:`the Caching chapter </caching>`).
 
+A new version says which version you reviewed, such as 'v3 reviewed' on the
+Ethernet driver, and how many replies to that review are waiting for you. The
+earlier version is often too old to be among the pages loaded, so tapping the
+new one shows your review of the earlier one below its patches: each part,
+what became of your review of it, and any replies waiting. This comes from
+patman's database, so it reads nothing from patchwork:
+
+.. image:: images/serve-inbox-earlier.png
+   :width: 644px
+   :alt: The Ethernet driver v4 opened, with the review of v3 below its
+         patches, showing one reply waiting
+
 Starting the review
 -------------------
 
