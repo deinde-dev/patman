@@ -1474,11 +1474,18 @@ class TestWebServer(unittest.TestCase, TestCommon):
 
     def test_inbox(self):
         """The inbox lists recent series, marking those already reviewed"""
-        rev_id, _ = self.add_series('rev', 'video: Add a driver',
-                                    {2: [('a', 'new', 6, 0)]},
-                                    source='review')
+        rev_id, svids = self.add_series('rev', 'video: Add a driver',
+                                        {2: [('a', 'new', 6, 0)]},
+                                        source='review')
         self.add_series('mine', 'My series', {1: [('x', 'new', 7, 0)]})
         db = self.cser.db
+
+        # Someone has replied to the review of v2
+        rid = db.review_add(svids[2], 1, 'Please fix', False,
+                            '2026-10-01 10:00:00')
+        db.review_set_sent(rid, 'Please fix', 'm1', 't1')
+        db.reply_add(rid, 'm2', '<a2@x>', '<r1@me>', 'Fred <f@x>', 'me@x', '',
+                     'Re: [PATCH] a', 'today', 'Why?', '2026-10-02 10:00:00')
         db.upstream_add('us', 'https://us', 'https://pw.us')
         db.upstream_set_default('us')
         db.patchwork_update('U-Boot', 6, 'uboot', 'us')
@@ -1507,8 +1514,10 @@ class TestWebServer(unittest.TestCase, TestCommon):
         items = {item['id']: item for item in data['series']}
         self.assertEqual([300, 200, 100, 400], list(items))
 
-        # A new version of a reviewed series is linked to the review
-        self.assertEqual((None, rev_id, False),
+        # A new version of a reviewed series is linked to the review, with
+        # the version reviewed and the replies waiting
+        self.assertEqual((None, {'id': rev_id, 'version': 2, 'replies': 1},
+                          False),
                          (items[300]['reviewed'], items[300]['earlier'],
                           items[300]['mine']))
         self.assertEqual((rev_id, None), (items[200]['reviewed'],
