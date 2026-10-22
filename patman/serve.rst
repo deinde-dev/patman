@@ -151,9 +151,10 @@ it. patman finds these in the upstream's main and next branches, e.g.
 states are often not updated when a patch is applied. This uses the git repo
 which the server runs in, so it sends nothing to patchwork. The inbox fetches
 the upstream when it is shown, if it has not done so for an hour, and the top
-of the inbox says when it last did; 'Refresh' fetches it at once. The inbox
-waits up to 20 seconds for the fetch, then shows what it has while the fetch
-carries on. An older version of a series whose patches came in
+of the inbox says when it last did; 'Refresh' fetches it at once. The fetch
+runs while the inbox is read from patchwork, and the inbox waits up to 20
+seconds in all for it, then shows what it has while the fetch carries on. An
+older version of a series whose patches came in
 a newer version is marked 'later version applied' instead.
 
 A patch which is accepted on patchwork counts as applied too, since a
