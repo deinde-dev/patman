@@ -158,7 +158,7 @@ class Lore:  # pylint: disable=R0903
         if cache and not recheck and \
                 cache.get(self.url, missing, MISSING_MAX_AGE):
             return None
-        content = await self._read(client, f'{msgid}/t.mbox.gz')
+        content = await self.read(client, f'{msgid}/t.mbox.gz')
         if content is None:
             return None
         if content is False:
@@ -170,12 +170,13 @@ class Lore:  # pylint: disable=R0903
         except (OSError, EOFError):
             return None
 
-    async def _read(self, client, subpath):
+    async def read(self, client, subpath, kind='thread'):
         """Read a file from lore
 
         Args:
             client (aiohttp.ClientSession): Session to use
             subpath (str): Path within the archive
+            kind (str): Kind of request, for counting the traffic
 
         Returns:
             bytes or None or False: Content, None if it cannot be read just
@@ -185,14 +186,14 @@ class Lore:  # pylint: disable=R0903
         async with self.semaphore:
             for i in range(RETRIES + 1):
                 self.request_count += 1
-                traffic.add(self.url, requests=1, kind='thread')
+                traffic.add(self.url, requests=1, kind=kind)
                 try:
                     async with client.get(
                             full_url, timeout=aiohttp.ClientTimeout(
                                 total=REQUEST_TIMEOUT)) as response:
                         content = await response.read()
                         traffic.add(self.url, nbytes=len(content),
-                                    kind='thread')
+                                    kind=kind)
                         if response.status == 200:
                             return content
                         if response.status == 404:
