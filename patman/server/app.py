@@ -33,6 +33,7 @@ from patman import traffic
 from patman.patchwork import Patchwork
 from patman.review import apply
 from patman.review import checkout
+from patman.review import lookup
 from patman.server import info
 from patman.server import jobs
 from patman.server import params
@@ -1038,11 +1039,12 @@ class Server(jobs.JobRunner):
         """Note the review branch of each series, from the server's repo
 
         This lets the page say which branch 'patman review --checkout'
-        checks out, or that there is none yet
+        checks out, or which it makes if there is none yet
 
         Args:
             items (list of dict): Series or versions, each of which gains a
-                'review_branch', or None if it has none
+                'review_branch', or None if it has none, and the
+                'review_name' of the branch which a review makes
             ups (str or None): Upstream name
             key (str): Key in each item which holds the patchwork link
         """
@@ -1052,6 +1054,8 @@ class Server(jobs.JobRunner):
         for item in items:
             item['review_branch'] = checkout.find_branch_in(item[key], ups,
                                                             branches)
+            item['review_name'] = (lookup.make_review_name(item[key], ups)
+                                   if item[key] else None)
 
     async def _run_fetch(self, ups):
         """Fetch an upstream, noting when it is done

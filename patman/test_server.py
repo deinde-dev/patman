@@ -861,6 +861,11 @@ class TestWebServer(unittest.TestCase, TestCommon):
                    'force': True}, ups))
         self.assertEqual((['-s', '457'], 'Review series 457'),
                          parse({'target': 'https://pw/series/457/'}, ups))
+
+        # A series on lore is known by its Message-ID
+        for target in ('<c@x>', 'https://lore.kernel.org/dtc/c@x/'):
+            self.assertEqual((['-s', 'c@x'], 'Review series c@x'),
+                             parse({'target': target}, ups))
         self.assertEqual(
             (['-p', '2000', '-w'], 'Review series of patch 2000'),
             parse({'target': 'https://pw/project/uboot/patch/2000/',
@@ -2089,11 +2094,11 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertTrue(data['more'])
         [item] = data['series']
         self.assertEqual(
-            ('c@x', 'lore:c@x', None, False,
+            ('c@x', 'lore:c@x', None, 'dtc-c-review', False,
              [{'id': 'lore:p1@x', 'name': 'dm: First', 'commit': None,
                'branch': None, 'state': None}]),
             (item['id'], item['cover_id'], item['review_branch'],
-             item['mine'], item['patches']))
+             item['review_name'], item['mine'], item['patches']))
 
         # An empty page is the last. With no default upstream, the only one
         # is used

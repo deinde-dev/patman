@@ -7,6 +7,8 @@
 
 import re
 
+from patman import lorelist
+
 
 class BadRequest(ValueError):
     """A request is not valid, e.g. a missing field or a bad value"""
@@ -60,7 +62,8 @@ def parse_review_req(data, upstreams):
 
     The request is a dict with these keys, all optional except that one of
     'target' and 'title' is needed:
-        target (str): Patchwork series ID, or the URL of a series or patch
+        target (str): Patchwork series ID, or the URL of a series or patch,
+            or the Message-ID of a series on lore, or its URL there
         title (str): Search for a series by its cover-letter title
         version (int): Version to review, with 'title'
         patch (int): Patchwork patch ID, to review just that patch
@@ -93,6 +96,10 @@ def parse_review_req(data, upstreams):
         if target.isdigit():
             args += ['-s', target]
             desc = f'series {target}'
+        elif '@' in target:
+            link = lorelist.parse_link(target)
+            args += ['-s', link]
+            desc = f'series {link}'
         elif mpatch:
             patch = int(mpatch.group(1))
         elif mseries:
