@@ -2456,12 +2456,12 @@ VERDICT: approved"""
                                            'dtc'))
 
         # A long one is cut short, with a hash to keep it unique
-        gmail = 'CAODfWeHQcjGn0CtweT4Q9Em6WC9cTmvfxhuQCgae4gdu5W9hSA'
-        name = review.lookup.safe_link(f'{gmail}@mail.gmail.com')
+        local = 'CAODfWeHQcjGn0CtweT4Q9Em6WC9cTmvfxhuQCgae4gdu5W9hSA'
+        name = review.lookup.safe_link(f'{local}@mail.gmail.com')
         self.assertEqual(review.lookup.MAX_LINK_NAME, len(name))
-        self.assertTrue(name.startswith(gmail[:31] + '-'))
+        self.assertTrue(name.startswith(local[:31] + '-'))
         self.assertNotEqual(name,
-                            review.lookup.safe_link(f'{gmail}@other.com'))
+                            review.lookup.safe_link(f'{local}@other.com'))
         self.assertEqual(8, len(review.lookup.safe_link('@x')))
 
     def test_review_lore_upstream(self):
