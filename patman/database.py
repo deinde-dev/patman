@@ -2008,6 +2008,23 @@ class Database:  # pylint:disable=R0904
             'WHERE sv.link = ?', (str(link),))
         return res.fetchone()
 
+    def series_is_own(self, link):
+        """Check whether a series with a link is one of your own
+
+        Args:
+            link (str): Patchwork series link/ID
+
+        Return:
+            bool: True if one of your own series, not a review, has a
+                version with that link
+        """
+        res = self.execute(
+            'SELECT 1 FROM ser_ver sv '
+            'JOIN series s ON sv.series_id = s.id '
+            "WHERE sv.link = ? AND (s.source IS NULL OR s.source != 'review')",
+            (str(link),))
+        return res.fetchone() is not None
+
     def series_search(self, query, include_archived=False):
         """Search for series by subject fragment
 
