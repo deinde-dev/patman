@@ -282,12 +282,13 @@ def copy_upstreams(src, dst, stats):
     have = {row[0] for row in dst.execute('SELECT name FROM upstream')}
     for row in src.execute(
             'SELECT name, url, patchwork_url, identity, series_to, '
-            'no_maintainers, no_tags FROM upstream').fetchall():
+            'no_maintainers, no_tags, lore_url FROM upstream').fetchall():
         if row[0] in have:
             continue
         dst.execute('INSERT INTO upstream (name, url, is_default, '
                     'patchwork_url, identity, series_to, no_maintainers, '
-                    'no_tags) VALUES (?, ?, 0, ?, ?, ?, ?, ?)', row)
+                    'no_tags, lore_url) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?)',
+                    row)
         stats.upstreams += 1
     have = {row[0] for row in dst.execute('SELECT upstream FROM patchwork')}
     for row in src.execute(

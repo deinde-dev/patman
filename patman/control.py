@@ -341,6 +341,7 @@ def upstream(args, test_db=None):
             cser.upstream_add(args.remote_name, args.url,
                               args.project_name,
                               patchwork_url=args.patchwork_url,
+                              lore_url=args.lore_url,
                               identity=args.identity,
                               series_to=args.series_to,
                               no_maintainers=args.no_maintainers,
@@ -359,6 +360,8 @@ def upstream(args, test_db=None):
             kwargs = {}
             if args.patchwork_url is not None:
                 kwargs['patchwork_url'] = args.patchwork_url
+            if args.lore_url is not None:
+                kwargs['lore_url'] = args.lore_url
             if args.identity is not None:
                 kwargs['identity'] = args.identity
             if args.series_to is not None:

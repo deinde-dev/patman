@@ -6,7 +6,7 @@ The patman database
 Patman stores series tracking, review and workflow state in a SQLite
 database (``.patman.db``) in the top-level git directory. The schema is
 versioned and migrated automatically when patman starts; it is currently at
-v16. The :doc:`db` chapter of the manual covers where the database is
+v18. The :doc:`db` chapter of the manual covers where the database is
 kept, the separate review database and sharing it between patman runs.
 
 The database allows patman to track a patch series across multiple
@@ -213,6 +213,7 @@ identity          TEXT      Git sendemail identity (added v6)
 series_to         TEXT      Default To: alias for series (added v6)
 no_maintainers    BIT       Skip get_maintainer.pl (added v6)
 no_tags           BIT       Skip subject-tag processing (added v6)
+lore_url          TEXT      Mailing list on lore (added v18)
 ================  ========  ==========================================
 
 patchwork

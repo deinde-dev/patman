@@ -232,7 +232,8 @@ class TestDatabase(CseriesTester):
         self.add_db_series(ocser.db, 'theirs', [3], todo=True)
         self.add_db_series(ocser.db, 'rev', [1], review=True)
         ocser.db.upstream_add('us', 'https://elsewhere')
-        ocser.db.upstream_add('ci', 'https://ci', 'https://pw.ci')
+        ocser.db.upstream_add('ci', 'https://ci', 'https://pw.ci',
+                              lore_url='https://lore.ci')
         ocser.db.upstream_set_default('ci')
         ocser.db.patchwork_update('U-Boot', 1, 'uboot', 'ci')
         ocser.commit()
@@ -255,6 +256,7 @@ class TestDatabase(CseriesTester):
         self.assertEqual(('https://us', True), ups['us'][:2])
         self.assertEqual(('https://ci', False, 'https://pw.ci'),
                          ups['ci'][:3])
+        self.assertEqual('https://lore.ci', ups['ci'][7])
         self.assertEqual('uboot', main.project_get('ci')[2])
         main.close_database()
 
@@ -295,7 +297,7 @@ class TestDatabase(CseriesTester):
                 db.execute("INSERT INTO traffic (hour, url, requests, bytes) "
                            "VALUES ('2026-10-18 09', 'https://pw', 5, 100)")
                 db.commit()
-        self.assertEqual(17, database.LATEST)
+        self.assertEqual(18, database.LATEST)
         self.assertEqual({('https://pw', ''): (5, 100)},
                          db.traffic_get_kinds('2026-10-18 00'))
 
