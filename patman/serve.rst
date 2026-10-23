@@ -189,6 +189,19 @@ read in the last five minutes, are shown from patman's cache of patchwork (see
 :ref:`the cache <patchwork_cache>`); the page says when the patch was read,
 and its 'Refresh' reads both again, e.g. to see the current state.
 
+.. _serve_lore:
+
+For a project whose list is on lore and which has no patchwork server, such as
+dtc (see :ref:`review_lore`), run the server in that project's tree. The inbox
+reads the newest patches and cover letters sent to the list from lore's feed,
+200 messages at a time, and gathers them into series by following the replies
+back to each cover letter, or first patch; 'Load more' reads the next 200. Each
+series is known by the Message-ID of its cover letter or first patch. Lore has
+no patch states, so only patches applied upstream are marked, and a large
+series which spans two pages may show only some of its patches. The patches,
+cover letters and comments are read from lore, and 'Review' and 'Try it' work
+as they do for patchwork.
+
 'Review' on a series starts the review as a job, but the inbox stays where it
 is, so you can start reviews of other series too. Each series shows how its
 review is getting on, with a link to the job's output, and offers 'Being

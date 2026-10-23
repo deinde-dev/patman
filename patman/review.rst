@@ -94,7 +94,9 @@ The patches are the messages in the thread which have the same version and
 number of patches, so a new version sent in reply to an old one is kept apart.
 The other messages in the thread are the comments. Lore has no patch states,
 so every patch counts as new. Searching by title, with ``-S`` or ``-P``, and
-scanning for new versions with ``--scan`` are not supported yet.
+scanning for new versions with ``--scan`` are not supported yet. The inbox on
+the ``patman serve`` page lists the newest series sent to the list (see
+:ref:`a list on lore <serve_lore>`).
 
 The review branch is named after the part of the Message-ID before the ``@``,
 e.g. ``dtc-20261001121036.2910243-1-ann-review``, with any characters which

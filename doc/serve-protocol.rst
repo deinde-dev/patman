@@ -245,7 +245,9 @@ Patchwork
 
 These read from patchwork each time. Those which take an optional ``ups`` query
 parameter use the patchwork server of that upstream, falling back to the ``-P``
-setting. Requests to patchwork are retried if they fail in a way which may not
+setting. For an upstream whose list is on lore and which has no patchwork
+server, they read from lore instead, and each patch and cover letter has an ID
+of ``lore:<msgid>`` in place of a patchwork ID. Requests to patchwork are retried if they fail in a way which may not
 happen again, using the ``--patchwork-timeout`` setting for each attempt.
 
 ``GET /api/comments/<kind>/<id>``
@@ -262,7 +264,7 @@ read from patchwork.
 A patch, given its patchwork ID. A patch read from patchwork in the last
 hour is taken from the cache; with ``refresh=1``, it is read from patchwork:
 
-- ``id`` (int): patchwork ID
+- ``id`` (int or str): patchwork ID, or ``lore:<msgid>``
 - ``name`` (str): subject
 - ``date`` (str): when it was sent
 - ``submitter`` (str): name or email address of the sender
@@ -284,27 +286,36 @@ letter is kept in the cache for a day.
 ``GET /api/upstreams``
 ~~~~~~~~~~~~~~~~~~~~~~
 
-The upstreams which have a patchwork server, each an object with ``name``,
-``default`` (true for the default upstream) and ``patchwork_url``.
+The upstreams which have a patchwork server, or a list on lore, each an object
+with ``name``, ``default`` (true for the default upstream), ``patchwork_url``
+and ``lore_url``, which is null if the upstream has a patchwork server.
 
 ``GET /api/inbox``
 ~~~~~~~~~~~~~~~~~~
 
 The most recent series on the patchwork server of an upstream, for choosing
 what to review. The ``ups`` query parameter gives the upstream, defaulting to
-the default upstream, which must have a patchwork project. The ``page`` query
+the default upstream, or to the only one if there is no default, which must
+have a patchwork project or a list on lore. The ``page`` query
 parameter gives the page, starting at 1, with 50 series on each.
+
+For an upstream whose list is on lore, the series are read from lore's feed of
+the patches and cover letters sent to the list, which has 200 messages in each
+page, however many series they make. Each series is known by the Message-ID of
+its cover letter, or of its first patch.
 
 The server keeps each page it reads from patchwork in the cache for ten
 minutes, timed from when it read the first page; a later page is read again
 if it is older than the first. With ``refresh=1``, it reads the page from
 patchwork whatever it has kept.
 
-The response has ``ups``, ``page``, ``per_page``, ``fetched`` (when the
-server read the first page from patchwork, as a local time like
-``2026-10-19 11:00:00``) and ``series``, a list of objects with:
+The response has ``ups``, ``page``, ``per_page``, ``more`` (true if there may
+be another page), ``fetched`` (when the server read the first page from
+patchwork, as a local time like ``2026-10-19 11:00:00``) and ``series``, a list
+of objects with:
 
-- ``id`` (int): patchwork series ID
+- ``id`` (int or str): patchwork series ID, or the Message-ID of a series on
+  lore
 - ``name`` (str): name of the series
 - ``version`` (int): version
 - ``date`` (str): when it was sent
@@ -312,8 +323,10 @@ server read the first page from patchwork, as a local time like
 - ``total`` (int): number of patches
 - ``received_all`` (bool): true if patchwork has all of them
 - ``web_url`` (str): URL of the series on patchwork
-- ``cover_id`` (int or null): patchwork cover-letter ID
-- ``patches`` (list): each with ``id`` (patchwork ID) and ``name``
+- ``cover_id`` (int or str or null): patchwork cover-letter ID, or
+  ``lore:<msgid>``
+- ``patches`` (list): each with ``id`` (patchwork ID, or ``lore:<msgid>``) and
+  ``name``
 - ``reviewed`` (int or null): ID of the reviewed series, if this one has been
   reviewed
 - ``earlier`` (int or null): if not, the ID of a reviewed series with the same
@@ -321,6 +334,8 @@ server read the first page from patchwork, as a local time like
 - ``mine`` (bool): true if this is one of your own series
 - ``job`` (int or null): the job reviewing the series, if one is waiting or
   running
+- ``review_branch`` (str or null): the series' review branch, if it has one
+- ``review_name`` (str): the name of the branch which a review of it makes
 
 Files
 -----
@@ -387,7 +402,8 @@ the Job, except where noted.
 Review a series, or part of one. The body has one of ``target``, ``patch`` and
 ``title``, with other fields as needed:
 
-- ``target`` (str): a patchwork series ID, or the URL of a series or patch
+- ``target`` (str): a patchwork series ID, or the URL of a series or patch, or
+  the Message-ID of a series on lore, or its URL there
 - ``patch`` (int): a patchwork patch ID, to review that patch
 - ``title`` (str): words from the cover-letter title, to search for
 - ``version`` (int): with ``title``, the version to review
