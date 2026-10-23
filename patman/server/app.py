@@ -25,6 +25,7 @@ from u_boot_pylib import tout
 
 from patman import database
 from patman import interpreter
+from patman import lorelist
 from patman import patchwork
 from patman import pwcache
 from patman import times
@@ -147,12 +148,29 @@ class Server(jobs.JobRunner):
             ups (str or None): Upstream name
 
         Return:
-            str or None: URL, or None if not known
+            str or None: URL, or None if not known, or if the upstream's
+                series are on lore instead
         """
         if self.pwork_for_testing:
             return self.pwork_for_testing.url
+        if self.get_lore_url(ups):
+            return None
         return (ups and self.cser.db.upstream_get_patchwork_url(ups)) or \
             self.pw_url
+
+    def get_lore_url(self, ups):
+        """Get the list on lore for an upstream with no patchwork server
+
+        Args:
+            ups (str or None): Upstream name
+
+        Return:
+            str or None: URL of the list on lore, or None if the upstream
+                has none, or has a patchwork server
+        """
+        if not ups or self.cser.db.upstream_get_patchwork_url(ups):
+            return None
+        return self.cser.db.upstream_get_lore_url(ups)
 
     def get_own_emails(self):
         """Get our own email addresses, finding them the first time
@@ -173,13 +191,20 @@ class Server(jobs.JobRunner):
             ups (str or None): Upstream name
 
         Return:
-            Patchwork: Object to use for that upstream's patchwork server
+            Patchwork or LoreList: Object to use for that upstream's
+                patchwork server, or for its list on lore if it has no
+                patchwork server
 
         Raises:
             ValueError: No patchwork URL is known
         """
         if self.pwork_for_testing:
             return self.pwork_for_testing
+        lore_url = self.get_lore_url(ups)
+        if lore_url:
+            if lore_url not in self._pworks:
+                self._pworks[lore_url] = lorelist.LoreList(lore_url)
+            return self._pworks[lore_url]
         url = self.get_pw_url(ups)
         if not url:
             raise ValueError(f"No patchwork URL for upstream '{ups}'")
@@ -537,6 +562,7 @@ class Server(jobs.JobRunner):
         """
         todo = [ver for ver in data['versions']
                 if not ver['cover_id'] and ver['link'] and
+                str(ver['link']).isdigit() and
                 ver['svid'] not in self._no_cover and
                 any(not rev['seq'] for rev in ver['reviews'])]
         if not todo:
@@ -770,16 +796,18 @@ class Server(jobs.JobRunner):
             _request (web.Request): Request (not used)
 
         Return:
-            web.Response: List of upstreams which have a patchwork URL, each
-                with its 'name', whether it is the 'default' and its
-                'patchwork_url'
+            web.Response: List of upstreams which have a patchwork URL, or a
+                list on lore, each with its 'name', whether it is the
+                'default', its 'patchwork_url' and its 'lore_url', which is
+                None if it has a patchwork URL
         """
         out = []
-        for name, (_, is_default, pw_url, *_) in \
+        for name, (_, is_default, pw_url, *_, lore_url) in \
                 self.cser.db.upstream_get_dict().items():
-            if pw_url:
+            if pw_url or lore_url:
                 out.append({'name': name, 'default': bool(is_default),
-                            'patchwork_url': pw_url})
+                            'patchwork_url': pw_url or None,
+                            'lore_url': None if pw_url else lore_url})
         return web.json_response(out)
 
     async def _inbox(self, request):
@@ -799,9 +827,12 @@ class Server(jobs.JobRunner):
         Args:
             request (web.Request): Request
 
+        For an upstream whose list is on lore, the series are read from lore
+        (see LoreList.get_recent_series()), which has no patch states.
+
         Return:
-            web.Response: Object with the upstream, page, page size and a list
-                of series
+            web.Response: Object with the upstream, page, page size, whether
+                there may be 'more' pages, and a list of series
 
         Raises:
             BadRequest: The page is invalid
@@ -809,11 +840,9 @@ class Server(jobs.JobRunner):
         """
         ups = request.query.get('ups') or self.cser.db.upstream_get_default()
         page = params.get_int(request.query, 'page') or 1
-        proj = self.cser.project_get(ups)
-        if not proj:
-            raise ValueError(f"No patchwork project for upstream '{ups}'")
         pwork = self.get_pwork(ups)
-        first = pwork.recent_series_path(proj[2], 1, INBOX_PAGE)
+        project = self._inbox_project(ups, pwork)
+        first = pwork.recent_series_path(project, 1, INBOX_PAGE)
         if request.query.get('refresh') == '1':
             max_age = 0
             # Fetch the upstream too, to see what has been applied
@@ -830,7 +859,7 @@ class Server(jobs.JobRunner):
         # other
         fetching = asyncio.ensure_future(self._fetch_upstream(ups))
         try:
-            series_list = await self._read_inbox(pwork, proj[2], page,
+            series_list = await self._read_inbox(pwork, project, page,
                                                  max_age)
         except BaseException:
             # The fetch carries on; this only stops waiting for it
@@ -849,10 +878,36 @@ class Server(jobs.JobRunner):
         await self._set_review_branches(series, ups, 'id')
         return web.json_response({
             'ups': ups, 'page': page, 'per_page': INBOX_PAGE,
+            # Each page of lore's feed has a set number of messages, not
+            # series
+            'more': (bool(series_list)
+                     if isinstance(pwork, lorelist.LoreList)
+                     else len(series_list) >= INBOX_PAGE),
             'fetched': (times.to_str(datetime.fromtimestamp(read)) if read
                         else times.now_str()),
             'upstream_fetched': self._fetched_str(ups),
             'series': series})
+
+    def _inbox_project(self, ups, pwork):
+        """Get the project whose series the inbox lists
+
+        Args:
+            ups (str): Upstream name
+            pwork (Patchwork or LoreList): Object to read the series with
+
+        Return:
+            str: Patchwork project's link name, or the name of the list on
+                lore
+
+        Raises:
+            ValueError: The upstream has no patchwork project
+        """
+        if isinstance(pwork, lorelist.LoreList):
+            return pwork.link_name
+        proj = self.cser.project_get(ups)
+        if not proj:
+            raise ValueError(f"No patchwork project for upstream '{ups}'")
+        return proj[2]
 
     @staticmethod
     async def _read_inbox(pwork, project, page, max_age):
