@@ -154,6 +154,18 @@ class Server(jobs.JobRunner):
         return (ups and self.cser.db.upstream_get_patchwork_url(ups)) or \
             self.pw_url
 
+    def get_own_emails(self):
+        """Get our own email addresses, finding them the first time
+
+        Return:
+            set of str: Our own email addresses, in lower case
+        """
+        if self.own_emails is None:
+            # The address which 'patman review' sends reviews from
+            email = gitutil.get_default_user_email()
+            self.own_emails = {email.lower()} if email else set()
+        return self.own_emails
+
     def get_pwork(self, ups):
         """Get a Patchwork object for an upstream
 
@@ -648,11 +660,7 @@ class Server(jobs.JobRunner):
             else:
                 comments = await pwork.get_cover_comments(client, item_id,
                                                           max_age)
-        if self.own_emails is None:
-            # The address which 'patman review' sends reviews from
-            email = gitutil.get_default_user_email()
-            self.own_emails = {email.lower()} if email else set()
-        return web.json_response([info.comment_info(c, self.own_emails)
+        return web.json_response([info.comment_info(c, self.get_own_emails())
                                   for c in comments or []])
 
     async def _mail(self, request):
