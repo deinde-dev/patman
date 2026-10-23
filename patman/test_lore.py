@@ -13,6 +13,7 @@ import unittest
 from unittest import mock
 
 from patman import lore
+from patman import lorelist
 from patman import pwcache
 from patman.patchwork import Patchwork
 from patman.review import lookup
@@ -156,6 +157,12 @@ class TestLore(unittest.TestCase):
             client = Client(Response(404))
             self.assertIsNone(run(lre.get_thread(client, 'gone@x')))
             self.assertIsNone(run(lre.get_thread(client, 'gone@x')))
+            self.assertEqual(1, len(client.urls))
+
+            # It is asked for again when rechecking
+            client = Client(Response(200, gzip.compress(THREAD)))
+            self.assertEqual(9, len(run(lre.get_thread(client, 'gone@x',
+                                                       recheck=True))))
             self.assertEqual(1, len(client.urls))
 
             # A failure is tried again, but not remembered
@@ -357,6 +364,125 @@ class TestLore(unittest.TestCase):
         done = dict(SERIES)
         self.assertIs(done, run(pwork.fill_from_lore(None, done)))
         fake_lore.get_thread.assert_not_called()
+
+    def lore_list(self, thread=THREAD):
+        """Make a LoreList which reads a thread given by the test"""
+        llist = lorelist.LoreList('https://lore.kernel.org/my-list/')
+        reads = []
+
+        async def get_thread(_client, msgid, recheck=False):
+            self.assertTrue(recheck)
+            reads.append(msgid)
+            messages = lore.parse_mbox(thread)
+            if msgid not in {lorelist.msgid_of(msg) for msg in messages}:
+                return None
+            return messages
+        llist.lore.get_thread = get_thread
+        return llist, reads
+
+    def test_lorelist_series(self):
+        """A series is read from its thread on lore"""
+        llist, reads = self.lore_list()
+        self.assertEqual(('https://lore.kernel.org/my-list', 'my-list'),
+                         (llist.url, llist.link_name))
+        data = run(llist.get_series(None, '<cover@x>'))
+        self.assertEqual(
+            ('cover@x', '[0/2] dm: Tidy up', 1, 2, 2, True),
+            (data['id'], data['name'], data['version'], data['total'],
+             data['received_total'], data['received_all']))
+        self.assertEqual('lore:cover@x', data['cover_letter']['id'])
+
+        # The new version sent in reply to the old one is left out
+        self.assertEqual(
+            [('lore:p1@x', '[1/2] dm: First', '<p1@x>'),
+             ('lore:p2@x', '[2/2] dm: Second', '<p2@x>')],
+            [(p['id'], p['name'], p['msgid']) for p in data['patches']])
+        self.assertEqual(['new', 'new'],
+                         run(llist.get_series_patch_states(None, 'cover@x')))
+
+        # Each reply goes to what it replies to, not to the cover letter
+        def replies(func, item_id):
+            return [c['msgid'] for c in run(func(None, item_id))]
+        self.assertEqual(['<r3@x>'],
+                         replies(llist.get_cover_comments, 'lore:cover@x'))
+        self.assertEqual(['<r1@x>', '<r2@x>'],
+                         replies(llist.get_patch_comments, 'lore:p1@x'))
+        self.assertEqual(['<r4@x>'],
+                         replies(llist.get_patch_comments, 'lore:p2@x'))
+
+        patch = run(llist.get_patch(None, 'lore:p2@x'))
+        self.assertEqual(('lore:p2@x', 'Second', '<p2@x>'),
+                         (patch['id'], patch['content'].strip(),
+                          patch['headers']['Message-ID']))
+        cover = run(llist.get_cover(None, 'lore:cover@x'))
+        self.assertEqual(('lore:cover@x', '[0/2] dm: Tidy up', 'Some tidy-ups'),
+                         (cover['id'], cover['name'],
+                          cover['content'].strip()))
+
+        # The mbox has the patches in order, without the cover letter
+        mbox = run(llist.get_series_mbox(None, 'cover@x'))
+        self.assertEqual(
+            ['[PATCH 1/2] dm: First', '[PATCH 2/2] dm: Second'],
+            [str(m['Subject']) for m in lore.parse_mbox(mbox)])
+        self.assertIsNone(llist.lore_mbox(data))
+        self.assertIs(data, run(llist.fill_from_lore(None, data)))
+
+        # The thread is read just once
+        self.assertEqual(['cover@x'], reads)
+
+        # A review reads the series the same way
+        with mock.patch.object(lookup.tout, 'notice'):
+            data, name, version, count = lookup.fetch_series(llist, 'cover@x')
+        self.assertEqual(('dm: Tidy up', 1, 2), (name, version, count))
+
+    def test_lorelist_single(self):
+        """A patch on its own is a series, and only a series is accepted"""
+        thread = ''.join([
+            message('one@x', '[PATCH v2] libfdt: Fix it', FRED, 'Fix',
+                    list_id='my-list.vger.kernel.org'),
+            message('re@x', 'Re: [PATCH v2] libfdt: Fix it', SIMON, 'Nice',
+                    'one@x', ['one@x']),
+            # A patch sent in reply, e.g. a suggested change, is not part of
+            # the series
+            message('fix@x', '[PATCH] libfdt: Fix it better', SIMON, 'Fix',
+                    'one@x', ['one@x']),
+        ]).replace('Subject: [PATCH v2]',
+                   'To: Fred <My-List@vger.kernel.org>\nSubject: [PATCH v2]',
+                   1).encode('utf-8')
+        llist, _ = self.lore_list(thread)
+        data = run(llist.get_series(
+            None, 'https://lore.kernel.org/my-list/one@x/T/#u'))
+        self.assertEqual(('one@x', '[v2] libfdt: Fix it', 2, 1, None),
+                         (data['id'], data['name'], data['version'],
+                          data['total'], data['cover_letter']))
+        self.assertEqual(['lore:one@x'], [p['id'] for p in data['patches']])
+        self.assertEqual(
+            {'name': 'my-list', 'link_name': 'my-list',
+             'list_id': 'my-list.vger.kernel.org',
+             'list_email': 'My-List@vger.kernel.org'}, data['project'])
+        self.assertEqual(['<re@x>'], [c['msgid'] for c in run(
+            llist.get_patch_comments(None, 'lore:one@x'))])
+
+        llist, _ = self.lore_list()
+        for msgid, msg in (
+                ('p2@x', "Message 'p2@x' is patch 2 of 2; give the cover "
+                 'letter or the first patch'),
+                ('r1@x', "Message 'r1@x' is not a patch or cover letter"),
+                ('gone@x', "Cannot read message 'gone@x' from "
+                 'https://lore.kernel.org/my-list')):
+            with self.assertRaises(ValueError) as exc:
+                run(llist.get_series(None, msgid))
+            self.assertEqual(msg, str(exc.exception))
+        with self.assertRaises(ValueError) as exc:
+            run(llist.query_series(None, 'dm: Tidy up'))
+        self.assertIn('give the Message-ID', str(exc.exception))
+
+    def test_lorelist_names(self):
+        """A link to a series on lore is tidied into its Message-ID"""
+        for link in ('a@b', '<a@b>', ' a@b ',
+                     'https://lore.kernel.org/dtc/a@b/',
+                     'https://lore.kernel.org/all/a@b/T/#u'):
+            self.assertEqual('a@b', lorelist.parse_link(link))
 
     def test_set_mode(self):
         """The mode must be one which is known"""
