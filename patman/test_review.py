@@ -600,6 +600,34 @@ class TestReview(CseriesTester):
         self.assertIn('not for this project', out.getvalue())
         ctx.cser.db.ser_ver_remove.assert_called_once_with(5, 1)
 
+    def test_review_nothing_tidied(self):
+        """A series with nothing to review leaves no worktree or branch"""
+        self.get_cser()
+        pwork = self._review_pwork()
+        with self._mock_review(), \
+                mock.patch('patman.review.apply.apply_and_check',
+                           return_value=None), \
+                mock.patch.object(review.core.gitutil,
+                                  'remove_worktree') as remove, \
+                mock.patch.object(review.core.gitutil, 'count_revs',
+                                  side_effect=[0, 1]) as count, \
+                mock.patch.object(review.core.gitutil,
+                                  'delete_branch') as delete:
+            with terminal.capture():
+                self.run_review('-s', str(self.REVIEW_LINK), pwork=pwork)
+            branch = review.lookup.make_review_name(str(self.REVIEW_LINK))
+            remove.assert_called_once_with(
+                self.tmpdir, review.core.cser_helper.review_worktree_path(
+                    self.tmpdir, branch))
+            delete.assert_called_once_with(branch, self.tmpdir)
+
+            # A branch with commits on it is kept
+            delete.reset_mock()
+            with terminal.capture():
+                self.run_review('-s', str(self.REVIEW_LINK), pwork=pwork)
+            self.assertEqual(2, count.call_count)
+            delete.assert_not_called()
+
     def test_review_drafts_fetch_cover_headers(self):
         """Drafts fetch the cover's headers so its reply is a reply-all"""
 
