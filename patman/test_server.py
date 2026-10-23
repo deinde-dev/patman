@@ -26,6 +26,7 @@ from patman import control
 from patman import cseries
 from patman import database
 from patman import interpreter
+from patman import lorelist
 from patman.database import Pcommit
 from patman import patchwork
 from patman.patchwork import Patchwork
@@ -860,6 +861,11 @@ class TestWebServer(unittest.TestCase, TestCommon):
                    'force': True}, ups))
         self.assertEqual((['-s', '457'], 'Review series 457'),
                          parse({'target': 'https://pw/series/457/'}, ups))
+
+        # A series on lore is known by its Message-ID
+        for target in ('<c@x>', 'https://lore.kernel.org/dtc/c@x/'):
+            self.assertEqual((['-s', 'c@x'], 'Review series c@x'),
+                             parse({'target': target}, ups))
         self.assertEqual(
             (['-p', '2000', '-w'], 'Review series of patch 2000'),
             parse({'target': 'https://pw/project/uboot/patch/2000/',
@@ -1525,7 +1531,8 @@ class TestWebServer(unittest.TestCase, TestCommon):
         srv.pwork_for_testing.fake_request = pages.get
         status, data = self.call(srv, 'GET', '/api/inbox')
         self.assertEqual(200, status)
-        self.assertEqual(('us', 1), (data['ups'], data['page']))
+        self.assertEqual(('us', 1, False),
+                         (data['ups'], data['page'], data['more']))
         items = {item['id']: item for item in data['series']}
         self.assertEqual([300, 200, 100, 400], list(items))
 
@@ -2040,15 +2047,110 @@ class TestWebServer(unittest.TestCase, TestCommon):
         return fake
 
     def test_upstreams(self):
-        """Upstreams with a patchwork server are listed"""
+        """Upstreams with a patchwork server or a list on lore are listed"""
         with terminal.capture():
             self.cser.upstream_add('us', 'https://us',
                                    patchwork_url='https://pw.us')
             self.cser.upstream_add('ci', 'https://ci')
+            self.cser.upstream_add('dtc', 'https://dtc',
+                                   lore_url='https://lore/dtc')
+            self.cser.upstream_add('both', 'https://both',
+                                   patchwork_url='https://pw.both',
+                                   lore_url='https://lore/both')
             self.cser.upstream_set_default('us')
         _, data = self.call(self.make_server(), 'GET', '/api/upstreams')
-        self.assertEqual([{'name': 'us', 'default': True,
-                           'patchwork_url': 'https://pw.us'}], data)
+        self.assertEqual(
+            [{'name': 'us', 'default': True, 'patchwork_url': 'https://pw.us',
+              'lore_url': None},
+             {'name': 'dtc', 'default': False, 'patchwork_url': None,
+              'lore_url': 'https://lore/dtc'},
+             {'name': 'both', 'default': False,
+              'patchwork_url': 'https://pw.both', 'lore_url': None}], data)
+
+    def test_lore_upstream(self):
+        """An upstream whose list is on lore is read from there"""
+        with terminal.capture():
+            self.cser.upstream_add('dtc', 'https://dtc',
+                                   lore_url='https://lore/dtc')
+        srv = self.make_server()
+        srv.pwork_for_testing = None
+        llist = srv.get_pwork('dtc')
+        self.assertIsInstance(llist, lorelist.LoreList)
+        self.assertIs(llist, srv.get_pwork('dtc'))
+        self.assertIsNone(srv.get_pw_url('dtc'))
+
+        # The inbox needs no patchwork project
+        series = [{'id': 'c@x', 'name': 'dm: Tidy up', 'version': 1,
+                   'date': '2026-10-01T10:00:00', 'total': 1,
+                   'received_all': True, 'web_url': 'https://lore/dtc/c@x/',
+                   'submitter': {'name': 'Ann', 'email': 'ann@x'},
+                   'cover_letter': {'id': 'lore:c@x', 'name': 'dm: Tidy up'},
+                   'patches': [{'id': 'lore:p1@x', 'name': 'dm: First'}]}]
+        with mock.patch.object(lorelist.LoreList, 'get_recent_series',
+                               mock.AsyncMock(return_value=series)) as recent:
+            status, data = self.call(srv, 'GET', '/api/inbox?ups=dtc')
+        self.assertEqual(200, status)
+        self.assertEqual('dtc', recent.call_args.args[1])
+        self.assertTrue(data['more'])
+        [item] = data['series']
+        self.assertEqual(
+            ('c@x', 'lore:c@x', None, 'dtc-c-review', False,
+             [{'id': 'lore:p1@x', 'name': 'dm: First', 'commit': None,
+               'branch': None, 'state': None}]),
+            (item['id'], item['cover_id'], item['review_branch'],
+             item['review_name'], item['mine'], item['patches']))
+
+        # An empty page is the last. With no default upstream, the only one
+        # is used
+        with mock.patch.object(lorelist.LoreList, 'get_recent_series',
+                               mock.AsyncMock(return_value=[])):
+            _, data = self.call(srv, 'GET', '/api/inbox?page=2')
+        self.assertEqual(('dtc', False), (data['ups'], data['more']))
+
+        # So it is for a patch, too
+        with mock.patch.object(lorelist.LoreList, 'get_patch',
+                               mock.AsyncMock(return_value={'id': 'lore:p@x'})):
+            status, data = self.call(srv, 'GET', '/api/patch/lore:p@x')
+        self.assertEqual((200, 'lore:p@x'), (status, data['id']))
+
+        # With more than one, the upstream must be given
+        with terminal.capture():
+            self.cser.upstream_add('us', 'https://us',
+                                   patchwork_url='https://pw.us')
+        status, data = self.call(srv, 'GET', '/api/inbox')
+        self.assertEqual(
+            (404, "There is no default upstream, so give one with 'ups'"),
+            (status, data['error']))
+
+        # A patch and its comments are read from lore by their Message-ID
+        patch = {'id': 'lore:p1@x', 'name': 'dm: First', 'state': 'new',
+                 'submitter': {'name': 'Ann'}, 'content': 'First'}
+        comment = {'id': None, 'msgid': '<r@x>', 'date': '2026-10-02',
+                   'submitter': {'name': 'Bob', 'email': 'bob@x'},
+                   'subject': 'Re: [PATCH] dm: First', 'content': 'OK',
+                   'web_url': 'https://lore/dtc/r@x/'}
+        with mock.patch.object(lorelist.LoreList, 'get_patch',
+                               mock.AsyncMock(return_value=patch)) as get, \
+                mock.patch.object(lorelist.LoreList, 'get_patch_comments',
+                                  mock.AsyncMock(return_value=[comment])):
+            status, data = self.call(srv, 'GET',
+                                     '/api/patch/lore:p1@x?ups=dtc')
+            self.assertEqual(200, status)
+            self.assertEqual(('lore:p1@x', 'First'),
+                             (data['id'], data['content']))
+            self.assertEqual('lore:p1@x', get.call_args.args[1])
+            status, data = self.call(srv, 'GET',
+                                     '/api/comments/patch/lore:p1@x?ups=dtc')
+            self.assertEqual(200, status)
+            self.assertEqual(['OK'], [cmt['content'] for cmt in data])
+
+        # A patch on lore is not looked for on patchwork
+        with terminal.capture():
+            self.cser.upstream_set_default('us')
+        status, data = self.call(srv, 'GET', '/api/comments/patch/lore:p1@x')
+        self.assertEqual(
+            (404, "'lore:p1@x' is on lore, but upstream 'us' has no list "
+             "there; give one with 'ups'"), (status, data['error']))
 
     def test_periodic_sync(self):
         """The periodic sync starts with the server and runs repeatedly"""

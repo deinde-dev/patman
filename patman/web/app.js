@@ -380,7 +380,7 @@ function commentToggle(card, kind, itemId, ups) {
     card.append(box);
     try {
       const q = ups ? `?ups=${encodeURIComponent(ups)}` : '';
-      const comments = await api(`comments/${kind}/${itemId}${q}`);
+      const comments = await api(`comments/${kind}/${idPath(itemId)}${q}`);
       fill(box, ...(comments.length ? comments.map((c) =>
         h('div', {},
           h('div', { class: 'who' }, c.name || c.email || 'Unknown',
@@ -739,9 +739,22 @@ function renderComments(comments) {
       renderMail(c.content))) : [h('div', { class: 'empty' }, 'No comments')];
 }
 
+// The ID of a patch or cover letter, for a URL path: a patchwork ID, or
+// 'lore:<msgid>' for one on lore, whose Message-ID may hold characters which
+// need escaping
+function idPath(id) {
+  return String(id).replace(/[%/?#]/g, encodeURIComponent);
+}
+
+// Where a series, patch or cover letter is, from its URL: 'lore' or
+// 'patchwork'
+function siteName(url) {
+  return /^https?:\/\/lore\./.test(url || '') ? 'lore' : 'patchwork';
+}
+
 // Link to the page for a patch or cover letter
 function mailHref(kind, id, ups) {
-  return `#/${kind}/${id}${ups ? '/' + encodeURIComponent(ups) : ''}`;
+  return `#/${kind}/${idPath(id)}${ups ? '/' + encodeURIComponent(ups) : ''}`;
 }
 
 // Show a patch or cover letter; 'refresh' reads it from patchwork again rather
@@ -749,7 +762,8 @@ function mailHref(kind, id, ups) {
 async function viewMail(kind, id, ups, refresh) {
   const q = ups ? `?ups=${encodeURIComponent(ups)}` : '';
   const rq = refresh ? `${q ? '&' : '?'}refresh=1` : '';
-  const m = await api(`${kind}/${id}${q}${rq}`);
+  const m = await api(`${kind}/${idPath(id)}${q}${rq}`);
+  const site = siteName(m.web_url);
   const comments = h('div', { class: 'list' },
                      h('div', { class: 'spinner' }, 'Loading comments…'));
   const ser = m.series[0];
@@ -762,24 +776,24 @@ async function viewMail(kind, id, ups, refresh) {
         m.date && h('span', {}, ago(parseTime(m.date, true))),
         ser && h('span', {}, `series ${ser.id} v${ser.version}`)),
       m.fetched && h('div', { class: 'row fetched' },
-        h('span', { class: 'grow ver' }, `Read from patchwork ${ago(parseTime(m.fetched))}`),
+        h('span', { class: 'grow ver' }, `Read from ${site} ${ago(parseTime(m.fetched))}`),
         h('button', { class: 'btn light small',
-                      title: 'Read this from patchwork again, e.g. to see its current state',
+                      title: `Read this from ${site} again, e.g. to see its current state`,
                       onclick: (ev) => {
           ev.target.disabled = true;
           viewMail(kind, id, ups, true).catch((err) => showError(err));
         } }, 'Refresh')),
       m.web_url && h('div', { class: 'actions' },
         h('a', { class: 'btn light small', href: m.web_url, target: '_blank',
-                 rel: 'noopener', title: 'Open this on patchwork, in a new tab' },
-          'patchwork ↗'))),
+                 rel: 'noopener', title: `Open this on ${site}, in a new tab` },
+          `${site} ↗`))),
     h('div', { class: 'section' }, kind === 'patch' ? 'Commit message' : 'Cover letter'),
     h('div', { class: 'card' }, renderMail(m.content)),
     m.diff && renderDiff(m.diff),
     h('div', { class: 'section' }, 'Comments'),
     comments);
   try {
-    fill(comments, ...renderComments(await api(`comments/${kind}/${id}${q}${rq}`)));
+    fill(comments, ...renderComments(await api(`comments/${kind}/${idPath(id)}${q}${rq}`)));
   } catch (err) {
     fill(comments, h('div', { class: 'error' }, err.message));
   }
@@ -801,7 +815,7 @@ function mailToggle(kind, id, ups) {
     fill(box, h('div', { class: 'ver' }, 'Loading…'));
     try {
       const q = ups ? `?ups=${encodeURIComponent(ups)}` : '';
-      mail = mail || await api(`${kind}/${id}${q}`);
+      mail = mail || await api(`${kind}/${idPath(id)}${q}`);
       if (open) {
         fill(box, h('div', {}, renderMail(mail.content),
                               mail.diff && renderDiff(mail.diff)));
@@ -1174,7 +1188,8 @@ async function viewReview(id, wantVer) {
     refreshJobCount();
     location.hash = `#/jobs/${job.id}`;
   };
-  const [tryBtn, tryBox] = sv.link ? tryButton(sv.link, ser.upstream, sv.review_branch)
+  const [tryBtn, tryBox] = sv.link ? tryButton(sv.link, ser.upstream, sv.review_branch,
+                                               sv.review_name)
                                    : [null, null];
   const [againBtn, againBox] = reviewButton(
     'Review again', 'btn light small',
@@ -1254,8 +1269,9 @@ async function copyText(text) {
 }
 
 // A button which shows the command to check out a series in the tree, to
-// try it, with a button to copy it. 'branch' is its review branch, if any
-function tryButton(link, ups, branch) {
+// try it, with a button to copy it. 'branch' is its review branch, if any,
+// and 'name' the branch which a review makes
+function tryButton(link, ups, branch, name) {
   const box = h('div', {});
   const cmd = `patman review -U ${ups} -s ${link} --checkout`;
   const btn = h('button', { class: 'btn light small',
@@ -1274,8 +1290,8 @@ function tryButton(link, ups, branch) {
     fill(box, h('div', { class: 'form' },
       h('div', { class: 'meta' }, branch
         ? `This checks out ${branch}, which has the series from its review:`
-        : `This applies the series with git am to a new branch, ${ups}-${link}-review, ` +
-          'and checks it out:'),
+        : 'This applies the series with git am to a new branch, ' +
+          `${name || `${ups}-${link}-review`}, and checks it out:`),
       h('div', { class: 'trycmd' }, cmd),
       h('div', { class: 'actions' }, copy, msg)));
   } }, 'Try it');
@@ -1712,13 +1728,14 @@ async function viewReviewForm() {
     return [box, h('label', { class: 'check', title: tip }, box, label)];
   };
   const target = h('input', { type: 'text', inputmode: 'url',
-                              placeholder: 'e.g. 471234 or a patchwork URL' });
+                              placeholder: 'e.g. 471234, a patchwork URL or a Message-ID' });
   const title = h('input', { type: 'text', placeholder: 'Words from the title' });
   const version = h('input', { type: 'number', min: 1, placeholder: 'Latest' });
   const index = h('input', { type: 'text', placeholder: 'All', inputmode: 'numeric' });
-  const ups = h('select', { title: 'The upstream whose patchwork has the series' },
+  const ups = h('select', { title: 'The upstream whose patchwork or list has the series' },
                 upstreams.map((u) =>
-    h('option', { value: u.name, selected: u.default }, `${u.name} (${u.patchwork_url})`)));
+    h('option', { value: u.name, selected: u.default },
+      `${u.name} (${u.patchwork_url || u.lore_url})`)));
   const [drafts, draftsRow] = check('Create Gmail drafts', true,
                                     'Put each review in a Gmail draft, ready to send');
   const [whole, wholeRow] = check('Whole series, for a patch URL', false,
@@ -1815,7 +1832,7 @@ function inboxDetails(s, ups, jobBox) {
       trackInboxJob(jobBox, job.id);
       reviewBtn.replaceWith(busyLink(job.id));
     });
-  const [tryBtn, tryBox] = tryButton(s.id, ups, s.review_branch);
+  const [tryBtn, tryBox] = tryButton(s.id, ups, s.review_branch, s.review_name);
   return h('div', { class: 'comments' },
     h('div', { class: 'list' }, cover, s.patches.map((p, i) => h('div', { class: 'row' },
       h('span', { class: 'seq' }, i + 1),
@@ -1832,8 +1849,8 @@ function inboxDetails(s, ups, jobBox) {
       tryBtn,
       s.web_url && h('a', { class: 'btn light small', href: s.web_url,
                             target: '_blank', rel: 'noopener',
-                            title: 'Open the series on patchwork, in a new tab' },
-        'patchwork ↗')),
+                            title: `Open the series on ${siteName(s.web_url)}, in a new tab` },
+        `${siteName(s.web_url)} ↗`)),
     reviewBox, tryBox,
     s.earlier && s.earlier.parts.length > 0 && earlierDetails(s.earlier, ups));
 }
@@ -1976,7 +1993,9 @@ async function viewInbox(more, refresh) {
   if (!upstreams.some((u) => u.name === ups)) {
     ups = (upstreams.find((u) => u.default) || upstreams[0] || {}).name || '';
   }
-  const pw = (upstreams.find((u) => u.name === ups) || {}).patchwork_url;
+  const upsInfo = upstreams.find((u) => u.name === ups) || {};
+  const pw = upsInfo.patchwork_url;
+  const site = upsInfo.lore_url ? 'lore' : 'patchwork';
   // Going back to the inbox keeps the pages read already
   let kept = null;
   if (!more || !inbox || inbox.ups !== ups) {
@@ -1993,7 +2012,7 @@ async function viewInbox(more, refresh) {
   // New series move the others down, so a later page may repeat some
   const ids = new Set(inbox.series.map((s) => s.id));
   inbox.series.push(...data.series.filter((s) => !ids.has(s.id)));
-  inbox.done = data.series.length < data.per_page;
+  inbox.done = !data.more;
   if (kept) {
     // Show the later pages again, as the server has them however old they
     // are, so that patchwork is only read for the first. The series in
@@ -2013,26 +2032,27 @@ async function viewInbox(more, refresh) {
 
   const upsTabs = upstreams.length > 1 && h('div', { class: 'tabs' },
     upstreams.map((u) => h('button', { class: u.name === ups ? 'on' : '',
-                                       title: `Show the series on ${u.name}'s patchwork`,
+                                       title: `Show the series on ${u.name}'s ` +
+                                              (u.lore_url ? 'list' : 'patchwork'),
                                        onclick: () => {
       try { localStorage.setItem('patman-inbox-ups', u.name); } catch (e) { /* ignore */ }
       route();
     } }, u.name)));
   const loadMore = !inbox.done && h('div', { class: 'actions' },
-    h('button', { class: 'btn light', title: 'Read more series from patchwork',
+    h('button', { class: 'btn light', title: `Read more series from ${site}`,
                   onclick: (ev) => {
       ev.target.disabled = true;
       viewInbox(true).catch((err) => showError(err, 'inbox'));
     } }, 'Load more'));
   const fetched = h('div', { class: 'row fetched' },
     h('span', { class: 'grow ver',
-                title: 'When the series were read from patchwork, and when the upstream was ' +
+                title: `When the series were read from ${site}, and when the upstream was ` +
                        'fetched, to see which patches are applied' },
-      `Read from patchwork ${ago(parseTime(inbox.fetched))}` +
+      `Read from ${site} ${ago(parseTime(inbox.fetched))}` +
       (inbox.upstreamFetched ? `; ${ups} fetched ${ago(parseTime(inbox.upstreamFetched))}`
                              : '')),
     h('button', { class: 'btn light small',
-                  title: 'Read the newest series from patchwork again, and fetch the ' +
+                  title: `Read the newest series from ${site} again, and fetch the ` +
                          'upstream to see which patches are applied',
                   onclick: (ev) => {
       ev.target.disabled = true;
@@ -2350,7 +2370,9 @@ async function route() {
     else if (page === 'review' && id === 'new') await viewReviewForm();
     else if (page === 'inbox') await viewInbox();
     else if ((page === 'patch' || page === 'cover') && id) {
-      await viewMail(page, +id, ver ? decodeURIComponent(ver) : null);
+      const mailId = decodeURIComponent(id);
+      await viewMail(page, /^\d+$/.test(mailId) ? +mailId : mailId,
+                     ver ? decodeURIComponent(ver) : null);
     }
     else if (page === 'file' && parts.length === 6) {
       await viewFile(parts[1], parts[2], +parts[3], +parts[4],

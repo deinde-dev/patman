@@ -15,17 +15,34 @@ comments and mbox in the form patchwork gives them, so that a review can use
 either. A series is known by the Message-ID of its cover letter or first
 patch, and each patch and cover letter has an ID of 'lore:<msgid>'.
 
-An upstream uses a lore list when its patchwork URL is the list on lore, e.g.
-'https://lore.kernel.org/devicetree-compiler'
+The newest series on the list are read from lore's Atom feed of the patches
+and cover letters sent to it, for the inbox on the 'patman serve' page.
+
+A review uses a lore list for an upstream which has one and no patchwork URL,
+e.g. 'https://lore.kernel.org/devicetree-compiler'
 """
 
+import asyncio
 import email.utils
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote_plus, unquote, urlparse
+import xml.etree.ElementTree as ET
 
 from patman import lore
+from patman import pwcache
 
 # Prefix of the ID of a patch or cover letter read from lore
 ID_PREFIX = 'lore:'
+
+# Search which gives the patches and cover letters sent to a list, leaving out
+# the replies to them
+FEED_QUERY = 's:PATCH AND NOT s:Re'
+
+# Number of messages in each page of lore's feed
+FEED_PAGE = 200
+
+# Namespaces of the elements in lore's Atom feed
+ATOM = '{http://www.w3.org/2005/Atom}'
+THREAD = '{http://purl.org/syndication/thread/1.0}'
 
 
 def parse_link(link):
@@ -69,6 +86,18 @@ def subject_info(msg):
         msg (email.message.EmailMessage): Message
 
     Returns:
+        tuple or None: As for parse_subject()
+    """
+    return parse_subject(str(msg.get('Subject', '')))
+
+
+def parse_subject(subject):
+    """Get the place of a patch or cover letter in its series, from a subject
+
+    Args:
+        subject (str): Subject, e.g. '[PATCH v3 2/5] dm: Tidy up'
+
+    Returns:
         tuple or None: None if the message is not a patch or cover letter,
                 else:
             int: Version, 1 if none is given
@@ -78,7 +107,7 @@ def subject_info(msg):
             str: Name as patchwork gives it, e.g. '[v3,2/5] dm: Tidy up', or
                 just the title if the prefix only says 'PATCH'
     """
-    subject = ' '.join(str(msg.get('Subject', '')).split())
+    subject = ' '.join(subject.split())
     match = lore.RE_SUBJECT.match(subject)
     if not match or 'PATCH' not in match.group(1).upper():
         return None
@@ -92,6 +121,135 @@ def subject_info(msg):
     return (int(version.group(1)) if version else 1,
             int(seq.group(1)) if seq else 1,
             int(seq.group(2)) if seq else 1, name)
+
+
+def _series_name(subject):
+    """Get the name of a series, from the subject of a patch or cover letter
+
+    Args:
+        subject (str): Subject, e.g. '[PATCH v3 2/5] dm: Tidy up'
+
+    Returns:
+        str: Name, as patchwork gives it, e.g. '[v3] dm: Tidy up'
+    """
+    match = lore.RE_SUBJECT.match(' '.join(subject.split()))
+    parts = [part for part in match.group(1).split()
+             if part.upper() != 'PATCH' and not lore.RE_SEQ.match(part)]
+    return f"[{','.join(parts)}] {match.group(2)}" if parts else match.group(2)
+
+
+def parse_feed(data):
+    """Get the patches and cover letters in a page of lore's Atom feed
+
+    Args:
+        data (bytes): Feed
+
+    Returns:
+        list of dict: One for each patch or cover letter, with:
+            msgid (str): Message-ID, without angle brackets
+            parent (str or None): Message-ID of the message which it replies
+                to, if any
+            subject (str): Subject
+            info (tuple): Its place in its series (see parse_subject())
+            date (str): When it was sent, e.g. '2026-10-20T15:37:51'
+            submitter (dict): Who sent it, with 'name' and 'email'
+    """
+    out = []
+    for entry in ET.fromstring(data).iter(f'{ATOM}entry'):
+        subject = entry.findtext(f'{ATOM}title') or ''
+        info = parse_subject(subject)
+        link = entry.find(f'{ATOM}link')
+        if not info or link is None:
+            continue
+        reply = entry.find(f'{THREAD}in-reply-to')
+        out.append({
+            'msgid': parse_link(link.get('href', '')),
+            'parent': (parse_link(reply.get('href', ''))
+                       if reply is not None else None),
+            'subject': subject, 'info': info,
+            'date': (entry.findtext(f'{ATOM}updated') or '').rstrip('Z'),
+            'submitter': {
+                'name': entry.findtext(f'{ATOM}author/{ATOM}name'),
+                'email': entry.findtext(f'{ATOM}author/{ATOM}email')},
+        })
+    return out
+
+
+def _series_link(entry, by_msgid):
+    """Find the Message-ID which a series in the feed is known by
+
+    This is the cover letter, or the first patch if there is no cover letter,
+    found by following the replies back, as long as each is in the same
+    version of the series. The cover letter may be too old to be in the page
+    of the feed, but a patch of a series of several replies to it.
+
+    Args:
+        entry (dict): Patch or cover letter, as from parse_feed()
+        by_msgid (dict): Each patch and cover letter in the page of the feed,
+            keyed by its Message-ID
+
+    Returns:
+        str: Message-ID of the series
+    """
+    version, _, total, _ = entry['info']
+    seen = {entry['msgid']}
+    while entry['parent'] in by_msgid and entry['parent'] not in seen:
+        parent = by_msgid[entry['parent']]
+        if (parent['info'][0], parent['info'][2]) != (version, total):
+            break
+        seen.add(parent['msgid'])
+        entry = parent
+    if entry['info'][1] and total > 1 and entry['parent'] and \
+            entry['parent'] not in by_msgid:
+        return entry['parent']
+    return entry['msgid']
+
+
+def feed_series(entries, url):
+    """Gather the patches and cover letters in the feed into series
+
+    Args:
+        entries (list of dict): Patches and cover letters, from parse_feed()
+        url (str): URL of the list on lore
+
+    Returns:
+        list of dict: Series, newest first, as Patchwork.get_recent_series()
+            gives them
+    """
+    by_msgid = {ent['msgid']: ent for ent in entries}
+    found = {}
+    for ent in entries:
+        found.setdefault(_series_link(ent, by_msgid), []).append(ent)
+    out = []
+    for link, ents in found.items():
+        ents.sort(key=lambda ent: ent['info'][1])
+        first = ents[0]
+        cover = first if first['info'][1] == 0 else None
+        patches = {}
+        for ent in ents:
+            if ent['info'][1]:
+                patches.setdefault(ent['info'][1], ent)
+        version, _, total, _ = first['info']
+        out.append({
+            'id': link, 'name': _series_name(first['subject']),
+            'version': version, 'total': total,
+            'received_total': len(patches),
+            'received_all': len(patches) >= total,
+            'date': min(ent['date'] for ent in ents),
+            'submitter': first['submitter'],
+            'web_url': f'{url}/{link}/',
+            'mbox': f'{url}/{link}/t.mbox.gz',
+            'project': {},
+            'cover_letter': cover and {
+                'id': f'{ID_PREFIX}{link}',
+                'name': cover['info'][3]},
+            'patches': [{'id': f"{ID_PREFIX}{ent['msgid']}",
+                         'name': ent['info'][3],
+                         'msgid': f"<{ent['msgid']}>"}
+                        for _, ent in sorted(patches.items())],
+        })
+    out.sort(key=lambda ser: ser['date'], reverse=True)
+    return out
 
 
 def _find_patches(messages, root, info):
@@ -225,6 +383,142 @@ class LoreList:
                 'name': subject_info(msg)[3], 'date': cmt['date'],
                 'web_url': f'{self.url}/{mid}/'}
 
+    @staticmethod
+    def recent_series_path(_project, page, _per_page):
+        """Get the path of a page of the feed of the newest series
+
+        Lore gives FEED_PAGE messages in each page, however many series
+        they make
+
+        Args:
+            _project (str): Project link name (not used)
+            page (int): Page number, starting at 1
+            _per_page (int): Number of series in each page (not used)
+
+        Returns:
+            str: Path within the list, e.g. for read_time()
+        """
+        path = f'?q={quote_plus(FEED_QUERY)}&x=A'
+        if page > 1:
+            path += f'&o={(page - 1) * FEED_PAGE}'
+        return path
+
+    @staticmethod
+    def patch_path(patch_id):
+        """Get the path of a patch, e.g. for read_time()
+
+        Args:
+            patch_id (str): ID of the patch, 'lore:<msgid>'
+
+        Returns:
+            str: Path within the list
+        """
+        return f'{str(patch_id).removeprefix(ID_PREFIX)}/'
+
+    def read_time(self, subpath):
+        """Get when the cached copy of a page of the feed was read
+
+        Args:
+            subpath (str): Path, as from recent_series_path()
+
+        Returns:
+            float or None: Time it was read, in seconds since the epoch, or
+                None if there is no copy
+        """
+        cache = pwcache.get()
+        return cache.fetched(self.url, subpath) if cache else None
+
+    def read_age(self, subpath):
+        """Get how long ago the cached copy of a page of the feed was read
+
+        Args:
+            subpath (str): Path, as from recent_series_path()
+
+        Returns:
+            float or None: Age in seconds, or None if there is no copy
+        """
+        cache = pwcache.get()
+        return cache.age(self.url, subpath) if cache else None
+
+    # pylint: disable-next=R0913
+    async def get_recent_series(self, client, project, page=1, per_page=50,
+                                max_age=0):
+        """Read the newest series sent to the list, newest first
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            project (str): Project link name (not used)
+            page (int): Page number, starting at 1
+            per_page (int): Number of series in each page (not used)
+            max_age (float or None): Oldest cached copy to use, in seconds; 0
+                (the default) to read lore, or None to use any
+
+        Returns:
+            list of dict: Series, as Patchwork.get_recent_series() gives them
+
+        Raises:
+            ValueError: The feed cannot be read
+        """
+        subpath = self.recent_series_path(project, page, per_page)
+        cache = pwcache.get()
+        data = (cache.get(self.url, subpath, max_age)
+                if cache and max_age != 0 else None)
+        if data is None:
+            content = await self.lore.read(client, subpath, kind='feed')
+            if not content:
+                raise ValueError(f'Cannot read the newest series from '
+                                 f'{self.url}')
+            data = await asyncio.gather(
+                *[self.complete_series(client, ser)
+                  for ser in feed_series(parse_feed(content), self.url)])
+            if cache:
+                cache.put(self.url, subpath, data)
+        return data
+
+    async def complete_series(self, client, ser):
+        """Fill in a series which is only partly in a page of the feed
+
+        A series may lack its cover letter, or some patches, because they
+        are in another page of the feed, or were missed by lore's search. Its
+        thread then gives the whole series.
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            ser (dict): Series, as from feed_series()
+
+        Returns:
+            dict: The series, filled in from its thread if needed
+        """
+        own = any(pat['id'] == f"{ID_PREFIX}{ser['id']}"
+                  for pat in ser['patches'])
+        if ser['received_all'] and (ser['cover_letter'] or own):
+            return ser
+        try:
+            full = await self.get_series(client, ser['id'])
+        except ValueError:
+            return ser
+        return {**ser, **{key: full[key] for key in (
+            'name', 'version', 'total', 'received_total', 'received_all',
+            'date', 'submitter', 'cover_letter', 'patches')}}
+
+    @staticmethod
+    async def follow_events(_client, _project=None):
+        """Follow the changes to patches, which lore does not record
+
+        Returns:
+            None: Always, since events are not followed
+        """
+        return None
+
+    @staticmethod
+    def get_states(_patch_ids):
+        """Get the states of patches, which lore does not have
+
+        Returns:
+            dict: Empty
+        """
+        return {}
+
     async def get_series(self, client, link, max_age=None):
         """Read a series from its thread on lore
 
@@ -253,7 +547,7 @@ class LoreList:
         if not info:
             raise ValueError(f"Message '{link}' is not a patch or cover "
                              'letter')
-        version, seq, total, name = info
+        version, seq, total, _ = info
         if seq > 1:
             raise ValueError(
                 f"Message '{link}' is patch {seq} of {total}; give the cover "
@@ -263,7 +557,8 @@ class LoreList:
         cmt = lore.to_comment(root)
         patches = [self._entry(found[num]) for num in sorted(found)]
         return {
-            'id': link, 'name': name, 'version': version, 'total': total,
+            'id': link, 'name': _series_name(str(root.get('Subject', ''))),
+            'version': version, 'total': total,
             'received_total': len(patches),
             'received_all': len(patches) >= total,
             'date': cmt['date'], 'submitter': cmt['submitter'],
@@ -344,12 +639,18 @@ class LoreList:
             since (float or None): Not used
 
         Returns:
-            dict: Patch, as lore.to_patch() gives it
+            dict: Patch, as lore.to_patch() gives it, named as in its series
+                and linking to it on the list
         """
         del max_age, since
         msgid = str(patch_id).removeprefix(ID_PREFIX)
-        return lore.to_patch(await self._message(client, msgid),
-                             str(patch_id))
+        msg = await self._message(client, msgid)
+        patch = lore.to_patch(msg, str(patch_id))
+        patch['web_url'] = f'{self.url}/{msgid}/'
+        info = subject_info(msg)
+        if info:
+            patch['name'] = info[3]
+        return patch
 
     async def get_cover(self, client, cover_id, max_age=None):
         """Read a cover letter

@@ -158,7 +158,7 @@ class Lore:  # pylint: disable=R0903
         if cache and not recheck and \
                 cache.get(self.url, missing, MISSING_MAX_AGE):
             return None
-        content = await self._read(client, f'{msgid}/t.mbox.gz')
+        content = await self.read(client, f'{msgid}/t.mbox.gz')
         if content is None:
             return None
         if content is False:
@@ -170,12 +170,13 @@ class Lore:  # pylint: disable=R0903
         except (OSError, EOFError):
             return None
 
-    async def _read(self, client, subpath):
+    async def read(self, client, subpath, kind='thread'):
         """Read a file from lore
 
         Args:
             client (aiohttp.ClientSession): Session to use
             subpath (str): Path within the archive
+            kind (str): Kind of request, for counting the traffic
 
         Returns:
             bytes or None or False: Content, None if it cannot be read just
@@ -185,14 +186,14 @@ class Lore:  # pylint: disable=R0903
         async with self.semaphore:
             for i in range(RETRIES + 1):
                 self.request_count += 1
-                traffic.add(self.url, requests=1, kind='thread')
+                traffic.add(self.url, requests=1, kind=kind)
                 try:
                     async with client.get(
                             full_url, timeout=aiohttp.ClientTimeout(
                                 total=REQUEST_TIMEOUT)) as response:
                         content = await response.read()
                         traffic.add(self.url, nbytes=len(content),
-                                    kind='thread')
+                                    kind=kind)
                         if response.status == 200:
                             return content
                         if response.status == 404:
@@ -256,6 +257,35 @@ def patch_info(msg):
             int(seq.group(2)), f"[{','.join(parts)}] {match.group(2)}")
 
 
+# The line which starts the signature at the end of a patch
+RE_SIG_LINE = re.compile(r'\n--[ \t]*\n')
+
+
+def strip_signature(diff):
+    """Remove the signature from the end of a patch's diff
+
+    The signature, e.g. the git version or the sender's name, follows a line
+    holding '-- ', perhaps with more spaces, and is not part of the diff. A
+    removed line holding '- ' is the same, but is followed by more of the
+    diff, or by nothing.
+
+    Args:
+        diff (str): Diff, as it ends the message
+
+    Returns:
+        str: Diff without any signature
+    """
+    found = list(RE_SIG_LINE.finditer(diff))
+    if not found:
+        return diff
+    pos = found[-1].start()
+    tail = diff[found[-1].end():].splitlines()
+    if not any(tail) or len(tail) > 5 or any(
+            line[:1] in (' ', '+', '-', '@', '\\') for line in tail):
+        return diff
+    return diff[:pos + 1]
+
+
 def to_patch(msg, patch_id):
     """Turn a message holding a patch into a patch, as patchwork gives them
 
@@ -277,7 +307,7 @@ def to_patch(msg, patch_id):
         'name': info[3] if info else cmt['subject'],
         'submitter': cmt['submitter'],
         'content': body if pos < 0 else body[:pos + 1],
-        'diff': '' if pos < 0 else body[pos + 1:],
+        'diff': '' if pos < 0 else strip_signature(body[pos + 1:]),
         'headers': cmt['headers'], 'state': 'new',
         'web_url': cmt['web_url'], 'project': {},
     }

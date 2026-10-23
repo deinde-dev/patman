@@ -74,6 +74,52 @@ THREAD = ''.join([
     message('other@x', 'Hello', FRED, 'Hi'),
 ]).encode('utf-8')
 
+def feed_entry(msgid, subject, date, parent=None, name='Ann'):
+    """Make an entry in lore's Atom feed
+
+    Args:
+        msgid (str): Message-ID, without angle brackets
+        subject (str): Subject
+        date (str): When it was sent, e.g. '2026-10-01T10:00:00Z'
+        parent (str or None): Message-ID of the message it replies to
+        name (str): Name of who sent it
+
+    Returns:
+        str: Entry, as XML
+    """
+    reply = (f'<thr:in-reply-to ref="urn:x" href="{LIST}/{parent}/"/>'
+             if parent else '')
+    return (f'<entry><author><name>{name}</name><email>{name.lower()}@x'
+            f'</email></author><title>{subject}</title><updated>{date}'
+            f'</updated><link href="{LIST}/{msgid}/"/>{reply}</entry>')
+
+
+LIST = 'https://lore.kernel.org/my-list'
+
+# A page of the feed: a series with a cover letter, its next version sent in
+# reply to it, a patch on its own, a series whose cover letter is too old to
+# be in the page, and a reply which lore's search missed
+FEED = ('<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom" '
+        'xmlns:thr="http://purl.org/syndication/thread/1.0">' + ''.join([
+            feed_entry('v2c@x', '[PATCH v2 0/2] dm: Tidy up',
+                       '2026-10-05T10:00:00Z', 'c@x'),
+            feed_entry('v2p1@x', '[PATCH v2 1/2] dm: First',
+                       '2026-10-05T10:00:01Z', 'v2c@x'),
+            feed_entry('v2p2@x', '[PATCH v2 2/2] dm: Second',
+                       '2026-10-05T10:00:02Z', 'v2c@x'),
+            feed_entry('one@x', '[PATCH] net: Fix it', '2026-10-04T10:00:00Z',
+                       name='Bob'),
+            feed_entry('old2@x', '[RFC PATCH 2/3] fs: Two',
+                       '2026-10-03T10:00:00Z', 'old@x'),
+            feed_entry('p2@x', '[PATCH 2/2] dm: Second', '2026-10-01T10:00:02Z',
+                       'c@x'),
+            feed_entry('p1@x', '[PATCH 1/2] dm: First', '2026-10-01T10:00:01Z',
+                       'c@x'),
+            feed_entry('c@x', '[PATCH 0/2] dm: Tidy up', '2026-10-01T10:00:00Z'),
+            feed_entry('r@x', 'Re: thanks', '2026-10-02T10:00:00Z', 'c@x'),
+        ]) + '</feed>').encode()
+
+
 SERIES = {
     'id': 7, 'received_all': True,
     'cover_letter': {'id': 70, 'name': 'dm: Tidy up', 'msgid': '<cover@x>'},
@@ -387,7 +433,7 @@ class TestLore(unittest.TestCase):
                          (llist.url, llist.link_name))
         data = run(llist.get_series(None, '<cover@x>'))
         self.assertEqual(
-            ('cover@x', '[0/2] dm: Tidy up', 1, 2, 2, True),
+            ('cover@x', 'dm: Tidy up', 1, 2, 2, True),
             (data['id'], data['name'], data['version'], data['total'],
              data['received_total'], data['received_all']))
         self.assertEqual('lore:cover@x', data['cover_letter']['id'])
@@ -456,6 +502,12 @@ class TestLore(unittest.TestCase):
                          (data['id'], data['name'], data['version'],
                           data['total'], data['cover_letter']))
         self.assertEqual(['lore:one@x'], [p['id'] for p in data['patches']])
+
+        # The patch is named as in its series, without 'PATCH', and links to
+        # the list
+        patch = run(llist.get_patch(None, 'lore:one@x'))
+        self.assertEqual(('[v2] libfdt: Fix it', f'{LIST}/one@x/'),
+                         (patch['name'], patch['web_url']))
         self.assertEqual(
             {'name': 'my-list', 'link_name': 'my-list',
              'list_id': 'my-list.vger.kernel.org',
@@ -476,6 +528,93 @@ class TestLore(unittest.TestCase):
         with self.assertRaises(ValueError) as exc:
             run(llist.query_series(None, 'dm: Tidy up'))
         self.assertIn('give the Message-ID', str(exc.exception))
+
+    def test_lorelist_feed_complete(self):
+        """A series which is only partly in the feed is read from its thread"""
+        llist, reads = self.lore_list()
+        part = lorelist.feed_series(lorelist.parse_feed(FEED), LIST)[3]
+        part['patches'] = part['patches'][1:]
+        part['received_all'] = False
+        part['id'] = 'cover@x'
+        full = run(llist.complete_series(None, part))
+        self.assertEqual(['cover@x'], reads)
+        self.assertEqual(
+            ('cover@x', 'dm: Tidy up', True, 'lore:cover@x',
+             ['lore:p1@x', 'lore:p2@x']),
+            (full['id'], full['name'], full['received_all'],
+             full['cover_letter']['id'],
+             [pat['id'] for pat in full['patches']]))
+
+        # A complete series is left alone
+        reads.clear()
+        whole = lorelist.feed_series(lorelist.parse_feed(FEED), LIST)[0]
+        self.assertIs(whole, run(llist.complete_series(None, whole)))
+        self.assertEqual([], reads)
+
+    def test_lorelist_feed(self):
+        """The newest series on a list are read from lore's feed"""
+        series = lorelist.feed_series(lorelist.parse_feed(FEED), LIST)
+        self.assertEqual(
+            [('v2c@x', '[v2] dm: Tidy up', 2, 2, True, 'lore:v2c@x',
+              ['lore:v2p1@x', 'lore:v2p2@x']),
+             ('one@x', 'net: Fix it', 1, 1, True, None, ['lore:one@x']),
+             ('old@x', '[RFC] fs: Two', 1, 3, False, None, ['lore:old2@x']),
+             ('c@x', 'dm: Tidy up', 1, 2, True, 'lore:c@x',
+              ['lore:p1@x', 'lore:p2@x'])],
+            [(ser['id'], ser['name'], ser['version'], ser['total'],
+              ser['received_all'], (ser['cover_letter'] or {}).get('id'),
+              [pat['id'] for pat in ser['patches']]) for ser in series])
+        one = series[1]
+        self.assertEqual(
+            ('2026-10-04T10:00:00', {'name': 'Bob', 'email': 'bob@x'},
+             f'{LIST}/one@x/', 'net: Fix it'),
+            (one['date'], one['submitter'], one['web_url'],
+             one['patches'][0]['name']))
+
+        # Each page is read once, then taken from the cache
+        llist = lorelist.LoreList(LIST)
+        self.assertEqual('?q=s%3APATCH+AND+NOT+s%3ARe&x=A',
+                         llist.recent_series_path(None, 1, 50))
+        self.assertEqual('?q=s%3APATCH+AND+NOT+s%3ARe&x=A&o=200',
+                         llist.recent_series_path(None, 2, 50))
+        cache = pwcache.Cache(os.path.join(self.tmpdir, 'pw.db'))
+        # The series whose cover letter is not in the page is looked for in
+        # its thread, which lore does not have here
+        client = Client(Response(200, FEED), Response(404), Response(404))
+        with mock.patch.object(pwcache, 'get', return_value=cache):
+            self.assertIsNone(llist.read_time(llist.recent_series_path(
+                None, 1, 50)))
+            got = run(llist.get_recent_series(client, None, max_age=60))
+            self.assertEqual(series, got)
+            self.assertEqual(got, run(llist.get_recent_series(client, None,
+                                                              max_age=60)))
+            self.assertEqual([f'{LIST}/?q=s%3APATCH+AND+NOT+s%3ARe&x=A',
+                              f'{LIST}/old@x/t.mbox.gz'], client.urls)
+            self.assertIsNotNone(llist.read_time(llist.recent_series_path(
+                None, 1, 50)))
+            self.assertLess(llist.read_age(llist.recent_series_path(
+                None, 1, 50)), 60)
+
+            # A page which cannot be read says so
+            with self.assertRaises(ValueError) as exc:
+                run(llist.get_recent_series(client, None, page=2))
+        self.assertEqual(f'Cannot read the newest series from {LIST}',
+                         str(exc.exception))
+        self.assertEqual({}, llist.get_states(['lore:p1@x']))
+        self.assertIsNone(run(llist.follow_events(client)))
+        self.assertEqual('p1@x/', llist.patch_path('lore:p1@x'))
+
+    def test_strip_signature(self):
+        """The signature at the end of a patch is not part of its diff"""
+        diff = '@@ -1,2 +1 @@\n-a\n+b\n'
+        for sig in ('-- \n2.43.0\n', '-- \nFred Bloggs <f@x>\n\n',
+                    '--  \nFred Bloggs <f@x>\n'):
+            self.assertEqual(diff, lore.strip_signature(diff + sig))
+
+        # A removed line holding '- ' is kept
+        for kept in ('@@ -1,2 +1 @@\n-a\n-- \n+b\n', '@@ -1 +0 @@\n-- \n',
+                     diff):
+            self.assertEqual(kept, lore.strip_signature(kept))
 
     def test_lorelist_names(self):
         """A link to a series on lore is tidied into its Message-ID"""

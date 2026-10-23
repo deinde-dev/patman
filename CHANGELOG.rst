@@ -10,6 +10,10 @@ Unreleased
 
 Added
 ~~~~~
+- The ``patman serve`` page works for an upstream whose list is on lore, such
+  as dtc: its inbox lists the newest series sent to the list, read from
+  lore's feed, and their patches, cover letters and comments are read from
+  lore.
 - ``patman review`` can read a series from a mailing list on lore, for a
   project with no patchwork, such as dtc: give the list with
   ``patman upstream add --lore-url``, and the Message-ID of the cover letter,
