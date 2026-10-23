@@ -842,7 +842,8 @@ class Server(jobs.JobRunner):
                                    for pat in ser.get('patches') or []])
         series = info.get_inbox(
             self.cser, self.rcser, series_list,
-            info.get_patch_status(series_list, commits, states))
+            info.get_patch_status(series_list, commits, states),
+            self.get_own_emails())
         for item in series:
             item['job'] = self._reviewing(item['id'])
         await self._set_review_branches(series, ups, 'id')

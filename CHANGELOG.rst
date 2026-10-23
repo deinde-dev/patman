@@ -91,6 +91,8 @@ Added
 
 Changed
 ~~~~~~~
+- The inbox on the ``patman serve`` page counts a series sent from your
+  address as yours, not just one in your database.
 - A new version of a series in the inbox on the ``patman serve`` page says
   which version you reviewed, e.g. 'v2 reviewed', rather than 'earlier
   version reviewed', and shows the replies to that review which are waiting

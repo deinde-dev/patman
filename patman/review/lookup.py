@@ -226,6 +226,27 @@ def clean_series_name(name):
     return name
 
 
+def is_own_series(data, own_emails, own_db):
+    """Check whether a series is one which you sent
+
+    It is yours if its submitter has one of your email addresses, or if it
+    is one of your own series in the database, which you may have sent from
+    another address
+
+    Args:
+        data (dict): Series, as Patchwork.get_series() gives it
+        own_emails (set of str): Your email addresses, in lower case
+        own_db (Database): Database holding your own series
+
+    Returns:
+        bool: True if the series is yours
+    """
+    sent_by = ((data.get('submitter') or {}).get('email') or '').lower()
+    if sent_by and sent_by in own_emails:
+        return True
+    return own_db.series_is_own(data.get('id'))
+
+
 # Longest name to give a series on lore, in a branch or file name
 MAX_LINK_NAME = 40
 

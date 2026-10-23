@@ -2133,6 +2133,26 @@ class TestReview(CseriesTester):
         self.db_open()
         self.assertIsNotNone(cser.db.series_find_by_link(str(self.REVIEW_LINK)))
 
+    def test_is_own_series(self):
+        """A series is yours if sent from your address, or in your database"""
+        db = self.get_database().db
+        sid = db.series_add('mine', 'Mine', None)
+        db.ser_ver_add(sid, 1, link='123')
+        sid = db.series_add('rev', 'Theirs', None)
+        db.series_set_source(sid, 'review')
+        db.ser_ver_add(sid, 1, link='456')
+        db.commit()
+
+        def is_own(link, sent_by):
+            return review.lookup.is_own_series(
+                {'id': link, 'submitter': {'email': sent_by}}, {'me@x.com'},
+                db)
+        self.assertTrue(is_own(789, 'Me@X.com'))
+        self.assertTrue(is_own(123, 'other@x.com'))
+        self.assertFalse(is_own(456, 'other@x.com'))
+        self.assertFalse(is_own(789, None))
+        self.assertFalse(review.lookup.is_own_series({'id': 789}, set(), db))
+
     def test_review_scan_skips_inactive(self):
         """Test --scan skips a new version that is not active"""
         self.get_cser()
