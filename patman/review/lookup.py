@@ -11,6 +11,7 @@ the series, its cover letter, the state of its patches and the comments it
 has received, and works out the name under which a review is stored.
 """
 
+import hashlib
 import os
 import re
 import tempfile
@@ -225,22 +226,32 @@ def clean_series_name(name):
     return name
 
 
+# Longest name to give a series on lore, in a branch or file name
+MAX_LINK_NAME = 40
+
+
 def safe_link(link):
     """Get a series link in a form which can go in a branch or file name
 
     A patchwork link is a number, but a series on lore is known by its
-    Message-ID, which can hold characters that git does not allow in a
-    branch name.
+    Message-ID. Only the part before the '@' is used, since that is unique
+    in practice, with any characters that git does not allow in a branch
+    name changed to '_'. A long one, such as from Gmail, is cut short and
+    ends with a hash of the whole Message-ID, to keep it unique.
 
     Args:
         link (str): Patchwork series link/ID, or Message-ID
 
     Returns:
-        str: Link with any such characters changed to '_', e.g.
-            '20261001121036.2910243-1-ann@amd.com'
+        str: Name, e.g. '498633' or '20261001121036.2910243-1-ann'
     """
-    name = re.sub(r'[^\w.@+=-]', '_', str(link))
-    return re.sub(r'\.{2,}', '.', name).strip('.')
+    link = str(link)
+    name = re.sub(r'[^\w.+=-]', '_', link.split('@', maxsplit=1)[0])
+    name = re.sub(r'\.{2,}', '.', name).strip('.')
+    if not name or len(name) > MAX_LINK_NAME:
+        digest = hashlib.sha1(link.encode()).hexdigest()[:8]
+        name = '-'.join(filter(None, (name[:MAX_LINK_NAME - 9], digest)))
+    return name
 
 
 def make_review_name(link, upstream=None):

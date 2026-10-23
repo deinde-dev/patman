@@ -2445,14 +2445,24 @@ VERDICT: approved"""
         self.assertEqual('pw-498633-review',
                          review.lookup.make_review_name(498633))
 
-        # A Message-ID can hold what git does not allow in a branch name
+        # A Message-ID gives the part before the '@', and can hold what git
+        # does not allow in a branch name
         self.assertEqual(
-            'dtc-20261001.29-1-ann@amd.com-review',
+            'dtc-20261001.29-1-ann-review',
             review.lookup.make_review_name('20261001.29-1-ann@amd.com', 'dtc'))
         self.assertEqual(
-            'dtc-CA_x_y.z=1+2@mail.gmail.com-review',
+            'dtc-CA_x_y.z=1+2-review',
             review.lookup.make_review_name('CA/x~y..z=1+2@mail.gmail.com',
                                            'dtc'))
+
+        # A long one is cut short, with a hash to keep it unique
+        gmail = 'CAODfWeHQcjGn0CtweT4Q9Em6WC9cTmvfxhuQCgae4gdu5W9hSA'
+        name = review.lookup.safe_link(f'{gmail}@mail.gmail.com')
+        self.assertEqual(review.lookup.MAX_LINK_NAME, len(name))
+        self.assertTrue(name.startswith(gmail[:31] + '-'))
+        self.assertNotEqual(name,
+                            review.lookup.safe_link(f'{gmail}@other.com'))
+        self.assertEqual(8, len(review.lookup.safe_link('@x')))
 
     def test_review_lore_upstream(self):
         """An upstream whose list is on lore reads series from there"""
