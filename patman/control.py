@@ -572,7 +572,7 @@ def do_review(args, test_db=None, pwork=None, cser=None):
         rcser = cseries.Cseries(cser.topdir, db_dir=review_db_dir)
         try:
             rcser.open_database()
-            return review_mod.do_review(args, pwork, rcser)
+            return review_mod.do_review(args, pwork, rcser, own_db=cser.db)
         finally:
             rcser.close_database()
     finally:

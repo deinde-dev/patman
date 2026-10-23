@@ -52,10 +52,11 @@ Choosing a series
 -----------------
 
 The Inbox tab lists the newest series on patchwork. 'To review' shows those
-which you have not reviewed and which are not yours, and 'New versions' those
-for which you reviewed an earlier version, such as the Ethernet driver here.
-Each series also says how far it has got: the board support is partly applied
-upstream, and changes have been requested to the bootflow series:
+which you have not reviewed and which are not yours (see :ref:`review_own`),
+and 'New versions' those for which you reviewed an earlier version, such as
+the Ethernet driver here. Each series also says how far it has got: the board
+support is partly applied upstream, and changes have been requested to the
+bootflow series:
 
 .. image:: images/serve-inbox.png
    :width: 660px
