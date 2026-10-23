@@ -94,6 +94,21 @@ def subject_info(msg):
             int(seq.group(2)) if seq else 1, name)
 
 
+def _series_name(subject):
+    """Get the name of a series, from the subject of a patch or cover letter
+
+    Args:
+        subject (str): Subject, e.g. '[PATCH v3 2/5] dm: Tidy up'
+
+    Returns:
+        str: Name, as patchwork gives it, e.g. '[v3] dm: Tidy up'
+    """
+    match = lore.RE_SUBJECT.match(' '.join(subject.split()))
+    parts = [part for part in match.group(1).split()
+             if part.upper() != 'PATCH' and not lore.RE_SEQ.match(part)]
+    return f"[{','.join(parts)}] {match.group(2)}" if parts else match.group(2)
+
+
 def _find_patches(messages, root, info):
     """Find the patches of a series in its thread
 
@@ -253,7 +268,7 @@ class LoreList:
         if not info:
             raise ValueError(f"Message '{link}' is not a patch or cover "
                              'letter')
-        version, seq, total, name = info
+        version, seq, total, _ = info
         if seq > 1:
             raise ValueError(
                 f"Message '{link}' is patch {seq} of {total}; give the cover "
@@ -263,7 +278,8 @@ class LoreList:
         cmt = lore.to_comment(root)
         patches = [self._entry(found[num]) for num in sorted(found)]
         return {
-            'id': link, 'name': name, 'version': version, 'total': total,
+            'id': link, 'name': _series_name(str(root.get('Subject', ''))),
+            'version': version, 'total': total,
             'received_total': len(patches),
             'received_all': len(patches) >= total,
             'date': cmt['date'], 'submitter': cmt['submitter'],

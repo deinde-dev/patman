@@ -387,7 +387,7 @@ class TestLore(unittest.TestCase):
                          (llist.url, llist.link_name))
         data = run(llist.get_series(None, '<cover@x>'))
         self.assertEqual(
-            ('cover@x', '[0/2] dm: Tidy up', 1, 2, 2, True),
+            ('cover@x', 'dm: Tidy up', 1, 2, 2, True),
             (data['id'], data['name'], data['version'], data['total'],
              data['received_total'], data['received_all']))
         self.assertEqual('lore:cover@x', data['cover_letter']['id'])
