@@ -539,6 +539,95 @@ class TestReview(CseriesTester):
         self.assertFalse(result)
         ctx.cser.db.ser_ver_remove.assert_called_once_with(5, 1)
 
+    def test_review_apply_other_project(self):
+        """A series for another project is not applied, saving agent time"""
+        tree = os.path.join(self.tmpdir, 'tree')
+        os.makedirs(os.path.join(tree, 'libfdt'))
+        for path in ('Makefile', 'libfdt/fdt_ro.c'):
+            tools.write_file(os.path.join(tree, path), b'x\n')
+        for cmd in (['init', '-q'], ['add', '.'],
+                    ['-c', 'user.name=T', '-c', 'user.email=t@x', 'commit',
+                     '-q', '-m', 'Base']):
+            subprocess.run(['git', *cmd], cwd=tree, check=True)
+
+        def mbox(*paths):
+            return b''.join(b'--- %s\n+++ b/x\n' % path.encode()
+                            for path in paths)
+
+        apply = review.apply
+        self.assertEqual({'libfdt/fdt_ro.c', 'a b.c'}, apply.changed_files(
+            mbox('a/libfdt/fdt_ro.c', '/dev/null', 'a/a b.c\t')))
+
+        # A series for the tree, or one only adding files, is fine
+        apply.check_for_tree(mbox('a/libfdt/fdt_ro.c'), 'HEAD', tree)
+        apply.check_for_tree(mbox('/dev/null'), 'HEAD', tree)
+        apply.check_for_tree(mbox('a/Makefile', 'a/scripts/dtc/checks.c'),
+                             'HEAD', tree)
+
+        # Most of the files changed by a kernel series are missing
+        kernel = mbox('a/Makefile', 'a/scripts/dtc/checks.c',
+                      'a/scripts/Makefile.lib')
+        with self.assertRaises(apply.OtherProjectError) as exc:
+            apply.check_for_tree(kernel, 'HEAD', tree)
+        self.assertEqual(
+            "2 of the 3 files which the series changes are not in HEAD, "
+            "e.g. 'scripts/Makefile.lib'", str(exc.exception))
+
+        # The agent is not run, and the review is a clean skip
+        mbox_path = os.path.join(self.tmpdir, 'series.mbox')
+        tools.write_file(mbox_path, kernel)
+        with mock.patch.object(apply.claude_mod, 'check_available',
+                               return_value=True), \
+                mock.patch.object(apply, 'fetch_mbox', mock.AsyncMock(
+                    return_value=mbox_path)), \
+                mock.patch.object(apply.claude_mod,
+                                  'run_agent_collect') as run_agent:
+            with self.assertRaises(apply.OtherProjectError):
+                apply.apply_series_sync(None, 'x@y', 'dtc-x-review', 'HEAD',
+                                        tree)
+            run_agent.assert_not_called()
+            self.assertFalse(os.path.exists(mbox_path))
+
+            ctx = mock.Mock()
+            ctx.branch_name = 'dtc-x-review'
+            ctx.upstream_branch = 'HEAD'
+            ctx.repo_path = tree
+            ctx.series_id = 5
+            ctx.version = 1
+            tools.write_file(mbox_path, kernel)
+            with terminal.capture() as (out, _):
+                self.assertIsNone(apply.apply_and_check(ctx, 'x@y'))
+        self.assertIn('not for this project', out.getvalue())
+        ctx.cser.db.ser_ver_remove.assert_called_once_with(5, 1)
+
+    def test_review_nothing_tidied(self):
+        """A series with nothing to review leaves no worktree or branch"""
+        self.get_cser()
+        pwork = self._review_pwork()
+        with self._mock_review(), \
+                mock.patch('patman.review.apply.apply_and_check',
+                           return_value=None), \
+                mock.patch.object(review.core.gitutil,
+                                  'remove_worktree') as remove, \
+                mock.patch.object(review.core.gitutil, 'count_revs',
+                                  side_effect=[0, 1]) as count, \
+                mock.patch.object(review.core.gitutil,
+                                  'delete_branch') as delete:
+            with terminal.capture():
+                self.run_review('-s', str(self.REVIEW_LINK), pwork=pwork)
+            branch = review.lookup.make_review_name(str(self.REVIEW_LINK))
+            remove.assert_called_once_with(
+                self.tmpdir, review.core.cser_helper.review_worktree_path(
+                    self.tmpdir, branch))
+            delete.assert_called_once_with(branch, self.tmpdir)
+
+            # A branch with commits on it is kept
+            delete.reset_mock()
+            with terminal.capture():
+                self.run_review('-s', str(self.REVIEW_LINK), pwork=pwork)
+            self.assertEqual(2, count.call_count)
+            delete.assert_not_called()
+
     def test_review_drafts_fetch_cover_headers(self):
         """Drafts fetch the cover's headers so its reply is a reply-all"""
 

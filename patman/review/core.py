@@ -743,6 +743,23 @@ def _check_wanted(args, ctx, link, clean_name, own_db):
             'review it anyway')
 
 
+def _remove_empty_branch(ctx, wt_path):
+    """Remove the worktree and branch of a series with nothing to review
+
+    The branch is only deleted if it has nothing on top of the upstream
+    branch, so that no commits are lost.
+
+    Args:
+        ctx (ReviewContext): Review context (uses main_repo, branch_name
+            and upstream_branch)
+        wt_path (str): Path of the review worktree
+    """
+    gitutil.remove_worktree(ctx.main_repo, wt_path)
+    if gitutil.count_revs(ctx.main_repo,
+                          f'{ctx.upstream_branch}..{ctx.branch_name}') == 0:
+        gitutil.delete_branch(ctx.branch_name, ctx.main_repo)
+
+
 def _review_link(args, pwork, cser, link, own_db=None):
     """Run the main review flow for a single patchwork series
 
@@ -811,7 +828,9 @@ def _review_link(args, pwork, cser, link, own_db=None):
 
         apply_ok = apply.apply_and_check(ctx, link)
         if apply_ok is None:
-            # Every patch is already upstream; nothing to review
+            # Every patch is already upstream, or the series is for another
+            # project; nothing to review
+            _remove_empty_branch(ctx, wt_path)
             return 0
         if not apply_ok:
             return 1
