@@ -10,6 +10,10 @@ Unreleased
 
 Added
 ~~~~~
+- A ``[review]`` section in the config, e.g. in a tracked
+  ``.patman-defaults``, gives the name of the project which reviews are for
+  and a file of its conventions, for the agent to check each patch against.
+  This allows reviewing projects other than U-Boot, which stays the default.
 - ``patman review --checkout`` checks out a series in the tree, to try it:
   its branch from the review if it has one, or else a new branch with the
   series applied by ``git am``. On the ``patman serve`` page, 'Try it' on a

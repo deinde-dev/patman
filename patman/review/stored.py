@@ -23,6 +23,7 @@ from u_boot_pylib import tout
 
 from patman import cser_helper
 from patman import database
+from patman import settings
 from patman import gmail
 from patman.review import apply
 from patman.review import common
@@ -335,7 +336,7 @@ async def revise_reviews(ctx, reviews, note, commits, others=None,
         prompt = prompts.REVISE_PROMPT.format(
             note=note, reviews_path=reviews_path, patches=patches,
             context=context, tag=ctx.reviewer_tag, spelling=ctx.spelling,
-            voice=prompts.voice_section())
+            voice=prompts.voice_section(), project=settings.review_project())
         kwargs = {'allowed_tools': ['Bash', 'Read', 'Grep'],
                   'cwd': ctx.repo_path,
                   'max_buffer_size': claude_mod.MAX_BUFFER_SIZE}

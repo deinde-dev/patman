@@ -125,6 +125,9 @@ repo's ``.patman`` (or a tracked ``.patman-defaults``)::
     [settings]
     keep_assist_tags: True
 
+A ``[review]`` section says which project reviews are for and gives its
+conventions; see :ref:`review_project`.
+
 If you want to adjust settings (or aliases) that affect just a single
 project you can add a section that looks like [project_settings] or
 [project_alias].  If you want to use tags for your linux work, you could do::

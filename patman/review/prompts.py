@@ -13,6 +13,9 @@ cover letter, refining and revising the reviews, and responding to replies,
 so that they can be read and changed in one place.
 """
 
+from u_boot_pylib import tools
+
+from patman import settings
 from patman.review import voice
 
 
@@ -141,9 +144,48 @@ USER CONTEXT (extra notes from the reviewer for this run):
 '''
 
 
-REVIEW_PROMPT = '''You are an experienced U-Boot developer reviewing \
+# Conventions to check when the project gives none, which suit U-Boot
+UBOOT_CONVENTIONS = '''\
+- U-Boot follows the Linux kernel coding style, with 80-column lines
+- Check the proper use of log categories and of driver-model (DM)
+  conventions
+- A series may need updates to the documentation, tests or Kconfig'''
+
+
+def conventions_section():
+    """Get the prompt section with the conventions of the project
+
+    The 'conventions' review setting names a file holding them. Without it,
+    U-Boot's conventions are used if the project is U-Boot, else there are
+    none.
+
+    Returns:
+        str: Section text, or '' if there are no conventions
+
+    Raises:
+        ValueError: if the conventions file cannot be read
+    """
+    project = settings.review_project()
+    fname = settings.review.get('conventions')
+    if fname:
+        try:
+            text = tools.read_file(fname, binary=False).strip()
+        except OSError as exc:
+            raise ValueError(
+                f"Cannot read the review conventions '{fname}': {exc}") from exc
+    elif project == 'U-Boot':
+        text = UBOOT_CONVENTIONS
+    else:
+        return ''
+    return f'''
+{project.upper()} CONVENTIONS (check the patches against these):
+{text}
+'''
+
+
+REVIEW_PROMPT = '''You are an experienced {project} developer reviewing \
 a patch submitted to
-the U-Boot mailing list. This is patch {seq}/{total} in the series.
+the {project} mailing list. This is patch {seq}/{total} in the series.
 {style}
 SERIES OVERVIEW (all patches, >>> marks the one you are reviewing):
 {series_overview}
@@ -173,12 +215,11 @@ IMPORTANT:
 4. Review the patch for:
    - Correctness: Does the code do what the commit message says? Are
      there logic errors, off-by-one errors, or missing error handling?
-   - Style: Does it follow U-Boot coding conventions (kernel style,
-     80-column lines, proper use of log categories, DM conventions)?
+   - Style: Does it follow the {project} coding conventions?
    - Commit message quality: Is it clear, using present/imperative
      tense? Does it explain the motivation?
-   - API usage: Are U-Boot APIs used correctly?
-{cover_section}{prev_section}{context_section}{coverity_section}
+   - API usage: Are the {project} APIs used correctly?
+{conventions_section}{cover_section}{prev_section}{context_section}{coverity_section}
 OUTPUT FORMAT:
 Your response MUST use this exact structured format, with no other text
 before or after. Start with a GREETING line containing the patch
@@ -244,7 +285,7 @@ Rules:
 - If another reviewer has already made a point, do NOT repeat it,
   rephrase it, or add to it - skip it entirely
 - Focus on what is wrong and what to do instead
-- Reference U-Boot conventions where applicable
+- Reference {project} conventions where applicable
 - Do not nitpick trivial style issues that checkpatch would catch
 - Focus on logic, correctness, and design issues
 - If unsure about something, say so rather than guessing
@@ -385,12 +426,14 @@ SERIES CONTEXT (cover letter):
         prev_section=_previous_section(previous_review),
         context_section=context_section(ctx),
         coverity_section=_coverity_section(ctx),
-        quoting_rules=QUOTING_RULES, spelling=ctx.spelling)
+        conventions_section=conventions_section(),
+        quoting_rules=QUOTING_RULES, spelling=ctx.spelling,
+        project=settings.review_project())
 
 
-COVER_REVIEW_PROMPT = '''You are an experienced U-Boot developer \
+COVER_REVIEW_PROMPT = '''You are an experienced {project} developer \
 reviewing a patch series
-submitted to the U-Boot mailing list. Review the series as a whole,
+submitted to the {project} mailing list. Review the series as a whole,
 replying to the cover letter.
 {style}
 SERIES ({total} patches):
@@ -406,8 +449,8 @@ TASK:
    - Whether the cover letter accurately describes what the series does
    - Any cross-patch issues (e.g. something introduced in patch 1 that
      is used incorrectly in patch 3)
-   - Missing patches (e.g. documentation, tests, Kconfig updates)
-
+   - Missing patches (e.g. documentation or tests)
+{conventions_section}
 IMPORTANT:
 - Do NOT run 'git checkout' or switch branches
 - Do NOT 'cd' to another directory
@@ -501,11 +544,13 @@ add at the series level.
         style=style, total=len(all_commits), series_overview=series_overview,
         cover_section=cover_section, comments_section=comments_section,
         context_section=context_section(ctx), prev_section=prev_section,
-        quoting_rules=QUOTING_RULES, spelling=ctx.spelling)
+        conventions_section=conventions_section(),
+        quoting_rules=QUOTING_RULES, spelling=ctx.spelling,
+        project=settings.review_project())
 
 
 REFINE_REVIEWS_PROMPT = '''You are editing draft code-review \
-emails for the U-Boot
+emails for the {project}
 mailing list. Your job is to make them more concise and natural while
 preserving all technical content.
 
@@ -587,7 +632,7 @@ context, and do not add points which they have already made.
     return ''.join(parts)
 
 
-REVISE_PROMPT = '''You are a U-Boot maintainer. You drafted the code
+REVISE_PROMPT = '''You are a {project} maintainer. You drafted the code
 reviews in the file below, but they have not been sent yet. The reviewer has
 read them and wants them changed, as described in their note.
 
@@ -627,7 +672,7 @@ change. Do not add any commentary.
 '''
 
 
-REPLY_PROMPT = '''You are a U-Boot maintainer. You previously reviewed a
+REPLY_PROMPT = '''You are a {project} maintainer. You previously reviewed a
 patch and the author (or another reviewer) has replied to your review.
 Decide whether a response is needed, and if so, draft one.
 
@@ -672,7 +717,7 @@ Rules:
 - If you need to push back, explain concisely with evidence from code
 '''
 
-COMMENT_PROMPT = '''You are a U-Boot maintainer. Someone has commented on
+COMMENT_PROMPT = '''You are a {project} maintainer. Someone has commented on
 {what} of a patch series on the mailing list, and you have been asked to
 respond to the comment.
 

@@ -27,6 +27,7 @@ from u_boot_pylib import tout
 
 from patman import database
 from patman import gmail
+from patman import settings
 from patman.review import common
 from patman.review import drafts
 from patman.review import emails
@@ -386,7 +387,7 @@ async def handle_reply(ctx, review_body, reply_from, reply_body):
 
     prompt = prompts.REPLY_PROMPT.format(review_path=review_path,
         reply_path=reply_path, reply_from=reply_from,
-        spelling=ctx.spelling)
+        spelling=ctx.spelling, project=settings.review_project())
     options = common.agent_options(allowed_tools=['Bash', 'Read', 'Grep'],
         cwd=ctx.repo_path, max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
 
@@ -510,7 +511,8 @@ THE OTHER COMMENTS ON IT, for context:
             comment_from=sender, comment_path=files['comment'],
             others_section=others_section,
             context_section=prompts.context_section(ctx),
-            spelling=ctx.spelling, voice=prompts.voice_section())
+            spelling=ctx.spelling, voice=prompts.voice_section(),
+            project=settings.review_project())
         options = common.agent_options(
             allowed_tools=['Bash', 'Read', 'Grep'], cwd=ctx.repo_path,
             max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
