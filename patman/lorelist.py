@@ -639,12 +639,18 @@ class LoreList:
             since (float or None): Not used
 
         Returns:
-            dict: Patch, as lore.to_patch() gives it
+            dict: Patch, as lore.to_patch() gives it, named as in its series
+                and linking to it on the list
         """
         del max_age, since
         msgid = str(patch_id).removeprefix(ID_PREFIX)
-        return lore.to_patch(await self._message(client, msgid),
-                             str(patch_id))
+        msg = await self._message(client, msgid)
+        patch = lore.to_patch(msg, str(patch_id))
+        patch['web_url'] = f'{self.url}/{msgid}/'
+        info = subject_info(msg)
+        if info:
+            patch['name'] = info[3]
+        return patch
 
     async def get_cover(self, client, cover_id, max_age=None):
         """Read a cover letter

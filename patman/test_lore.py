@@ -502,6 +502,12 @@ class TestLore(unittest.TestCase):
                          (data['id'], data['name'], data['version'],
                           data['total'], data['cover_letter']))
         self.assertEqual(['lore:one@x'], [p['id'] for p in data['patches']])
+
+        # The patch is named as in its series, without 'PATCH', and links to
+        # the list
+        patch = run(llist.get_patch(None, 'lore:one@x'))
+        self.assertEqual(('[v2] libfdt: Fix it', f'{LIST}/one@x/'),
+                         (patch['name'], patch['web_url']))
         self.assertEqual(
             {'name': 'my-list', 'link_name': 'my-list',
              'list_id': 'my-list.vger.kernel.org',
@@ -597,6 +603,18 @@ class TestLore(unittest.TestCase):
         self.assertEqual({}, llist.get_states(['lore:p1@x']))
         self.assertIsNone(run(llist.follow_events(client)))
         self.assertEqual('p1@x/', llist.patch_path('lore:p1@x'))
+
+    def test_strip_signature(self):
+        """The signature at the end of a patch is not part of its diff"""
+        diff = '@@ -1,2 +1 @@\n-a\n+b\n'
+        for sig in ('-- \n2.43.0\n', '-- \nFred Bloggs <f@x>\n\n',
+                    '--  \nFred Bloggs <f@x>\n'):
+            self.assertEqual(diff, lore.strip_signature(diff + sig))
+
+        # A removed line holding '- ' is kept
+        for kept in ('@@ -1,2 +1 @@\n-a\n-- \n+b\n', '@@ -1 +0 @@\n-- \n',
+                     diff):
+            self.assertEqual(kept, lore.strip_signature(kept))
 
     def test_lorelist_names(self):
         """A link to a series on lore is tidied into its Message-ID"""

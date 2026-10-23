@@ -257,6 +257,35 @@ def patch_info(msg):
             int(seq.group(2)), f"[{','.join(parts)}] {match.group(2)}")
 
 
+# The line which starts the signature at the end of a patch
+RE_SIG_LINE = re.compile(r'\n--[ \t]*\n')
+
+
+def strip_signature(diff):
+    """Remove the signature from the end of a patch's diff
+
+    The signature, e.g. the git version or the sender's name, follows a line
+    holding '-- ', perhaps with more spaces, and is not part of the diff. A
+    removed line holding '- ' is the same, but is followed by more of the
+    diff, or by nothing.
+
+    Args:
+        diff (str): Diff, as it ends the message
+
+    Returns:
+        str: Diff without any signature
+    """
+    found = list(RE_SIG_LINE.finditer(diff))
+    if not found:
+        return diff
+    pos = found[-1].start()
+    tail = diff[found[-1].end():].splitlines()
+    if not any(tail) or len(tail) > 5 or any(
+            line[:1] in (' ', '+', '-', '@', '\\') for line in tail):
+        return diff
+    return diff[:pos + 1]
+
+
 def to_patch(msg, patch_id):
     """Turn a message holding a patch into a patch, as patchwork gives them
 
@@ -278,7 +307,7 @@ def to_patch(msg, patch_id):
         'name': info[3] if info else cmt['subject'],
         'submitter': cmt['submitter'],
         'content': body if pos < 0 else body[:pos + 1],
-        'diff': '' if pos < 0 else body[pos + 1:],
+        'diff': '' if pos < 0 else strip_signature(body[pos + 1:]),
         'headers': cmt['headers'], 'state': 'new',
         'web_url': cmt['web_url'], 'project': {},
     }
