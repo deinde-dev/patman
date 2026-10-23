@@ -2102,6 +2102,12 @@ class TestWebServer(unittest.TestCase, TestCommon):
             _, data = self.call(srv, 'GET', '/api/inbox?page=2')
         self.assertEqual(('dtc', False), (data['ups'], data['more']))
 
+        # So it is for a patch, too
+        with mock.patch.object(lorelist.LoreList, 'get_patch',
+                               mock.AsyncMock(return_value={'id': 'lore:p@x'})):
+            status, data = self.call(srv, 'GET', '/api/patch/lore:p@x')
+        self.assertEqual((200, 'lore:p@x'), (status, data['id']))
+
         # With more than one, the upstream must be given
         with terminal.capture():
             self.cser.upstream_add('us', 'https://us',
@@ -2110,6 +2116,36 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(
             (404, "There is no default upstream, so give one with 'ups'"),
             (status, data['error']))
+
+        # A patch and its comments are read from lore by their Message-ID
+        patch = {'id': 'lore:p1@x', 'name': 'dm: First', 'state': 'new',
+                 'submitter': {'name': 'Ann'}, 'content': 'First'}
+        comment = {'id': None, 'msgid': '<r@x>', 'date': '2026-10-02',
+                   'submitter': {'name': 'Bob', 'email': 'bob@x'},
+                   'subject': 'Re: [PATCH] dm: First', 'content': 'OK',
+                   'web_url': 'https://lore/dtc/r@x/'}
+        with mock.patch.object(lorelist.LoreList, 'get_patch',
+                               mock.AsyncMock(return_value=patch)) as get, \
+                mock.patch.object(lorelist.LoreList, 'get_patch_comments',
+                                  mock.AsyncMock(return_value=[comment])):
+            status, data = self.call(srv, 'GET',
+                                     '/api/patch/lore:p1@x?ups=dtc')
+            self.assertEqual(200, status)
+            self.assertEqual(('lore:p1@x', 'First'),
+                             (data['id'], data['content']))
+            self.assertEqual('lore:p1@x', get.call_args.args[1])
+            status, data = self.call(srv, 'GET',
+                                     '/api/comments/patch/lore:p1@x?ups=dtc')
+            self.assertEqual(200, status)
+            self.assertEqual(['OK'], [cmt['content'] for cmt in data])
+
+        # A patch on lore is not looked for on patchwork
+        with terminal.capture():
+            self.cser.upstream_set_default('us')
+        status, data = self.call(srv, 'GET', '/api/comments/patch/lore:p1@x')
+        self.assertEqual(
+            (404, "'lore:p1@x' is on lore, but upstream 'us' has no list "
+             "there; give one with 'ups'"), (status, data['error']))
 
     def test_periodic_sync(self):
         """The periodic sync starts with the server and runs repeatedly"""

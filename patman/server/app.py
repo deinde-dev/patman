@@ -69,6 +69,10 @@ REVIEW_ACTIONS = {'--redraft', '--send', '--revise', '--respond-comment',
 # Tag given in a review which approves the patch
 RE_REVIEWED_BY = re.compile(r'^Reviewed-by:', re.MULTILINE)
 
+# ID of a patch or cover letter in a request: a patchwork ID, or one read from
+# lore, e.g. 'lore:<msgid>'
+ITEM_ID = r'\d+|lore:[^/]+'
+
 
 # pylint: disable=R0902
 class Server(jobs.JobRunner):
@@ -658,12 +662,14 @@ class Server(jobs.JobRunner):
         """Handle 'GET /api/comments/<kind>/<id>': read comments from patchwork
 
         The 'ups' query parameter selects the upstream whose patchwork server
-        is used. Comments read in the last few minutes are taken from the
-        cache, unless the 'refresh' query parameter is 1.
+        is used, defaulting as for the inbox. Comments read in the last few
+        minutes are taken from the cache, unless the 'refresh' query parameter
+        is 1.
 
         Args:
             request (web.Request): Request, with 'kind' ('patch' or 'cover')
-                and the patchwork ID as 'item_id'
+                and the patchwork ID as 'item_id', or 'lore:<msgid>' for one
+                on lore
 
         Each comment says whether we sent it, from our git user.email
         address, which is how a review we sent appears on patchwork
@@ -675,8 +681,8 @@ class Server(jobs.JobRunner):
             ValueError: No patchwork URL is known for the upstream
         """
         kind = request.match_info['kind']
-        item_id = int(request.match_info['item_id'])
-        pwork = self.get_pwork(request.query.get('ups') or None)
+        item_id = _item_id(request)
+        pwork = self._mail_pwork(request, item_id)
         max_age = (0 if request.query.get('refresh') == '1'
                    else patchwork.COMMENTS_MAX_AGE)
         async with aiohttp.ClientSession() as client:
@@ -689,17 +695,47 @@ class Server(jobs.JobRunner):
         return web.json_response([info.comment_info(c, self.get_own_emails())
                                   for c in comments or []])
 
+    def _mail_pwork(self, request, item_id):
+        """Get what to read a patch or cover letter, or its comments, with
+
+        Args:
+            request (web.Request): Request, with the upstream as the 'ups'
+                query parameter, or none to use the default one
+            item_id (int or str): Patchwork ID, or 'lore:<msgid>'
+
+        Return:
+            Patchwork or LoreList: Object for the upstream
+
+        Raises:
+            ValueError: The item is on lore, but the upstream's series are
+                not
+        """
+        ups = request.query.get('ups')
+        if not ups:
+            try:
+                ups = self._default_upstream()
+            except ValueError:
+                ups = None
+        pwork = self.get_pwork(ups)
+        if isinstance(item_id, str) and not isinstance(pwork,
+                                                       lorelist.LoreList):
+            raise ValueError(f"'{item_id}' is on lore, but upstream '{ups}' "
+                             "has no list there; give one with 'ups'")
+        return pwork
+
     async def _mail(self, request):
         """Handle 'GET /api/patch/<id>' or 'GET /api/cover/<id>'
 
         This reads a patch or cover letter from patchwork. The 'ups' query
-        parameter selects the upstream whose patchwork server is used. A patch
-        read in the last hour is taken from the cache, unless the 'refresh'
-        query parameter is 1. The response says when it was read.
+        parameter selects the upstream whose patchwork server is used,
+        defaulting as for the inbox. A patch read in the last hour is taken
+        from the cache, unless the 'refresh' query parameter is 1. The
+        response says when it was read.
 
         Args:
             request (web.Request): Request, with 'kind' ('patch' or 'cover')
-                and the patchwork ID as 'item_id'
+                and the patchwork ID as 'item_id', or 'lore:<msgid>' for one
+                on lore
 
         Return:
             web.Response: Information about the patch or cover letter
@@ -707,8 +743,8 @@ class Server(jobs.JobRunner):
         Raises:
             ValueError: No patchwork URL is known for the upstream
         """
-        item_id = int(request.match_info['item_id'])
-        pwork = self.get_pwork(request.query.get('ups') or None)
+        item_id = _item_id(request)
+        pwork = self._mail_pwork(request, item_id)
         refresh = request.query.get('refresh') == '1'
         read = None
         async with aiohttp.ClientSession() as client:
@@ -1693,10 +1729,9 @@ class Server(jobs.JobRunner):
         app.router.add_get(r'/api/reviews/{idnum:\d+}', self._review_detail)
         app.router.add_get('/api/todo', self._todo_list)
         app.router.add_get('/api/version', self._version)
-        app.router.add_get(r'/api/comments/{kind:patch|cover}/{item_id:\d+}',
-                           self._comments)
-        app.router.add_get(r'/api/{kind:patch|cover}/{item_id:\d+}',
-                           self._mail)
+        item = r'{kind:patch|cover}/{item_id:' + ITEM_ID + '}'
+        app.router.add_get('/api/comments/' + item, self._comments)
+        app.router.add_get('/api/' + item, self._mail)
         app.router.add_get('/api/blob', self._blob)
         app.router.add_get('/api/sync', self._sync_get)
         app.router.add_post('/api/sync', self._sync_post)
@@ -1730,6 +1765,19 @@ class Server(jobs.JobRunner):
         app.on_startup.append(self._start_background)
         app.on_cleanup.append(self._stop_background)
         return app
+
+
+def _item_id(request):
+    """Get the ID of the patch or cover letter which a request is for
+
+    Args:
+        request (web.Request): Request, with the ID as 'item_id'
+
+    Return:
+        int or str: Patchwork ID, or 'lore:<msgid>' for one on lore
+    """
+    item_id = request.match_info['item_id']
+    return int(item_id) if item_id.isdigit() else item_id
 
 
 def is_loopback(host):
