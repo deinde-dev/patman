@@ -488,12 +488,51 @@ def Setup(parser, project_name, argv, config_fname=None):
     for name, value in GetItems(config, 'bounces'):
         bounces.add(value)
 
+    _read_review(config, top_level)
+
     return _UpdateDefaults(parser, config, argv)
+
+
+def _read_review(config, top_level):
+    """Read the [review] section, which says what project reviews are for
+
+    A relative 'conventions' filename is taken from the top of the git
+    repository, where a project can ship the file alongside its
+    .patman-defaults
+
+    Args:
+        config (_ProjectConfigParser): Config to read
+        top_level (str): Top directory of the git repository, or '' if none
+    """
+    review.clear()
+    for name, value in GetItems(config, 'review'):
+        if name not in REVIEW_KEYS:
+            print(f'WARNING: Unknown review setting {name}', file=sys.stderr)
+            continue
+        if name == 'conventions' and value:
+            value = os.path.join(top_level, os.path.expanduser(value))
+        review[name] = value
+
+
+def review_project():
+    """Get the name of the project which reviews are for
+
+    Returns:
+        str: Name from the 'project' review setting, e.g. 'dtc', or 'U-Boot'
+            if there is none
+    """
+    return review.get('project') or 'U-Boot'
 
 
 # These are the aliases we understand, indexed by alias. Each member is a list.
 alias = {}
 bounces = set()
+
+# Review settings from the [review] section, keyed by name, e.g. 'project'
+review = {}
+
+# Names which the [review] section can hold
+REVIEW_KEYS = ('project', 'conventions')
 
 if __name__ == "__main__":
     import doctest

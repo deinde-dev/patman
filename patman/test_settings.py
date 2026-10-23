@@ -148,6 +148,40 @@ class TestSettings(unittest.TestCase):
                     self.assertEqual('base-proj', args.project)
                     create.assert_called_once()
 
+    def test_review_section(self):
+        # The [review] section is layered like [settings], and a relative
+        # conventions file is taken from the top of the repo
+        with cleared_command_line_args():
+            with empty_git_repository() as tmpdir:
+                with tempfile.NamedTemporaryFile() as global_config:
+                    global_config.write(b'[review]\nproject: global-proj\n')
+                    global_config.flush()
+                    with open('.patman-defaults', 'w', buffering=1) as f:
+                        f.write('[review]\n'
+                                'project: dtc\n'
+                                'conventions: doc/review.md\n'
+                                'colour: blue\n')
+                    parser, _ = _make_parser()
+                    with mock.patch('sys.stderr') as stderr:
+                        settings.Setup(parser, 'unknown', [],
+                                       global_config.name)
+                    self.assertIn('Unknown review setting colour',
+                                  ''.join(call.args[0] for call in
+                                          stderr.write.call_args_list))
+                    self.assertEqual(
+                        {'project': 'global-proj',
+                         'conventions': os.path.join(
+                             os.path.realpath(tmpdir), 'doc/review.md')},
+                        settings.review)
+                    self.assertEqual('global-proj',
+                                     settings.review_project())
+
+                # Without a [review] section, the project is U-Boot
+                parser, _ = _make_parser()
+                settings.Setup(parser, 'unknown', [], False)
+                self.assertEqual({}, settings.review)
+                self.assertEqual('U-Boot', settings.review_project())
+
     def test_nested_subcommand(self):
         # A setting reaches a subcommand of a subcommand, such as
         # 'series send', as well as 'send'
