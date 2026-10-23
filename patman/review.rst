@@ -91,6 +91,37 @@ with the ``em_dash`` setting, a hyphen by default, with a space each side.
 Quoted lines are left alone. Set ``em_dash`` to ``—`` to keep them, or use
 ``--em-dash``.
 
+.. _review_project:
+
+Reviewing another project
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The agent is told which project it is reviewing for, and given that
+project's conventions to check each patch against. By default the project is
+U-Boot, with a few of U-Boot's own conventions, such as log categories and
+driver model. For another project, add a ``[review]`` section to the repo's
+``.patman-defaults``, so that everyone reviewing in that tree gets it, or to
+your own ``.patman``:
+
+.. code-block:: ini
+
+    [review]
+    project: dtc
+    conventions: .patman-review.md
+
+``project`` is the name used in the prompts, e.g. 'an experienced dtc
+developer'. ``conventions`` names a file holding the project's conventions,
+in plain text or Markdown, which goes into the prompt for each patch and for
+the cover letter. A relative name is taken from the top of the repo, so a
+project can ship the file alongside its ``.patman-defaults``. The review stops
+with an error if the file cannot be read. A project other than U-Boot with no
+``conventions`` file is reviewed without any.
+
+The file might say which coding style the project follows, what its commit
+subjects look like, which tags a patch needs, and what a reviewer should look
+out for in each part of the tree. Keep it to what the agent cannot easily
+learn from the code itself.
+
 Reviewing a series
 ------------------
 

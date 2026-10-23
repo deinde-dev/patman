@@ -25,6 +25,7 @@ from patman import cseries
 from patman import gmail
 from patman.database import Pcommit
 from patman import database
+from patman import settings
 from patman.patchwork import Patchwork
 from patman.test_common import CseriesTester, Namespace
 
@@ -2712,6 +2713,58 @@ VERDICT: approved"""
                 ctx, 'abc1234', 1, [(1, 'abc1234', 'subj')], None)
         self.assertIn('COVERITY', prompt)
         self.assertIn('drivers/foo.c:42', prompt)
+
+    def test_review_prompt_project(self):
+        """Test the prompts name the project and give its conventions"""
+        ctx = self._make_review_ctx()
+        ctx.comments_path = None
+        ctx.spelling = 'British'
+        commits = [(1, 'abc1234', 'subj')]
+
+        def prompts(review_settings):
+            with mock.patch.dict(settings.review, review_settings,
+                                 clear=True), \
+                    mock.patch.object(review.voice, 'get_voice',
+                                      return_value=None):
+                return (review.prompts.build_review_prompt(
+                            ctx, 'abc1234', 1, commits, None),
+                        review.prompts.build_cover_review_prompt(
+                            ctx, commits))
+
+        # U-Boot is the default, with its own conventions
+        for prompt in prompts({}):
+            self.assertIn('experienced U-Boot developer', prompt)
+            self.assertIn('U-BOOT CONVENTIONS', prompt)
+            self.assertIn('log categories', prompt)
+
+        # Another project has none unless it gives a file
+        for prompt in prompts({'project': 'dtc'}):
+            self.assertIn('experienced dtc developer', prompt)
+            self.assertNotIn('U-Boot', prompt)
+            self.assertNotIn('CONVENTIONS', prompt)
+
+        fname = os.path.join(self.tmpdir, 'conventions.md')
+        tools.write_file(fname, '- No dynamic allocation in libfdt\n',
+                         binary=False)
+        for prompt in prompts({'project': 'dtc', 'conventions': fname}):
+            self.assertIn('DTC CONVENTIONS', prompt)
+            self.assertIn('- No dynamic allocation in libfdt\n', prompt)
+            self.assertNotIn('U-Boot', prompt)
+
+        missing = os.path.join(self.tmpdir, 'missing.md')
+        with self.assertRaises(ValueError) as exc:
+            prompts({'project': 'dtc', 'conventions': missing})
+        self.assertIn(f"Cannot read the review conventions '{missing}'",
+                      str(exc.exception))
+
+        # The other prompts name the project too
+        for prompt in (review.prompts.REFINE_REVIEWS_PROMPT,
+                       review.prompts.REVISE_PROMPT,
+                       review.prompts.REPLY_PROMPT,
+                       review.prompts.COMMENT_PROMPT,
+                       review.voice._VOICE_PROMPT):
+            self.assertIn('{project}', prompt)
+            self.assertNotIn('U-Boot', prompt)
 
     def test_review_aligns_by_subject(self):
         """Test reviews attach to the patchwork patch by subject, not order"""

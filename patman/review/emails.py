@@ -19,6 +19,7 @@ import re
 from u_boot_pylib import claude as claude_mod
 from u_boot_pylib import tout
 
+from patman import settings
 from patman.review import common
 from patman.review import prompts
 from patman.review import voice
@@ -508,7 +509,8 @@ Match this voice when editing the reviews:
 '''
 
     prompt = prompts.REFINE_REVIEWS_PROMPT.format(drafts=drafts_text,
-        voice_section=voice_section, spelling=spelling)
+        voice_section=voice_section, spelling=spelling,
+        project=settings.review_project())
 
     options = common.agent_options(allowed_tools=[],
         max_buffer_size=claude_mod.MAX_BUFFER_SIZE)

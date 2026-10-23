@@ -25,6 +25,7 @@ from u_boot_pylib import tools
 from u_boot_pylib import tout
 
 from patman import gmail
+from patman import settings
 from patman.review import common
 
 
@@ -71,7 +72,7 @@ VOICE_PATH = os.path.join(os.path.expanduser('~/.config/patman.d'),
 
 
 _VOICE_PROMPT = '''Analyse the following email reviews written by a single
-person. These are code-review replies on the U-Boot mailing list.
+person. These are code-review replies on the {project} mailing list.
 
 Study the writing style carefully and produce a concise style guide that
 captures this person's voice. Focus on:
@@ -183,7 +184,8 @@ async def learn_voice(vp):
     combined = '\n\n--- NEXT EMAIL ---\n\n'.join(bodies)
     tools.write_file(reviews_path, combined, binary=False)
 
-    prompt = _VOICE_PROMPT.format(emails=f'(see file: {reviews_path})')
+    prompt = _VOICE_PROMPT.format(emails=f'(see file: {reviews_path})',
+                                  project=settings.review_project())
     options = common.agent_options(allowed_tools=['Read'],
         max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
 
