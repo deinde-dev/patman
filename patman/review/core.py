@@ -695,6 +695,29 @@ def _release_review_lock(fd):
     os.close(fd)
 
 
+def _check_wanted(args, ctx, link, clean_name):
+    """Check that a series is one to review
+
+    Args:
+        args (Namespace): Command-line arguments
+        ctx (ReviewContext): Review context (uses pwork)
+        link (str): Patchwork series link/ID
+        clean_name (str): Name of the series
+
+    Raises:
+        ValueError: if no patch is in an active state, and the option to
+            review it anyway is not given
+    """
+    if not getattr(args, 'any_state', False):
+        states = lookup.get_patch_states(ctx.pwork, link)
+        if not any(state in lookup.ACTIVE_STATES for state in states):
+            shown = ', '.join(sorted({s for s in states if s})) or 'none'
+            raise ValueError(
+                f"Series '{clean_name}' is not active on patchwork "
+                f'(patch states: {shown}); use --any-state to review it '
+                'anyway')
+
+
 def _review_link(args, pwork, cser, link):
     """Run the main review flow for a single patchwork series
 
@@ -729,16 +752,8 @@ def _review_link(args, pwork, cser, link):
         series_data, clean_name, version, patch_count = \
             lookup.fetch_series(pwork, link)
 
-        if not getattr(args, 'any_state', False):
-            states = lookup.get_patch_states(pwork, link)
-            if not any(state in lookup.ACTIVE_STATES for state in states):
-                shown = ', '.join(sorted({s for s in states if s})) or 'none'
-                raise ValueError(
-                    f"Series '{clean_name}' is not active on patchwork "
-                    f'(patch states: {shown}); use --any-state to review it '
-                    'anyway')
-
         ctx = common.ReviewContext(pwork, cser, series_data)
+        _check_wanted(args, ctx, link, clean_name)
         ctx.version = version
         ctx.patch_count = patch_count
 
