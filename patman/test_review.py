@@ -2437,6 +2437,22 @@ VERDICT: approved"""
         self.assertIn('>  drivers/core/uclass.c | 6 ------\n'
                       '>  include/dm.h          | 2 +-\n', body)
 
+    def test_review_name_safe(self):
+        """A series link which is not a number makes a valid branch name"""
+        self.assertEqual('us-498633-review',
+                         review.lookup.make_review_name('498633', 'us'))
+        self.assertEqual('pw-498633-review',
+                         review.lookup.make_review_name(498633))
+
+        # A Message-ID can hold what git does not allow in a branch name
+        self.assertEqual(
+            'dtc-20261001.29-1-ann@amd.com-review',
+            review.lookup.make_review_name('20261001.29-1-ann@amd.com', 'dtc'))
+        self.assertEqual(
+            'dtc-CA_x_y.z=1+2@mail.gmail.com-review',
+            review.lookup.make_review_name('CA/x~y..z=1+2@mail.gmail.com',
+                                           'dtc'))
+
     def test_review_records_upstream(self):
         """A review knows its upstream, which names its branch"""
         cser = self.get_database()

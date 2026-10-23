@@ -46,7 +46,7 @@ async def fetch_mbox(pwork, link, series_data=None):
         ValueError: if the download fails
     """
     mbox_path = os.path.join(tempfile.gettempdir(),
-                             f'patman_review_{link}.mbox')
+                             f'patman_review_{lookup.safe_link(link)}.mbox')
     content = pwork.lore_mbox(series_data) if series_data else None
     if content:
         tout.notice(f'Taking series {link} from lore, since patchwork lacks '

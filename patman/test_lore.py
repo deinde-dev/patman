@@ -350,7 +350,7 @@ class TestLore(unittest.TestCase):
         with mock.patch.object(lookup.tout, 'notice'):
             with self.assertRaises(ValueError) as exc:
                 lookup.fetch_series(pwork, '8')
-        self.assertIn('patchwork received 1 of 2', str(exc.exception))
+        self.assertIn('https://my-fake-url has 1 of 2', str(exc.exception))
 
         # A complete series is left alone, and lore is not asked
         fake_lore.get_thread = mock.Mock()

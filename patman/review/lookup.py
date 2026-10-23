@@ -12,6 +12,7 @@ has received, and works out the name under which a review is stored.
 """
 
 import os
+import re
 import tempfile
 
 import aiohttp
@@ -224,18 +225,37 @@ def clean_series_name(name):
     return name
 
 
+def safe_link(link):
+    """Get a series link in a form which can go in a branch or file name
+
+    A patchwork link is a number, but a series on lore is known by its
+    Message-ID, which can hold characters that git does not allow in a
+    branch name.
+
+    Args:
+        link (str): Patchwork series link/ID, or Message-ID
+
+    Returns:
+        str: Link with any such characters changed to '_', e.g.
+            '20261001121036.2910243-1-ann@amd.com'
+    """
+    name = re.sub(r'[^\w.@+=-]', '_', str(link))
+    return re.sub(r'\.{2,}', '.', name).strip('.')
+
+
 def make_review_name(link, upstream=None):
     """Build a series name for a review branch
 
     Args:
-        link (str): Patchwork series link/ID
+        link (str): Patchwork series link/ID, or Message-ID for a series on
+            lore
         upstream (str or None): Upstream name
 
     Returns:
         str: Branch-style name, e.g. 'us-498633-review'
     """
     ups = upstream or 'pw'
-    return f'{ups}-{link}-review'
+    return f'{ups}-{safe_link(link)}-review'
 
 
 def fetch_series(pwork, link):
@@ -275,7 +295,7 @@ def fetch_series(pwork, link):
     tout.notice(f"Version: {version}, Patches: {patch_count}")
 
     if patch_count < total:
-        raise ValueError('Incomplete series: patchwork received '
+        raise ValueError(f'Incomplete series: {pwork.url} has '
             f'{patch_count} of {total} patches')
 
     return series_data, clean_name, version, patch_count
