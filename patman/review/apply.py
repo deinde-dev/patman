@@ -63,6 +63,58 @@ async def fetch_mbox(pwork, link, series_data=None):
     return mbox_path
 
 
+class OtherProjectError(Exception):
+    """The series is for another project, so cannot be applied here"""
+
+
+def changed_files(content):
+    """Get the files which the patches in an mbox change
+
+    New files are not included, since they are not in the tree before the
+    patches are applied.
+
+    Args:
+        content (bytes): Content of the mbox
+
+    Returns:
+        set of str: Path of each file changed, e.g. 'libfdt/fdt_ro.c'
+    """
+    return {path.decode('utf-8', 'replace').rstrip()
+            for path in re.findall(rb'^--- a/([^\t\n]+)', content, re.M)}
+
+
+def check_for_tree(content, upstream_branch, repo_path):
+    """Check that a series is for the tree it is to be applied to
+
+    A series sent to more than one list, such as a kernel series which
+    touches dtc, may be for another project. Most of the files it changes
+    are then missing from the tree, so there is no point in applying it.
+
+    Args:
+        content (bytes): Content of the mbox
+        upstream_branch (str): Branch the series is to be applied to
+        repo_path (str): Path to the git repository
+
+    Raises:
+        OtherProjectError: More than half of the files which the series
+            changes are not in the tree
+    """
+    paths = changed_files(content)
+    if not paths:
+        return
+    result = subprocess.run(
+        ['git', 'ls-tree', '-r', '--name-only', '-z', upstream_branch],
+        cwd=repo_path, capture_output=True, check=False)
+    if result.returncode:
+        return
+    tree = set(result.stdout.decode('utf-8', 'replace').split('\0'))
+    missing = sorted(paths - tree)
+    if len(missing) * 2 > len(paths):
+        raise OtherProjectError(
+            f'{len(missing)} of the {len(paths)} files which the series '
+            f"changes are not in {upstream_branch}, e.g. '{missing[0]}'")
+
+
 # pylint: disable-next=R0913
 async def apply_series(pwork, link, branch_name, upstream_branch,
                        repo_path, series_data=None):
@@ -82,13 +134,23 @@ async def apply_series(pwork, link, branch_name, upstream_branch,
     Returns:
         tuple: (success, branch_name) where success is bool and
             branch_name is the name of the created branch
+
+    Raises:
+        OtherProjectError: The series is for another project
     """
 
     if not claude_mod.check_available():
         return False, None
 
-    # Download the mbox
+    # Download the mbox, and check that the series is for this tree before
+    # spending agent time on applying it
     mbox_path = await fetch_mbox(pwork, link, series_data)
+    try:
+        check_for_tree(tools.read_file(mbox_path), upstream_branch,
+                       repo_path)
+    except OtherProjectError:
+        os.unlink(mbox_path)
+        raise
 
     # Build the prompt and run the agent
     prompt = prompts.build_apply_prompt(
@@ -315,11 +377,18 @@ def apply_and_check(ctx, link):
 
     Returns:
         True if the patches applied cleanly, None if there was nothing to
-        apply because every patch is already upstream (a clean skip), or
-        False if applying failed
+        apply because every patch is already upstream or the series is for
+        another project (a clean skip), or False if applying failed
     """
-    success, _ = apply_series_sync(ctx.pwork, link, ctx.branch_name,
-        ctx.upstream_branch, ctx.repo_path, ctx.series_data)
+    try:
+        success, _ = apply_series_sync(ctx.pwork, link, ctx.branch_name,
+            ctx.upstream_branch, ctx.repo_path, ctx.series_data)
+    except OtherProjectError as exc:
+        tout.notice(f"Nothing to review for '{ctx.branch_name}': it is not "
+                    f'for this project, since {exc}')
+        ctx.cser.db.ser_ver_remove(ctx.series_id, ctx.version)
+        ctx.cser.commit()
+        return None
 
     if not success:
         # The agent hit a real problem, or was interrupted (which leaves

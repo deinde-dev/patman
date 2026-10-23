@@ -166,3 +166,12 @@ There is nothing to review
 The series has been merged, so applying it to the upstream branch adds
 nothing. To review it anyway, give a branch from before it was merged with
 ``-b``, as :doc:`reviewing` does.
+
+A series sent to more than one list may be for another project::
+
+    $ patman review -U dtc -s 20261020153652.2907186-1-dianders@chromium.org
+    ...
+    Nothing to review for 'dtc-20261020153652.2907186-1-dianders-review': it is not for this project, since 16 of the 17 files which the series changes are not in dtc/main, e.g. 'arch/arm64/Makefile'
+
+patman checks this before the agent applies the patches: if more than half
+of the files which the series changes are missing from the tree, it stops.
