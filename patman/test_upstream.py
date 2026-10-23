@@ -31,14 +31,14 @@ class TestUpstream(CseriesTester):  # pylint: disable=R0904
             cser.upstream_add('us', 'https://one')
         ulist = cser.get_upstream_dict()
         self.assertEqual(1, len(ulist))
-        self.assertEqual(('https://one', None, None, None, None, 0, 0), ulist['us'])
+        self.assertEqual(('https://one', None, None, None, None, 0, 0, None), ulist['us'])
 
         with terminal.capture():
             cser.upstream_add('ci', 'git@two')
         ulist = cser.get_upstream_dict()
         self.assertEqual(2, len(ulist))
-        self.assertEqual(('https://one', None, None, None, None, 0, 0), ulist['us'])
-        self.assertEqual(('git@two', None, None, None, None, 0, 0), ulist['ci'])
+        self.assertEqual(('https://one', None, None, None, None, 0, 0, None), ulist['us'])
+        self.assertEqual(('git@two', None, None, None, None, 0, 0, None), ulist['ci'])
 
         # Try to add a duplicate
         with self.assertRaises(ValueError) as exc:
@@ -63,8 +63,8 @@ class TestUpstream(CseriesTester):  # pylint: disable=R0904
         ulist = cser.get_upstream_dict()
         self.assertEqual(1, len(ulist))
         self.assertEqual(
-            ('https://one', None, 'https://pw.example.com', None, None, 0, 0),
-            ulist['us'])
+            ('https://one', None, 'https://pw.example.com', None, None, 0, 0,
+             None), ulist['us'])
 
         # Check that the patchwork URL shows in the list
         with terminal.capture() as (out, _):
@@ -92,6 +92,27 @@ class TestUpstream(CseriesTester):  # pylint: disable=R0904
         self.assertEqual(3, len(lines))
         self.assertIn('us', lines[2])
         self.assertIn('https://one', lines[2])
+
+    def test_upstream_lore_url(self):
+        """An upstream can have its mailing list on lore"""
+        lore_url = 'https://lore.kernel.org/devicetree-compiler'
+        with terminal.capture() as (out, _):
+            self.run_args('upstream', 'add', 'dtc', 'https://dtc.git',
+                          '-l', lore_url)
+        self.assertIn(f"lore '{lore_url}'", out.getvalue())
+        with terminal.capture() as (out, _):
+            self.run_args('upstream', 'list')
+        self.assertIn(f'lore:{lore_url}', out.getvalue())
+
+        with terminal.capture():
+            self.run_args('upstream', 'add', 'us', 'https://one')
+            self.run_args('upstream', 'set', 'us', '-l', 'https://lore.x/y')
+        cser = self.get_cser()
+        self.assertEqual(lore_url, cser.db.upstream_get_lore_url('dtc'))
+        self.assertEqual('https://lore.x/y',
+                         cser.db.upstream_get_lore_url('us'))
+        self.assertIsNone(cser.db.upstream_get_patchwork_url('dtc'))
+        self.assertIsNone(cser.db.upstream_get_lore_url('nonexistent'))
 
     def test_upstream_set(self):
         """Test updating settings on an existing upstream"""

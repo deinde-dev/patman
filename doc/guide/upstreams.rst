@@ -66,6 +66,12 @@ The settings are:
     Do not treat the tags at the start of a subject, such as ``doc:``, as
     aliases to copy
 
+``-l``
+    The mailing list on lore, e.g.
+    ``https://lore.kernel.org/devicetree-compiler``, for a project with no
+    patchwork server. A review then reads the series from the list (see
+    :ref:`review_lore`)
+
 Set the one most series go to as the default::
 
     $ patman upstream default us

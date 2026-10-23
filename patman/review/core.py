@@ -29,6 +29,7 @@ from u_boot_pylib import tout
 from patman import coverity
 from patman import cser_helper
 from patman import database
+from patman import lorelist
 from patman import patchstream
 from patman import workflow
 from patman.review import apply
@@ -449,7 +450,8 @@ def _register_series(cser, clean_name, version, link, series_data,
         # A new version needs looking at, even if the series was hidden
         cser.db.series_set_hidden(series_id, False)
         cover = series_data.get('cover_letter')
-        if cover and cover.get('id'):
+        # A cover letter taken from lore has no patchwork ID
+        if cover and isinstance(cover.get('id'), int):
             cser.db.ser_ver_set_info(database.SerVer(
                 svid, None, None, None, cover['id'], 0, cover.get('name'),
                 None, None, None))
@@ -921,6 +923,8 @@ def do_review(args, pwork, cser):
     # is then restricted to just that patch; -w reviews the whole series
     whole = getattr(args, 'whole_series', False)
     link = args.pw_link
+    if link and isinstance(pwork, lorelist.LoreList):
+        link = lorelist.parse_link(link)
     if not link and has_patch:
         link, patch_seq = lookup.lookup_patch_series(pwork, args.patch)
         if not whole:

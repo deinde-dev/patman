@@ -137,13 +137,16 @@ class Lore:  # pylint: disable=R0903
         # Number of threads read from lore
         self.request_count = 0
 
-    async def get_thread(self, client, msgid):
+    async def get_thread(self, client, msgid, recheck=False):
         """Read the thread holding a message
 
         Args:
             client (aiohttp.ClientSession): Session to use
             msgid (str): Message-ID of a message in the thread, e.g. the
                 cover letter, with or without angle brackets
+            recheck (bool): True to ask lore even if it lacked the message
+                last time, e.g. because the user gave it and lore may have
+                it by now
 
         Returns:
             list of email.message.EmailMessage or None: Messages in the
@@ -152,7 +155,8 @@ class Lore:  # pylint: disable=R0903
         msgid = bare_msgid(msgid)
         missing = f'missing/{msgid}'
         cache = pwcache.get()
-        if cache and cache.get(self.url, missing, MISSING_MAX_AGE):
+        if cache and not recheck and \
+                cache.get(self.url, missing, MISSING_MAX_AGE):
             return None
         content = await self._read(client, f'{msgid}/t.mbox.gz')
         if content is None:

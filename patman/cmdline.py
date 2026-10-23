@@ -576,6 +576,11 @@ def add_upstream_subparser(subparsers):
         help='URL of patchwork server for this upstream, e.g. '
              "'https://patchwork.ozlabs.org'")
     uadd.add_argument(
+        '-l', '--lore-url',
+        help='URL of the mailing list on lore, for an upstream with no '
+             "patchwork project, e.g. "
+             "'https://lore.kernel.org/devicetree-compiler'")
+    uadd.add_argument(
         '-I', '--identity',
         help="Git sendemail identity to use, e.g. 'chromium'")
     uadd.add_argument(
@@ -604,6 +609,10 @@ def add_upstream_subparser(subparsers):
     uset.add_argument(
         '-p', '--patchwork-url',
         help='URL of patchwork server for this upstream')
+    uset.add_argument(
+        '-l', '--lore-url',
+        help='URL of the mailing list on lore, for an upstream with no '
+             'patchwork project')
     uset.add_argument(
         '-I', '--identity',
         help="Git sendemail identity to use, e.g. 'chromium'")

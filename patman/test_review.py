@@ -25,6 +25,7 @@ from patman import cseries
 from patman import gmail
 from patman.database import Pcommit
 from patman import database
+from patman import lorelist
 from patman import settings
 from patman.patchwork import Patchwork
 from patman.test_common import CseriesTester, Namespace
@@ -2436,6 +2437,73 @@ VERDICT: approved"""
         loop.close()
         self.assertIn('>  drivers/core/uclass.c | 6 ------\n'
                       '>  include/dm.h          | 2 +-\n', body)
+
+    def test_review_name_safe(self):
+        """A series link which is not a number makes a valid branch name"""
+        self.assertEqual('us-498633-review',
+                         review.lookup.make_review_name('498633', 'us'))
+        self.assertEqual('pw-498633-review',
+                         review.lookup.make_review_name(498633))
+
+        # A Message-ID can hold what git does not allow in a branch name
+        self.assertEqual(
+            'dtc-20261001.29-1-ann@amd.com-review',
+            review.lookup.make_review_name('20261001.29-1-ann@amd.com', 'dtc'))
+        self.assertEqual(
+            'dtc-CA_x_y.z=1+2@mail.gmail.com-review',
+            review.lookup.make_review_name('CA/x~y..z=1+2@mail.gmail.com',
+                                           'dtc'))
+
+    def test_review_lore_upstream(self):
+        """An upstream whose list is on lore reads series from there"""
+        cser = self.get_database()
+        cser.db.upstream_add(
+            'dtc', 'https://dtc.git',
+            lore_url='https://lore.kernel.org/devicetree-compiler')
+        cser.commit()
+
+        # No patchwork project is needed
+        pwork = control._setup_patchwork(cser, None, 'dtc', None,
+                                         allow_lore=True)
+        self.assertIsInstance(pwork, lorelist.LoreList)
+        self.assertEqual(('dtc', 'https://lore.kernel.org/devicetree-compiler'),
+                         (pwork.upstream, pwork.url))
+
+        # A lore URL given for the series is taken as its Message-ID
+        args = Namespace(
+            learn_voice=False, sync=False, scan=False, relink=False,
+            pw_link='https://lore.kernel.org/devicetree-compiler/a@b/T/',
+            title=None, patch=None, patch_title=None, checkout=False,
+            respond_comment=None, show=False, revise=None, send=False,
+            delete=False, redraft=False, list_models=False)
+        with mock.patch.object(review.core, '_review_link',
+                               return_value=0) as review_link, \
+                mock.patch.object(review.core.stored, 'do_stored'), \
+                mock.patch.object(review.core.drafts, 'redraft_from_db',
+                                  return_value=False):
+            review.core.do_review(args, pwork, cser)
+        self.assertEqual('a@b', review_link.call_args.args[3])
+
+        # Only a review reads series from lore
+        with self.assertRaises(ValueError) as exc:
+            control._setup_patchwork(cser, None, 'dtc', 'https://pw')
+        self.assertIn('Patchwork project not configured', str(exc.exception))
+
+        # Patchwork is used if the upstream has it, as well as lore
+        cser.db.upstream_set('dtc', patchwork_url='https://pw.dtc')
+        cser.db.patchwork_update('dtc', 3, 'dtc', 'dtc')
+        pwork = control._setup_patchwork(cser, None, 'dtc', None,
+                                         allow_lore=True)
+        self.assertNotIsInstance(pwork, lorelist.LoreList)
+        self.assertEqual('https://pw.dtc', pwork.url)
+
+        # A list on lore cannot be scanned for new versions
+        with self.assertRaises(ValueError) as exc:
+            review.scan.do_scan(None, lorelist.LoreList(
+                'https://lore.kernel.org/devicetree-compiler'), cser)
+        self.assertEqual(
+            'Cannot scan https://lore.kernel.org/devicetree-compiler for new '
+            'versions yet; review each one with -s', str(exc.exception))
 
     def test_review_records_upstream(self):
         """A review knows its upstream, which names its branch"""

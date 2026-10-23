@@ -22,7 +22,7 @@ from u_boot_pylib import tout
 from patman.series import Series
 
 # Schema version (version 0 means there is no database yet)
-LATEST = 17
+LATEST = 18
 
 # Information about a review record
 # Review status values
@@ -359,6 +359,10 @@ class Database:  # pylint:disable=R0904
         self.cur.execute('DROP TABLE traffic')
         self.cur.execute('ALTER TABLE traffic_new RENAME TO traffic')
 
+    def _migrate_to_v18(self):
+        """Allow an upstream to have its mailing list on lore"""
+        self.cur.execute('ALTER TABLE upstream ADD COLUMN lore_url')
+
     # pylint: disable=R0912
     def migrate_to(self, dest_version):
         """Migrate the database to the selected version
@@ -425,6 +429,8 @@ class Database:  # pylint:disable=R0904
                 self._migrate_to_v16()
             elif version == 17:
                 self._migrate_to_v17()
+            elif version == 18:
+                self._migrate_to_v18()
 
             # Save the new version if we have a schema_version table
             if version > 1:
@@ -1186,7 +1192,8 @@ class Database:  # pylint:disable=R0904
 
     # pylint: disable=R0913,R0917
     def upstream_add(self, name, url, patchwork_url=None, identity=None,
-                     series_to=None, no_maintainers=False, no_tags=False):
+                     series_to=None, no_maintainers=False, no_tags=False,
+                     lore_url=None):
         """Add a new upstream record
 
         Args:
@@ -1197,6 +1204,8 @@ class Database:  # pylint:disable=R0904
             series_to (str or None): Patman alias for the To address
             no_maintainers (bool): True to skip get_maintainer.pl
             no_tags (bool): True to skip subject-tag alias processing
+            lore_url (str or None): URL of the mailing list on lore, e.g.
+                'https://lore.kernel.org/devicetree-compiler'
 
         Raises:
             ValueError if the name already exists in the database
@@ -1204,10 +1213,10 @@ class Database:  # pylint:disable=R0904
         try:
             self.execute(
                 'INSERT INTO upstream (name, url, patchwork_url, identity,'
-                ' series_to, no_maintainers, no_tags) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                ' series_to, no_maintainers, no_tags, lore_url) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                 (name, url, patchwork_url, identity, series_to,
-                 no_maintainers, no_tags))
+                 no_maintainers, no_tags, lore_url))
         except sqlite3.IntegrityError as exc:
             if 'UNIQUE constraint failed: upstream.name' in str(exc):
                 raise ValueError(f"Upstream '{name}' already exists") from exc
@@ -1274,12 +1283,14 @@ class Database:  # pylint:disable=R0904
                     get_maintainer.pl when sending
                 no_tags (bool): True to skip processing of subject
                     tags (e.g. 'dm:') when sending
+                lore_url (str): URL of the mailing list on lore, e.g.
+                    'https://lore.kernel.org/devicetree-compiler'
 
         Raises:
             ValueError: Upstream does not exist or invalid field
         """
         valid = {'patchwork_url', 'identity', 'series_to',
-                 'no_maintainers', 'no_tags'}
+                 'no_maintainers', 'no_tags', 'lore_url'}
         invalid = set(kwargs) - valid
         if invalid:
             raise ValueError(f"Invalid upstream field(s): {invalid}")
@@ -1302,6 +1313,22 @@ class Database:  # pylint:disable=R0904
         """
         res = self.execute(
             'SELECT patchwork_url FROM upstream WHERE name = ?', (name,))
+        rec = res.fetchone()
+        if rec:
+            return rec[0]
+        return None
+
+    def upstream_get_lore_url(self, name):
+        """Get the URL of the mailing list on lore for an upstream
+
+        Args:
+            name (str): Upstream name
+
+        Return:
+            str or None: Lore URL, or None if not set
+        """
+        res = self.execute(
+            'SELECT lore_url FROM upstream WHERE name = ?', (name,))
         rec = res.fetchone()
         if rec:
             return rec[0]
@@ -1358,10 +1385,11 @@ class Database:  # pylint:disable=R0904
                     str or None: series_to
                     bool: no_maintainers
                     bool: no_tags
+                    str or None: lore_url
         """
         res = self.execute(
             'SELECT name, url, is_default, patchwork_url, identity,'
-            ' series_to, no_maintainers, no_tags FROM upstream')
+            ' series_to, no_maintainers, no_tags, lore_url FROM upstream')
         udict = OrderedDict()
         for rec in res.fetchall():
             udict[rec[0]] = rec[1:]

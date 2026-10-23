@@ -1749,7 +1749,7 @@ class Cseries(cser_helper.CseriesHelper):
 
     def upstream_add(self, name, url, project=None, pwork=None,
                      patchwork_url=None, identity=None, series_to=None,
-                     no_maintainers=False, no_tags=False):
+                     no_maintainers=False, no_tags=False, lore_url=None):
         """Add a new upstream tree
 
         Args:
@@ -1764,11 +1764,13 @@ class Cseries(cser_helper.CseriesHelper):
             series_to (str or None): Patman alias for the To address
             no_maintainers (bool): True to skip get_maintainer.pl
             no_tags (bool): True to skip subject-tag alias processing
+            lore_url (str or None): URL of the mailing list on lore, e.g.
+                'https://lore.kernel.org/devicetree-compiler'
         """
         self.db.upstream_add(name, url, patchwork_url, identity=identity,
                              series_to=series_to,
                              no_maintainers=no_maintainers,
-                             no_tags=no_tags)
+                             no_tags=no_tags, lore_url=lore_url)
         if project:
             if not pwork:
                 if not patchwork_url:
@@ -1780,6 +1782,8 @@ class Cseries(cser_helper.CseriesHelper):
         msg = f"Added upstream '{name}' ({url})"
         if patchwork_url:
             msg += f" patchwork '{patchwork_url}'"
+        if lore_url:
+            msg += f" lore '{lore_url}'"
         if identity:
             msg += f" identity '{identity}'"
         if series_to:
@@ -1806,13 +1810,15 @@ class Cseries(cser_helper.CseriesHelper):
         print(border)
         for name, items in udict.items():
             (url, is_default, patchwork_url, identity, series_to,
-             no_maintainers, no_tags) = items
+             no_maintainers, no_tags, lore_url) = items
             default = '*' if is_default else ''
             proj = self.db.patchwork_get(name)
             proj_name = proj[0] if proj else ''
             opts = []
             if patchwork_url:
                 opts.append(f'pw:{patchwork_url}')
+            if lore_url:
+                opts.append(f'lore:{lore_url}')
             if identity:
                 opts.append(f'id:{identity}')
             if series_to:
