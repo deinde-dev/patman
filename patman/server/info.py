@@ -16,6 +16,7 @@ import re
 import subprocess
 
 from patman import database
+from patman.review import lookup
 from patman.server.params import BadRequest
 from patman.workflow import Wtype
 
@@ -622,7 +623,8 @@ def _earlier_info(rcser, found):
     return out
 
 
-def get_inbox(cser, rcser, series_list, status=None):
+def get_inbox(cser, rcser, series_list, status=None,
+              own_emails=frozenset()):
     """Get information about recent series on patchwork, for review
 
     Args:
@@ -631,12 +633,14 @@ def get_inbox(cser, rcser, series_list, status=None):
         series_list (list of dict): Series from patchwork, newest first
         status (dict or None): What is known about each patch, as returned
             by get_patch_status(), or None if nothing is
+        own_emails (set of str): Your email addresses, in lower case
 
     Return:
         list of dict: One item for each series. Each of its 'patches' has
             its 'id' and 'name', with the 'commit', 'branch' and 'state' from
             'status', or None. 'earlier' is None, or your review of an
-            earlier version (see _earlier_info())
+            earlier version (see _earlier_info()). 'mine' is True if you
+            sent the series (see lookup.is_own_series())
     """
     status = status or {}
     reviews = rcser.db.series_get_dict(include_archived=True,
@@ -648,7 +652,6 @@ def get_inbox(cser, rcser, series_list, status=None):
         link = str(data['id'])
         found = rcser.db.series_find_by_link(link)
         reviewed = found[0] if found and found[0] in review_ids else None
-        own = cser.db.series_find_by_link(link)
         submitter = data.get('submitter') or {}
         out.append({
             'id': data['id'],
@@ -666,8 +669,7 @@ def get_inbox(cser, rcser, series_list, status=None):
             'reviewed': reviewed,
             'earlier': (None if reviewed else _earlier_info(
                 rcser, by_title.get(_norm_title(data.get('name'))))),
-            'mine': bool(own) and (rcser is not cser or
-                                   own[0] not in review_ids),
+            'mine': lookup.is_own_series(data, own_emails, cser.db),
         })
     return out
 

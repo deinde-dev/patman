@@ -248,16 +248,20 @@ class TestReview(CseriesTester):
                                   config_fname=False)
         seen = {}
 
-        def fake_review(args, pwork, rcser):
+        def fake_review(args, pwork, rcser, own_db):
             seen['path'] = rcser.db.db_path
             seen['topdir'] = rcser.topdir
             seen['ups'] = args.upstream
+            seen['own'] = own_db.db_path
             return 0
 
         with mock.patch.object(review, 'do_review', side_effect=fake_review):
             self.assertEqual(0, control.do_review(args, self.tmpdir))
         self.assertEqual(os.path.join(rdir, '.patman.db'), seen['path'])
         self.assertEqual(self.tmpdir, seen['topdir'])
+
+        # Your own series are in the main database
+        self.assertEqual(os.path.join(self.tmpdir, '.patman.db'), seen['own'])
 
         # The default upstream is only in the main database
         self.assertEqual('us', seen['ups'])
@@ -607,13 +611,13 @@ class TestReview(CseriesTester):
             args = make_args(False)
             review.core.do_review(args, None, None)
             self.assertEqual('3', args.patches)
-            rev_link.assert_called_once_with(args, None, None, 'link-xyz')
+            rev_link.assert_called_once_with(args, None, None, 'link-xyz', None)
 
             # -w: locate via the patch but review the whole series
             args = make_args(True)
             review.core.do_review(args, None, None)
             self.assertIsNone(args.patches)
-            rev_link.assert_called_with(args, None, None, 'link-xyz')
+            rev_link.assert_called_with(args, None, None, 'link-xyz', None)
 
     def test_review_no_link_or_title(self):
         """Test that missing -l and -t gives a proper error"""
@@ -2130,6 +2134,52 @@ class TestReview(CseriesTester):
             with terminal.capture() as _:
                 self.run_review('-s', str(self.REVIEW_LINK), '--any-state',
                                 pwork=pwork)
+        self.db_open()
+        self.assertIsNotNone(cser.db.series_find_by_link(str(self.REVIEW_LINK)))
+
+    def test_is_own_series(self):
+        """A series is yours if sent from your address, or in your database"""
+        db = self.get_database().db
+        sid = db.series_add('mine', 'Mine', None)
+        db.ser_ver_add(sid, 1, link='123')
+        sid = db.series_add('rev', 'Theirs', None)
+        db.series_set_source(sid, 'review')
+        db.ser_ver_add(sid, 1, link='456')
+        db.commit()
+
+        def is_own(link, sent_by):
+            return review.lookup.is_own_series(
+                {'id': link, 'submitter': {'email': sent_by}}, {'me@x.com'},
+                db)
+        self.assertTrue(is_own(789, 'Me@X.com'))
+        self.assertTrue(is_own(123, 'other@x.com'))
+        self.assertFalse(is_own(456, 'other@x.com'))
+        self.assertFalse(is_own(789, None))
+        self.assertFalse(review.lookup.is_own_series({'id': 789}, set(), db))
+
+    def test_review_own_series(self):
+        """Test reviewing your own series is refused unless asked for"""
+        cser = self.get_cser()
+        pwork = self._review_pwork()
+        author = 'Test Author <Author@Example.com>'
+
+        with self._mock_review():
+            with terminal.capture() as (out, _):
+                self.run_args('review', '--reviewer', author, '-s',
+                              str(self.REVIEW_LINK), pwork=pwork,
+                              expect_ret=1)
+        self.assertIn(f"Series '{self.REVIEW_NAME}' is your own",
+                      out.getvalue())
+        self.assertIn('--any-author', out.getvalue())
+        self.db_open()
+        self.assertIsNone(cser.db.series_find_by_link(str(self.REVIEW_LINK)))
+        self.db_close()
+
+        with self._mock_review():
+            with terminal.capture() as _:
+                self.run_args('review', '--reviewer', author, '-s',
+                              str(self.REVIEW_LINK), '--any-author',
+                              pwork=pwork)
         self.db_open()
         self.assertIsNotNone(cser.db.series_find_by_link(str(self.REVIEW_LINK)))
 

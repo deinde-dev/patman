@@ -1553,6 +1553,13 @@ class TestWebServer(unittest.TestCase, TestCommon):
                            'commit': None, 'branch': None, 'state': None}],
                          items[400]['patches'])
 
+        # A series sent from one of our own addresses is ours too
+        srv.own_emails = {'f@b.com'}
+        _, data = self.call(srv, 'GET', '/api/inbox')
+        self.assertEqual({300: True, 200: True, 100: True, 400: True},
+                         {item['id']: item['mine'] for item in data['series']})
+        srv.own_emails = set()
+
         status, data = self.call(srv, 'GET', '/api/inbox?ups=xx')
         self.assertEqual(404, status)
         self.assertIn("No patchwork project for upstream 'xx'", data['error'])

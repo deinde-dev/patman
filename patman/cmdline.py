@@ -837,6 +837,9 @@ def add_review_subparser(subparsers):
         '-f', '--force', action='store_true',
         help='Force re-review even if the series was already reviewed')
     review.add_argument(
+        '--any-author', action='store_true',
+        help='Review the series even if you sent it')
+    review.add_argument(
         '--any-state', action='store_true',
         help='Review the series even if no patch is in an active state '
              '(new, RFC, under-review, changes-requested or '

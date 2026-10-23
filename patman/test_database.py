@@ -273,6 +273,16 @@ class TestDatabase(CseriesTester):
         self.assertEqual({}, rcser.db.upstream_get_dict())
         rcser.close_database()
 
+    def test_series_is_own(self):
+        """A series with a link is found if it is yours, not a review"""
+        db = self.get_database().db
+        mine = self.add_db_series(db, 'mine', [1])
+        rev = self.add_db_series(db, 'rev', [1], review=True)
+        self.assertEqual((True, False, False),
+                         (db.series_is_own(f'{mine}1'),
+                          db.series_is_own(int(f'{rev}1')),
+                          db.series_is_own('999')))
+
     def test_migrate(self):
         """Test migration to later schema versions"""
         db = database.Database(f'{self.tmpdir}/.patman.db')

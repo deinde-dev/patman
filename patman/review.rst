@@ -297,6 +297,21 @@ review regardless::
 
     patman review -s 497923 --any-state
 
+.. _review_own:
+
+Your own series
+~~~~~~~~~~~~~~~
+
+A series which you sent is not reviewed, since the review would go to you.
+It is yours if its submitter has the reviewer's email address, or if it is
+one of your own series in the database, which you may have sent from another
+address. The inbox on the ``patman serve`` page marks the same series as
+yours. Use
+``patman series review`` (see `Reviewing your own series before sending`_)
+to review it before sending it, or ``--any-author`` to review it anyway::
+
+    patman review -s 497923 --any-author
+
 Coverity static analysis
 ~~~~~~~~~~~~~~~~~~~~~~~~
 

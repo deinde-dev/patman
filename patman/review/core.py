@@ -695,7 +695,55 @@ def _release_review_lock(fd):
     os.close(fd)
 
 
-def _review_link(args, pwork, cser, link):
+def _own_emails(args):
+    """Get the email addresses which the reviewer sends from
+
+    Args:
+        args (Namespace): Command-line arguments
+
+    Returns:
+        set of str: The reviewer's address, in lower case, or an empty set
+            if it is not known
+    """
+    try:
+        _, email = common.parse_reviewer(args)
+    except ValueError:
+        return set()
+    return {email.lower()}
+
+
+def _check_wanted(args, ctx, link, clean_name, own_db):
+    """Check that a series is one to review
+
+    Args:
+        args (Namespace): Command-line arguments
+        ctx (ReviewContext): Review context (uses pwork and series_data)
+        link (str): Patchwork series link/ID
+        clean_name (str): Name of the series
+        own_db (Database): Database holding your own series
+
+    Raises:
+        ValueError: if no patch is in an active state, or the series is
+            yours, and the option to review it anyway is not given
+    """
+    if not getattr(args, 'any_state', False):
+        states = lookup.get_patch_states(ctx.pwork, link)
+        if not any(state in lookup.ACTIVE_STATES for state in states):
+            shown = ', '.join(sorted({s for s in states if s})) or 'none'
+            raise ValueError(
+                f"Series '{clean_name}' is not active on patchwork "
+                f'(patch states: {shown}); use --any-state to review it '
+                'anyway')
+
+    if not getattr(args, 'any_author', False) and lookup.is_own_series(
+            ctx.series_data, _own_emails(args), own_db):
+        raise ValueError(
+            f"Series '{clean_name}' is your own; use 'patman series "
+            "review' to review it before sending, or --any-author to "
+            'review it anyway')
+
+
+def _review_link(args, pwork, cser, link, own_db=None):
     """Run the main review flow for a single patchwork series
 
     Fetches the series, registers it (detecting an already-reviewed series
@@ -708,6 +756,8 @@ def _review_link(args, pwork, cser, link):
         pwork (Patchwork): Configured patchwork instance
         cser (Cseries): Open cseries instance
         link (str): Patchwork series link/ID
+        own_db (Database or None): Database holding your own series, or
+            None if it is the one in cser
 
     Returns:
         int: 0 on success, 1 if applying the patches failed
@@ -729,16 +779,8 @@ def _review_link(args, pwork, cser, link):
         series_data, clean_name, version, patch_count = \
             lookup.fetch_series(pwork, link)
 
-        if not getattr(args, 'any_state', False):
-            states = lookup.get_patch_states(pwork, link)
-            if not any(state in lookup.ACTIVE_STATES for state in states):
-                shown = ', '.join(sorted({s for s in states if s})) or 'none'
-                raise ValueError(
-                    f"Series '{clean_name}' is not active on patchwork "
-                    f'(patch states: {shown}); use --any-state to review it '
-                    'anyway')
-
         ctx = common.ReviewContext(pwork, cser, series_data)
+        _check_wanted(args, ctx, link, clean_name, own_db or cser.db)
         ctx.version = version
         ctx.patch_count = patch_count
 
@@ -876,7 +918,7 @@ def _list_models():
     return 0
 
 
-def do_review(args, pwork, cser):
+def do_review(args, pwork, cser, own_db=None):
     """Run the review command
 
     Dispatches to learn-voice, sync, scan, relink, or the main review
@@ -886,6 +928,8 @@ def do_review(args, pwork, cser):
         args (Namespace): Command-line arguments
         pwork (Patchwork): Configured patchwork instance
         cser (Cseries): Open cseries instance
+        own_db (Database or None): Database holding your own series, if
+            the reviews are kept apart from them, else None
     """
     if getattr(args, 'list_models', False):
         return _list_models()
@@ -952,4 +996,4 @@ def do_review(args, pwork, cser):
     if (getattr(args, 'redraft', False) and not getattr(args, 'force', False)
             and drafts.redraft_from_db(args, cser, link)):
         return 0
-    return _review_link(args, pwork, cser, link)
+    return _review_link(args, pwork, cser, link, own_db)
