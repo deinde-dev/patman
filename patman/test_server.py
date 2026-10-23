@@ -2095,11 +2095,21 @@ class TestWebServer(unittest.TestCase, TestCommon):
             (item['id'], item['cover_id'], item['review_branch'],
              item['mine'], item['patches']))
 
-        # An empty page is the last
+        # An empty page is the last. With no default upstream, the only one
+        # is used
         with mock.patch.object(lorelist.LoreList, 'get_recent_series',
                                mock.AsyncMock(return_value=[])):
-            _, data = self.call(srv, 'GET', '/api/inbox?ups=dtc&page=2')
-        self.assertFalse(data['more'])
+            _, data = self.call(srv, 'GET', '/api/inbox?page=2')
+        self.assertEqual(('dtc', False), (data['ups'], data['more']))
+
+        # With more than one, the upstream must be given
+        with terminal.capture():
+            self.cser.upstream_add('us', 'https://us',
+                                   patchwork_url='https://pw.us')
+        status, data = self.call(srv, 'GET', '/api/inbox')
+        self.assertEqual(
+            (404, "There is no default upstream, so give one with 'ups'"),
+            (status, data['error']))
 
     def test_periodic_sync(self):
         """The periodic sync starts with the server and runs repeatedly"""

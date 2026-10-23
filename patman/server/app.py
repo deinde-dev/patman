@@ -838,7 +838,7 @@ class Server(jobs.JobRunner):
             BadRequest: The page is invalid
             ValueError: The upstream has no patchwork project
         """
-        ups = request.query.get('ups') or self.cser.db.upstream_get_default()
+        ups = request.query.get('ups') or self._default_upstream()
         page = params.get_int(request.query, 'page') or 1
         pwork = self.get_pwork(ups)
         project = self._inbox_project(ups, pwork)
@@ -887,6 +887,27 @@ class Server(jobs.JobRunner):
                         else times.now_str()),
             'upstream_fetched': self._fetched_str(ups),
             'series': series})
+
+    def _default_upstream(self):
+        """Get the upstream to use for a request which does not give one
+
+        Return:
+            str: The default upstream, or the only one with a patchwork
+                server or a list on lore, if there is no default
+
+        Raises:
+            ValueError: There is no default upstream, and not just one
+        """
+        ups = self.cser.db.upstream_get_default()
+        if ups:
+            return ups
+        names = [name for name, (_, _, pw_url, *_, lore_url) in
+                 self.cser.db.upstream_get_dict().items()
+                 if pw_url or lore_url]
+        if len(names) != 1:
+            raise ValueError("There is no default upstream, so give one with "
+                             "'ups'")
+        return names[0]
 
     def _inbox_project(self, ups, pwork):
         """Get the project whose series the inbox lists
