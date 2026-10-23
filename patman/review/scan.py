@@ -22,6 +22,7 @@ from u_boot_pylib import tout
 
 import patman
 from patman import interpreter
+from patman import lorelist
 from patman.review import common
 from patman.review import drafts
 from patman.review import lookup
@@ -48,7 +49,14 @@ def _scan_new_versions(pwork, cser):
 
     Returns:
         list of NewVersion: one entry per series that has a newer version
+
+    Raises:
+        ValueError: The upstream's series are on lore, which cannot be
+            searched for new versions yet
     """
+    if isinstance(pwork, lorelist.LoreList):
+        raise ValueError(f'Cannot scan {pwork.url} for new versions yet; '
+                         'review each one with -s')
     series = cser.db.series_get_dict(reviews_only=True)
     found = []
 

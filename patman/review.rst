@@ -69,6 +69,37 @@ Configure an upstream with its Patchwork URL::
 
 :doc:`The Patchwork chapter </patchwork>` describes the patchwork commands.
 
+.. _review_lore:
+
+A list without patchwork
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Some projects, such as dtc, have a mailing list but no patchwork project.
+Patman can read their series from the list's archive on lore.kernel.org
+instead. Give the list on lore when adding the upstream, with no patchwork
+URL::
+
+    patman upstream add dtc https://github.com/dgibson/dtc \
+        --lore-url https://lore.kernel.org/devicetree-compiler
+
+No ``patchwork set-project`` is needed. An upstream which has a patchwork URL
+uses patchwork, even if it has a list on lore too. A series is known by the Message-ID of
+its cover letter, or of its first patch if it has none. Give it with ``-s``,
+with or without the angle brackets, or as the URL of the message on lore::
+
+    patman review -U dtc -s 20261001121036.2910243-1-ann@amd.com
+    patman review -U dtc -s https://lore.kernel.org/devicetree-compiler/20261001121036.2910243-1-ann@amd.com/
+
+The patches are the messages in the thread which have the same version and
+number of patches, so a new version sent in reply to an old one is kept apart.
+The other messages in the thread are the comments. Lore has no patch states,
+so every patch counts as new. Searching by title, with ``-S`` or ``-P``, and
+scanning for new versions with ``--scan`` are not supported yet.
+
+The review branch is named after the Message-ID, e.g.
+``dtc-20261001121036.2910243-1-ann@amd.com-review``, with any characters
+which git does not allow in a branch name changed to ``_``.
+
 Settings
 ~~~~~~~~
 

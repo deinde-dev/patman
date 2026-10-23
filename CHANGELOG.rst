@@ -10,6 +10,10 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman review`` can read a series from a mailing list on lore, for a
+  project with no patchwork, such as dtc: give the list with
+  ``patman upstream add --lore-url``, and the Message-ID of the cover letter,
+  or of the first patch, with ``-s``.
 - A ``[review]`` section in the config, e.g. in a tracked
   ``.patman-defaults``, gives the name of the project which reviews are for
   and a file of its conventions, for the agent to check each patch against.

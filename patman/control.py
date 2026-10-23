@@ -30,6 +30,7 @@ from u_boot_pylib import tout
 from patman import cseries
 from patman import dbmerge
 from patman import lore
+from patman import lorelist
 from patman import patchstream
 from patman import pwcache
 from patman import review as review_mod
@@ -153,7 +154,7 @@ def patchwork_status(branch, count, start, end, dest_branch, force,
 
 
 
-def _setup_patchwork(cser, pwork, ups, pw_url):
+def _setup_patchwork(cser, pwork, ups, pw_url, allow_lore=False):
     """Set up a Patchwork instance from upstream and project settings
 
     Args:
@@ -161,9 +162,11 @@ def _setup_patchwork(cser, pwork, ups, pw_url):
         pwork (Patchwork or None): Existing instance, or None to create
         ups (str or None): Upstream name
         pw_url (str or None): Patchwork URL override
+        allow_lore (bool): True to read series from the upstream's list on
+            lore, if it has no patchwork URL
 
     Returns:
-        Patchwork: Configured instance
+        Patchwork or LoreList: Configured instance
 
     Raises:
         ValueError: if the URL or project cannot be resolved
@@ -173,6 +176,12 @@ def _setup_patchwork(cser, pwork, ups, pw_url):
     tout.debug(f'_setup_patchwork: ups={ups!r} pw_url={pw_url!r}')
     if ups:
         ups_url = cser.db.upstream_get_patchwork_url(ups)
+        lore_url = cser.db.upstream_get_lore_url(ups)
+        if allow_lore and not ups_url and lore_url:
+            tout.debug(f'  Lore list for upstream {ups!r}: {lore_url!r}')
+            pwork = lorelist.LoreList(lore_url)
+            pwork.upstream = ups
+            return pwork
         if ups_url:
             if pw_url and pw_url != ups_url:
                 tout.info(f'  Overriding {pw_url!r} with upstream'
@@ -551,7 +560,7 @@ def do_review(args, test_db=None, pwork=None, cser=None):
             if not ups:
                 ups = cser.db.upstream_get_default()
             pwork = _setup_patchwork(
-                cser, pwork, ups, args.patchwork_url)
+                cser, pwork, ups, args.patchwork_url, allow_lore=True)
 
         if not review_db_dir:
             return review_mod.do_review(args, pwork, cser)
