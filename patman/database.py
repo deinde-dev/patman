@@ -747,6 +747,17 @@ class Database:  # pylint:disable=R0904
                      (idnum, idnum))
         return self.rowcount() == 1
 
+    def series_remove_empty_reviews(self):
+        """Remove the review series which have no versions
+
+        Return:
+            int: Number of series removed
+        """
+        self.execute("DELETE FROM series WHERE source = 'review' AND NOT "
+                     'EXISTS (SELECT 1 FROM ser_ver sv '
+                     'WHERE sv.series_id = series.id)')
+        return self.rowcount()
+
     def series_remove_by_name(self, name):
         """Remove a series from the database
 

@@ -150,6 +150,8 @@ Fixed
   review database when there is nothing to review, e.g. a series for another
   project, or when applying it fails. The inbox on the ``patman serve`` page
   took such a series for an earlier review of the next version.
+- ``patman review --relink`` removes the series with no versions from an
+  older review database.
 
 0.5.0 - 2026-10-19
 ------------------

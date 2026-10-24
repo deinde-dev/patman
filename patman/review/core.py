@@ -869,7 +869,12 @@ def _do_relink(args, cser):
     of one series did not link and follow-up reviews had no earlier
     feedback for context. Group the review series by their cleaned title,
     merge each group into a single series holding all the versions and
-    clean the stored description. The database is backed up first.
+    clean the stored description.
+
+    Older patman also left a review series with no versions when it found
+    nothing to review, e.g. a series for another project, which looks like
+    an earlier review of a later version. Remove these first. The database
+    is backed up before any change.
 
     Args:
         args (Namespace): Command-line arguments (unused)
@@ -882,6 +887,7 @@ def _do_relink(args, cser):
     shutil.copy2(cser.db.db_path, backup)
     tout.notice(f'Backed up database to {backup}')
 
+    removed = cser.db.series_remove_empty_reviews()
     series = cser.db.series_get_dict(include_archived=True, reviews_only=True)
     groups = {}
     for ser in series.values():
@@ -902,7 +908,8 @@ def _do_relink(args, cser):
             merged += 1
     cser.commit()
     tout.notice(f'Relinked {merged} duplicate series record(s); cleaned '
-                f'{cleaned} description(s)')
+                f'{cleaned} description(s); removed {removed} empty '
+                'series record(s)')
     return 0
 
 

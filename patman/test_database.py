@@ -294,6 +294,17 @@ class TestDatabase(CseriesTester):
         self.assertEqual([rev], [ser.idnum for ser in db.series_get_dict(
             include_archived=True, reviews_only=True).values()])
 
+    def test_series_remove_empty_reviews(self):
+        """Review series with no versions are removed, but not your own"""
+        db = self.get_database().db
+        mine = self.add_db_series(db, 'mine', [])
+        rev = self.add_db_series(db, 'rev', [1], review=True)
+        self.add_db_series(db, 'empty', [], review=True)
+        self.add_db_series(db, 'empty2', [], review=True)
+        self.assertEqual(2, db.series_remove_empty_reviews())
+        self.assertEqual([mine, rev], [ser.idnum for ser in db.series_get_dict(
+            include_archived=True, include_reviews=True).values()])
+
     def test_migrate(self):
         """Test migration to later schema versions"""
         db = database.Database(f'{self.tmpdir}/.patman.db')

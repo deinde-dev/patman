@@ -2385,6 +2385,11 @@ class TestReview(CseriesTester):
         db.series_set_source(s2, 'review')
         sv2 = db.ser_ver_add(s2, 2, link='2')
         db.review_add(sv2, 1, 'v2 body', 1, '2026-01-02')
+
+        # A review series left with no versions, and one of your own
+        db.series_set_source(db.series_add('pw-3-review', 'foo bar'),
+                             'review')
+        own = db.series_add('mine', 'My series')
         cser.commit()
 
         # Before: separate series, v2 has no prior context
@@ -2394,6 +2399,7 @@ class TestReview(CseriesTester):
         with terminal.capture() as (out, _):
             self.run_review('--relink')
         self.assertIn('Relinked 1', out.getvalue())
+        self.assertIn('removed 1 empty', out.getvalue())
 
         # After: one series with both versions; v2 now sees v1's review
         self.db_open()
@@ -2403,6 +2409,12 @@ class TestReview(CseriesTester):
         prev = cser.db.review_get_previous(v1[0], 2)
         self.assertEqual(1, len(prev))
         self.assertEqual('v1 body', prev[0].body)
+
+        # The empty review series is removed, but not your own series
+        reviews = cser.db.series_get_dict(include_archived=True,
+                                          reviews_only=True)
+        self.assertEqual([v1[0]], [ser.idnum for ser in reviews.values()])
+        self.assertIn(own, cser.db.series_get_dict_by_id())
 
     def test_review_lock_in_progress(self):
         """Test a review is refused when one is already running for it"""
