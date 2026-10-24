@@ -209,6 +209,45 @@ class TestPwCache(unittest.TestCase):  # pylint: disable=R0904
         self.assertEqual('state4', get())
         self.assertEqual('state5', get())
 
+    def test_search_series(self):
+        """Series are found by their names or their patches', and kept"""
+        requests = []
+        query = 'project=uboot&q=video+driver&order=-date&per_page=30'
+        pages = {
+            f'series/?{query}': [
+                {'id': 2, 'name': 'video: Add a driver', 'version': 1,
+                 'date': '2026-10-02T10:00:00', 'total': 2}],
+            f'patches/?{query}': [
+                # A patch of a series found already, then one of another
+                {'id': 21, 'date': '2026-10-02T10:00:01',
+                 'series': [{'id': 2, 'name': 'video: Add a driver'}]},
+                {'id': 31, 'date': '2026-10-03T10:00:00',
+                 'submitter': {'name': 'Fred'},
+                 'series': [{'id': 3, 'name': 'video: Tidy up', 'version': 2,
+                             'web_url': 'https://pw/3'}]}],
+        }
+
+        def fake(subpath):
+            requests.append(subpath)
+            return pages[subpath]
+
+        pwork = Patchwork.for_testing(fake)
+        pwork.cache = self.cache()
+        found = run(pwork.search_series(None, 'uboot', ' video\tdriver '))
+        self.assertEqual(
+            [{'id': 3, 'name': 'video: Tidy up', 'version': 2,
+              'web_url': 'https://pw/3', 'date': '2026-10-03T10:00:00',
+              'submitter': {'name': 'Fred'}, 'total': None},
+             pages[f'series/?{query}'][0]], found)
+        self.assertEqual(found, run(pwork.search_series(None, 'uboot',
+                                                        'video driver')))
+        self.assertEqual(2, len(requests))
+
+        with self.assertRaises(ValueError) as exc:
+            run(pwork.search_series(None, 'uboot', ' '))
+        self.assertEqual('Please give some text to search for',
+                         str(exc.exception))
+
     def test_get_series(self):
         """A series is kept once it is complete, but not before"""
         reads = []

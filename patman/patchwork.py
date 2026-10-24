@@ -80,6 +80,11 @@ SERIES_MAX_AGE = 10 * 60
 MBOX_MAX_AGE = 60 * 60
 # The projects on a server rarely change
 PROJECTS_MAX_AGE = 24 * 60 * 60
+# Searches for series are kept for a while, so that searching again is quick
+SEARCH_MAX_AGE = 10 * 60
+
+# Number of series and of patches to read for a search
+SEARCH_COUNT = 30
 
 # Events which say that a patch has changed, so that a copy of it in the
 # cache is out of date
@@ -874,6 +879,46 @@ class Patchwork:
             for series in data:
                 self._to_cache(self.series_path(series['id']), series)
         return data
+
+    async def search_series(self, client, project, text,
+                            max_age=SEARCH_MAX_AGE):
+        """Search a project for series whose names match some text
+
+        A series is found if its name, which is that of its cover letter or
+        first patch, has the text in it, or the name of one of its patches
+        does. A series found by a patch has only what the patch says of it,
+        with the 'date' and 'submitter' of the patch and no 'total'
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            project (str): Project link name, e.g. 'uboot'
+            text (str): Text to search for
+            max_age (float or None): Oldest cached copy to use, in seconds; 0
+                to read patchwork, or None to use any
+
+        Returns:
+            list of dict: Series, newest first, with at least 'id', 'name',
+                'version', 'date', 'submitter', 'total' and 'web_url'
+
+        Raises:
+            ValueError: There is no text
+        """
+        text = ' '.join(text.split())
+        if not text:
+            raise ValueError('Please give some text to search for')
+        query = (f'project={project}&q={quote_plus(text)}&order=-date'
+                 f'&per_page={SEARCH_COUNT}')
+        series, patches = await asyncio.gather(
+            self._cached_request(client, f'series/?{query}', max_age),
+            self._cached_request(client, f'patches/?{query}', max_age))
+        found = {ser['id']: ser for ser in series}
+        for pat in patches:
+            for ser in pat.get('series') or []:
+                found.setdefault(ser['id'], {
+                    'date': pat.get('date'), **ser,
+                    'submitter': pat.get('submitter'), 'total': None})
+        return sorted(found.values(), key=lambda ser: ser.get('date') or '',
+                      reverse=True)
 
     async def get_series(self, client, link, max_age=SERIES_MAX_AGE):
         """Read information about a series
