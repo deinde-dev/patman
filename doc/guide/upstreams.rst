@@ -75,7 +75,8 @@ The settings are:
 ``--no-feed``
     List only the series which you add in the inbox of ``patman serve``,
     not the newest series sent to the list. This suits a project as busy as
-    Linux, with its lists all on ``https://lore.kernel.org/all``
+    Linux, with its lists all on ``https://lore.kernel.org/all`` (see
+    :ref:`adding a series <serve_search>`)
 
 Set the one most series go to as the default::
 

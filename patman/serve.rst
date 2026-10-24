@@ -14,8 +14,8 @@ page has these tabs:
   review of each patch and whether it has been drafted, sent or replied to.
   A series which is applied but not reviewed, e.g. with ``--apply-only``,
   says 'not reviewed'
-- **Inbox**: recent series on patchwork, showing which you have reviewed
-  and which are applied upstream
+- **Inbox**: recent series on patchwork, and any you add to it from a search,
+  showing which you have reviewed and which are applied upstream
 - **Jobs**: reviews and other commands started from the page, and the syncs,
   with their output
 - **Todo**: series marked with ``patman workflow todo``, due ones first
@@ -208,6 +208,26 @@ The top of the page, and the name of the browser tab, give the project which
 the server is for, from the ``project`` setting in the ``[review]`` section of
 the config (see :ref:`review_project`), so that the servers for two projects
 are easy to tell apart.
+
+.. _serve_search:
+
+'Add a series' at the top of the inbox finds a series to add to it, by
+searching the upstream's patchwork project for series whose names, or the
+names of whose patches, have the text in them, or by searching its list on
+lore for patches and cover letters with each word in their subjects. The
+results say where the search ran, since each upstream has its own tab. On lore,
+text with a term of a lore query is passed to lore as it is, e.g.
+``dfn:scripts/make_fit.py`` for the series which change that file, or
+``f:fred`` for those from Fred. 'Add' on a result keeps the series at
+the top of the inbox, marked 'added', until you tap 'Remove' on it; 'Added'
+lists just these. This is useful for a series which is too old to be among the
+pages loaded, and for a project as large as Linux, where there is no one list
+to follow: give its upstream the whole of lore, with ``--no-feed`` so that the
+inbox lists only the series you add::
+
+    patman upstream add linux \
+        https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git \
+        -l https://lore.kernel.org/all --no-feed
 
 'Review' on a series starts the review as a job, but the inbox stays where it
 is, so you can start reviews of other series too. Each series shows how its
