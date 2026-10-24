@@ -293,8 +293,6 @@ function showError(err, tab) {
   setView('patman', tab, false, h('div', { class: 'error' }, String(err.message || err)));
 }
 
-// --- Series ---
-
 // A search box and optional filter chips above a list of cards. Each item
 // is {card, text, groups} where text is searched and groups lists the
 // filters the item belongs to. Each filter is [id, label, tooltip]
@@ -337,6 +335,8 @@ function filteredList(key, items, filters) {
   return [search, chips, count, h('div', { class: 'list' }, items.map((it) => it.card)),
           empty];
 }
+
+// --- Series ---
 
 // Patchwork series IDs increase over time, so give a good recency order
 function linkNum(link) { return parseInt(link, 10) || 0; }
@@ -511,7 +511,7 @@ function seriesSync(id, version) {
   return h('div', { class: 'actions' }, btn, msg);
 }
 
-// --- Patches ---
+// --- Patches and mail ---
 
 // Number of diff lines to show before asking
 const DIFF_LINES = 1500;
@@ -2224,28 +2224,6 @@ function syncOk(state) {
   return !state.cancelled && state.results.every((r) => r.returncode === 0);
 }
 
-// Show the number of jobs which are waiting or running on the Jobs tab,
-// checking again every few seconds while there are any
-let jobCountTimer = null;
-async function refreshJobCount() {
-  clearTimeout(jobCountTimer);
-  let jobs;
-  try {
-    jobs = await api('jobs');
-  } catch (err) {
-    return;
-  }
-  const count = jobs.filter((job) => !job.finished).length;
-  const tab = document.querySelector('nav a[data-tab="jobs"]');
-  let badge = tab.querySelector('.badge');
-  if (!badge) {
-    badge = h('span', { class: 'badge' });
-    tab.append(badge);
-  }
-  badge.textContent = count || '';
-  if (count) jobCountTimer = setTimeout(refreshJobCount, 3000);
-}
-
 // Seconds to wait before asking again when the server does not answer, e.g.
 // because it is restarting
 const SYNC_RETRY = 10;
@@ -2283,46 +2261,7 @@ async function cancelSync() {
   await refreshSync();
 }
 
-// Describe how a command in a job ended
-function cmdStatus(r, st) {
-  if (r.returncode === null) return 'running…';
-  if (r.returncode === 0) return 'ok';
-  if (st.cancelled && r === st.results[st.results.length - 1]) return 'cancelled';
-  return 'exit ' + r.returncode;
-}
-
-// Get the status of a job as [text, chip class]
-function jobStatus(st) {
-  if (st.queued) return st.cancelled ? ['cancelled', 'st-other'] : ['waiting', 'st-other'];
-  if (st.running) return ['running', 'st-under-review'];
-  if (st.cancelled) return ['cancelled', 'st-changes-requested'];
-  return st.results.every((r) => r.returncode === 0) ? ['ok', 'st-accepted']
-                                                    : ['failed', 'st-rejected'];
-}
-
-// Render the output of each command in a job, following the one running.
-// The page is redrawn every few seconds while the job runs, so the returned
-// function puts the page and each log back where the user left them, and
-// keeps a log scrolled to its end there as more output arrives
-function jobOutput(st) {
-  const key = (i) => `${location.hash}:${i}`;
-  const old = new Map([...main.querySelectorAll('.log')].map((log) => [log.dataset.key, {
-    top: log.scrollTop,
-    end: log.scrollTop + log.clientHeight >= log.scrollHeight - 4 }]));
-  const pageY = old.size ? window.scrollY : null;
-  const logs = st.results.map((r, i) =>
-    h('div', { class: 'log mail', 'data-key': key(i) }, r.output.trim() || '(no output yet)'));
-  const follow = () => {
-    if (pageY !== null) window.scrollTo(0, pageY);
-    logs.forEach((log, i) => {
-      const prev = old.get(key(i));
-      if (prev && !prev.end) log.scrollTop = prev.top;
-      else if (prev || (st.running && i === logs.length - 1)) log.scrollTop = log.scrollHeight;
-    });
-  };
-  return [st.results.flatMap((r, i) => [
-    h('div', { class: 'section cmd' }, `${r.cmd} — ${cmdStatus(r, st)}`), logs[i]]), follow];
-}
+syncBtn.addEventListener('click', () => { location.hash = '#/sync'; });
 
 // Show a number of bytes in a short form, e.g. '1.2 MB'
 function fmtBytes(n) {
@@ -2401,6 +2340,71 @@ function viewSync() {
   follow();
 }
 
+// --- Jobs ---
+
+// Show the number of jobs which are waiting or running on the Jobs tab,
+// checking again every few seconds while there are any
+let jobCountTimer = null;
+async function refreshJobCount() {
+  clearTimeout(jobCountTimer);
+  let jobs;
+  try {
+    jobs = await api('jobs');
+  } catch (err) {
+    return;
+  }
+  const count = jobs.filter((job) => !job.finished).length;
+  const tab = document.querySelector('nav a[data-tab="jobs"]');
+  let badge = tab.querySelector('.badge');
+  if (!badge) {
+    badge = h('span', { class: 'badge' });
+    tab.append(badge);
+  }
+  badge.textContent = count || '';
+  if (count) jobCountTimer = setTimeout(refreshJobCount, 3000);
+}
+
+// Describe how a command in a job ended
+function cmdStatus(r, st) {
+  if (r.returncode === null) return 'running…';
+  if (r.returncode === 0) return 'ok';
+  if (st.cancelled && r === st.results[st.results.length - 1]) return 'cancelled';
+  return 'exit ' + r.returncode;
+}
+
+// Get the status of a job as [text, chip class]
+function jobStatus(st) {
+  if (st.queued) return st.cancelled ? ['cancelled', 'st-other'] : ['waiting', 'st-other'];
+  if (st.running) return ['running', 'st-under-review'];
+  if (st.cancelled) return ['cancelled', 'st-changes-requested'];
+  return st.results.every((r) => r.returncode === 0) ? ['ok', 'st-accepted']
+                                                    : ['failed', 'st-rejected'];
+}
+
+// Render the output of each command in a job, following the one running.
+// The page is redrawn every few seconds while the job runs, so the returned
+// function puts the page and each log back where the user left them, and
+// keeps a log scrolled to its end there as more output arrives
+function jobOutput(st) {
+  const key = (i) => `${location.hash}:${i}`;
+  const old = new Map([...main.querySelectorAll('.log')].map((log) => [log.dataset.key, {
+    top: log.scrollTop,
+    end: log.scrollTop + log.clientHeight >= log.scrollHeight - 4 }]));
+  const pageY = old.size ? window.scrollY : null;
+  const logs = st.results.map((r, i) =>
+    h('div', { class: 'log mail', 'data-key': key(i) }, r.output.trim() || '(no output yet)'));
+  const follow = () => {
+    if (pageY !== null) window.scrollTo(0, pageY);
+    logs.forEach((log, i) => {
+      const prev = old.get(key(i));
+      if (prev && !prev.end) log.scrollTop = prev.top;
+      else if (prev || (st.running && i === logs.length - 1)) log.scrollTop = log.scrollHeight;
+    });
+  };
+  return [st.results.flatMap((r, i) => [
+    h('div', { class: 'section cmd' }, `${r.cmd} — ${cmdStatus(r, st)}`), logs[i]]), follow];
+}
+
 let jobTimer = null;
 function pollJobs(hash, active) {
   clearTimeout(jobTimer);
@@ -2477,7 +2481,6 @@ async function viewJob(id) {
     output);
   follow();
 }
-syncBtn.addEventListener('click', () => { location.hash = '#/sync'; });
 
 // --- Routing ---
 
