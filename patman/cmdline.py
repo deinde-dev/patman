@@ -593,6 +593,10 @@ def add_upstream_subparser(subparsers):
         '--no-tags', action='store_true', default=False,
         help='Skip subject-tag alias processing for this upstream')
     uadd.add_argument(
+        '--no-feed', action='store_true', default=False,
+        help='List only the series you add in the inbox of patman serve, '
+             'not the newest ones, e.g. for a list as busy as Linux')
+    uadd.add_argument(
         'project_name', nargs='?',
         help="Patchwork project name, e.g. 'U-Boot'")
     udel = upstream_subparsers.add_parser(
@@ -631,6 +635,13 @@ def add_upstream_subparser(subparsers):
     uset.add_argument(
         '--tags', action='store_true', default=None,
         help='Enable subject-tag alias processing for this upstream')
+    uset.add_argument(
+        '--no-feed', action='store_true', default=None,
+        help='List only the series you add in the inbox of patman serve')
+    uset.add_argument(
+        '--feed', action='store_true', default=None,
+        help='List the newest series in the inbox of patman serve, as well '
+             'as those you add')
     udef = upstream_subparsers.add_parser(
         'default', help='Show, set or unset the default upstream')
     udef.add_argument('-u', '--unset', action='store_true',

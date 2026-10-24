@@ -354,7 +354,8 @@ def upstream(args, test_db=None):
                               identity=args.identity,
                               series_to=args.series_to,
                               no_maintainers=args.no_maintainers,
-                              no_tags=args.no_tags)
+                              no_tags=args.no_tags,
+                              no_feed=args.no_feed)
         elif args.subcmd == 'default':
             if args.unset:
                 cser.upstream_set_default(None)
@@ -383,6 +384,10 @@ def upstream(args, test_db=None):
                 kwargs['no_tags'] = True
             elif args.tags:
                 kwargs['no_tags'] = False
+            if args.no_feed:
+                kwargs['no_feed'] = True
+            elif args.feed:
+                kwargs['no_feed'] = False
             if not kwargs:
                 raise ValueError('No settings to update')
             cser.upstream_set(args.remote_name, **kwargs)

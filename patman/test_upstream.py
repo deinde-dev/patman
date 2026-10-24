@@ -163,6 +163,27 @@ class TestUpstream(CseriesTester):  # pylint: disable=R0904
         self.assertIn('to:concept', line)
         self.assertIn('no-maintainers', line)
         self.assertIn('no-tags', line)
+        self.assertNotIn('no-feed', line)
+
+    def test_upstream_no_feed(self):
+        """An upstream's inbox can list only the series added to it"""
+        with terminal.capture() as (out, _):
+            self.run_args('upstream', 'add', 'linux', 'https://linux', '-l',
+                          'https://lore.kernel.org/all', '--no-feed')
+        self.assertIn('no-feed', out.getvalue())
+
+        def listed():
+            with terminal.capture() as (out, _):
+                self.run_args('upstream', 'list')
+            return 'no-feed' in out.getvalue()
+
+        self.assertTrue(listed())
+        with terminal.capture():
+            self.run_args('upstream', 'set', 'linux', '--feed')
+        self.assertFalse(listed())
+        with terminal.capture():
+            self.run_args('upstream', 'set', 'linux', '--no-feed')
+        self.assertTrue(listed())
 
     def test_upstream_default(self):
         """Operation of the default upstream"""
