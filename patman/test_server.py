@@ -1360,15 +1360,21 @@ class TestWebServer(unittest.TestCase, TestCommon):
                         not first.state['results'][0]['output']:
                     await asyncio.sleep(0.01)
                 queued = second.state['queued']
+                # The tasks running the jobs are kept until they finish
+                running = len(srv._tasks)
                 await client.post('/api/jobs/2/cancel')
                 await client.post('/api/jobs/1/cancel')
                 while first.active or second.active:
                     await asyncio.sleep(0.01)
-                return queued
+                for _ in range(100):
+                    if not srv._tasks:
+                        break
+                    await asyncio.sleep(0.01)
+                return queued, running, len(srv._tasks)
 
         loop = asyncio.new_event_loop()
         try:
-            self.assertTrue(loop.run_until_complete(_go()))
+            self.assertEqual((True, 2, 0), loop.run_until_complete(_go()))
         finally:
             loop.close()
         self.assertTrue(srv.get_job(1).state['cancelled'])
@@ -2391,6 +2397,13 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertFalse(server.app.is_loopback('0.0.0.0'))
         self.assertFalse(server.app.is_loopback('100.64.1.2'))
         self.assertFalse(server.app.is_loopback('myhost'))
+
+    def test_cmd_series(self):
+        """The series which a review command acts on is found"""
+        self.assertEqual(['123', None, None], [
+            server.app.cmd_series(['patman', 'review', '-s', '123', '-d']),
+            server.app.cmd_series(['patman', 'review', '--scan']),
+            server.app.cmd_series(['patman', 'review', '-s'])])
 
     def test_serve_cmdline(self):
         """The serve command passes its options through to the server"""

@@ -54,7 +54,7 @@ class Job:
         proc (asyncio.subprocess.Process or None): Command which is running
         state (dict): State of the job, as provided by the API
     """
-    # pylint: disable=R0913,R0917
+    # pylint: disable-next=R0913,R0917
     def __init__(self, idnum, kind, title, cmds, resumed=0, target=None,
                  parallel=False):
         """Set up a new job
@@ -144,7 +144,11 @@ class JobRunner:
         self._jobs = OrderedDict()
         self._last_job = 0
 
-    # pylint: disable=R0913,R0917
+        # Tasks running jobs. asyncio only keeps a weak reference to a task,
+        # so one which nothing else refers to may be lost before it finishes
+        self._tasks = set()
+
+    # pylint: disable-next=R0913,R0917
     def add_job(self, kind, title, cmds, target=None, parallel=False):
         """Add a job and start it once it is its turn
 
@@ -160,10 +164,20 @@ class JobRunner:
         """
         job = self._new_job(kind, title, cmds, target=target,
                             parallel=parallel)
-        asyncio.create_task(self.run_job(job))
+        self.start_job(job)
         return job
 
-    # pylint: disable=R0913,R0917
+    def start_job(self, job):
+        """Start running a job, once it is its turn
+
+        Args:
+            job (Job): Job to run
+        """
+        task = asyncio.create_task(self.run_job(job))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    # pylint: disable-next=R0913,R0917
     def _new_job(self, kind, title, cmds, resumed=0, target=None,
                  parallel=False):
         """Create a job and remember it, dropping old jobs if needed"""
@@ -272,7 +286,7 @@ class JobRunner:
                               'cancelled': False, 'started': None,
                               'finished': None, 'results': [],
                               'resumed': resumed})
-            asyncio.create_task(self.run_job(job))
+            self.start_job(job)
             jobs.append(job)
         self.save_jobs()
         return jobs
@@ -446,7 +460,7 @@ class JobRunner:
             unsent (list of int): Patches whose reviews have not been sent
 
         Raises:
-            ValueError: A job is waiting or running for one of the reviews
+            JobBusyError: A job is waiting or running for one of the reviews
         """
         pending = self.pending_jobs(idnum, version)
         busy = None in pending or any(seq in pending

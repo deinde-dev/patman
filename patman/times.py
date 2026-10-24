@@ -26,6 +26,19 @@ def to_str(when):
     return when.strftime(DB_FORMAT)
 
 
+def stamp_str(stamp):
+    """Get a time in seconds since the epoch in the form used in the database
+
+    Args:
+        stamp (float or None): Time, e.g. from time.time(), or None
+
+    Return:
+        str or None: Time, e.g. '2026-10-19 08:30:00', or None if there is
+            none
+    """
+    return to_str(datetime.fromtimestamp(stamp)) if stamp else None
+
+
 def now_str():
     """Get the current time in the form used in the database
 
