@@ -8,6 +8,9 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+0.6.0 - 2026-10-24
+------------------
+
 Added
 ~~~~~
 - The top of the ``patman serve`` page, and the name of the browser tab, give
