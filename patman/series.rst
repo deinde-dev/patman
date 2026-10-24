@@ -77,24 +77,30 @@ through them with a real U-Boot series and the output of each.
 
        patman series add -M
 
-3. Send it. patman then waits for the series to appear on patchwork and
+3. If you like, have the agent review it before you send it, and read what
+   it found (see :ref:`review_before_send`)::
+
+       patman series review
+       patman series info -r
+
+4. Send it. patman then waits for the series to appear on patchwork and
    records its link. If it does not appear in time, run
    ``patman series autolink`` later::
 
        patman series send
 
-4. Follow the reviews. ``gather`` records the state of each patch and adds
+5. Follow the reviews. ``gather`` records the state of each patch and adds
    new review tags to the commits; ``status`` just shows them. Use ``-c`` and
    ``-C`` to see the comments on the patches and the cover letter::
 
        patman series gather
        patman series status -cC
 
-5. See where all your series stand::
+6. See where all your series stand::
 
        patman series progress
 
-6. Start the next version. ``inc`` creates the 'video2' branch, sets
+7. Start the next version. ``inc`` creates the 'video2' branch, sets
    ``Series-version: 2`` and adds v2 to the database. After changing the
    commits, use ``scan`` to update the database from the branch, then send
    as before::
@@ -106,7 +112,7 @@ through them with a real U-Boot series and the output of each.
    Alternatively, create 'video2' yourself and run ``patman series add``, or
    collect the tags into it with ``patman status -d video2``.
 
-7. Once the series is merged, archive it. This keeps each version's branch
+8. Once the series is merged, archive it. This keeps each version's branch
    as a tag and deletes the branches::
 
        patman series archive
