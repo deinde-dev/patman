@@ -3,11 +3,16 @@
 // Token handling: a ?token=... in the URL is remembered, then removed
 // from the address bar so it does not end up in screenshots or history
 const TOKEN_KEY = 'patman-token';
-function getToken() {
-  try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; }
+function getToken() { return lsGet(TOKEN_KEY) || ''; }
+function setToken(tok) { lsSet(TOKEN_KEY, tok); }
+
+// Read and write the browser's storage, which may not be allowed, e.g. in a
+// private window, in which case nothing is kept
+function lsGet(key) {
+  try { return localStorage.getItem(key); } catch (e) { return null; }
 }
-function setToken(tok) {
-  try { localStorage.setItem(TOKEN_KEY, tok); } catch (e) { /* ignore */ }
+function lsSet(key, value) {
+  try { localStorage.setItem(key, value); } catch (e) { /* ignore */ }
 }
 (function () {
   const params = new URLSearchParams(location.search);
@@ -128,12 +133,40 @@ function stateChips(states) {
 }
 function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
 function npatches(n) { return `${n} patch${n === 1 ? '' : 'es'}`; }
+function nreplies(n) { return `${n} ${n === 1 ? 'reply' : 'replies'}`; }
 
-// Render an email body, with quoted lines dimmed and long runs of
-// quoted text folded away
-// Show an email, collapsing long quotes. If onChunk is given, each comment
-// which follows a quote gets a button which calls onChunk() with the quote
-// and the comment
+// The query giving the upstream to use, if any
+function upsQuery(ups) { return ups ? `?ups=${encodeURIComponent(ups)}` : ''; }
+
+// An error message to show in place of something which cannot be shown
+function errorBox(err, tag = 'div') {
+  return h(tag, { class: 'error' }, String(err.message || err));
+}
+
+// A link which opens a page on another site, e.g. patchwork, in a new tab
+function extLink(href, label, tip, cls = 'extlink') {
+  return h('a', { class: cls, href, target: '_blank', rel: 'noopener', title: tip },
+           `${label} ↗`);
+}
+
+// Who sent a comment and when
+function commentHead(c) {
+  return h('div', { class: 'who' }, c.name || c.email || 'Unknown',
+           h('span', { class: 'when' }, ago(parseTime(c.date, true))));
+}
+
+// Tabs to choose a version, e.g. of a series. Each replaces the page's address
+// with 'base/<version>', so that going back does not step through them
+function versionTabs(versions, sv, base, tip) {
+  return versions.length > 1 ? h('div', { class: 'tabs' }, versions.map((v) =>
+    h('button', { class: v === sv ? 'on' : '', title: tip(v.version),
+                  onclick: () => { location.replace(`${base}/${v.version}`); } },
+      `v${v.version}`))) : null;
+}
+
+// Render an email body, with quoted lines dimmed and long runs of quoted text
+// folded away. If onChunk is given, each comment which follows a quote gets a
+// button which calls onChunk() with the quote and the comment
 //
 // onChunk(part) is called when 'Revise this' is tapped under a comment, with
 // the comment and the end of the quote it is about.
@@ -290,20 +323,16 @@ function showError(err, tab) {
                            title: 'Use this token for the server' }, 'Save')));
     return;
   }
-  setView('patman', tab, false, h('div', { class: 'error' }, String(err.message || err)));
+  setView('patman', tab, false, errorBox(err));
 }
-
-// --- Series ---
 
 // A search box and optional filter chips above a list of cards. Each item
 // is {card, text, groups} where text is searched and groups lists the
 // filters the item belongs to. Each filter is [id, label, tooltip]
 function filteredList(key, items, filters) {
   let current = filters ? filters[0][0] : null;
-  try {
-    const saved = localStorage.getItem(`patman-filter-${key}`);
-    if (filters && filters.some(([id]) => id === saved)) current = saved;
-  } catch (e) { /* ignore */ }
+  const saved = lsGet(`patman-filter-${key}`);
+  if (filters && filters.some(([id]) => id === saved)) current = saved;
   const search = h('input', { type: 'search', class: 'search',
                               placeholder: 'Search', 'aria-label': 'Search' });
   const count = h('div', { class: 'section' });
@@ -325,8 +354,7 @@ function filteredList(key, items, filters) {
         class: id === current ? 'on' : '', title: tip,
         onclick: () => {
           current = id;
-          try { localStorage.setItem(`patman-filter-${key}`, id); }
-          catch (e) { /* ignore */ }
+          lsSet(`patman-filter-${key}`, id);
           update();
         } }, label)));
     }
@@ -338,9 +366,13 @@ function filteredList(key, items, filters) {
           empty];
 }
 
+// --- Series ---
+
 // Patchwork series IDs increase over time, so give a good recency order
 function linkNum(link) { return parseInt(link, 10) || 0; }
 
+// States of a patch which is finished with, so that its series needs no more
+// work or review
 const FINAL_STATES = new Set(['accepted', 'rejected', 'superseded',
                               'not-applicable']);
 
@@ -384,15 +416,13 @@ function commentToggle(card, kind, itemId, ups) {
     box = h('div', { class: 'comments' }, h('div', { class: 'ver' }, 'Loading…'));
     card.append(box);
     try {
-      const q = ups ? `?ups=${encodeURIComponent(ups)}` : '';
+      const q = upsQuery(ups);
       const comments = await api(`comments/${kind}/${idPath(itemId)}${q}`);
       fill(box, ...(comments.length ? comments.map((c) =>
-        h('div', {},
-          h('div', { class: 'who' }, c.name || c.email || 'Unknown',
-            h('span', { class: 'when' }, ago(parseTime(c.date, true)))),
-          renderMail(c.content))) : [h('div', { class: 'ver' }, 'No comments')]));
+        h('div', {}, commentHead(c), renderMail(c.content)))
+        : [h('div', { class: 'ver' }, 'No comments')]));
     } catch (err) {
-      fill(box, h('div', { class: 'error' }, err.message));
+      fill(box, errorBox(err));
     }
   };
 }
@@ -402,10 +432,7 @@ async function viewSeries(id, wantVer) {
   const pw = ser.patchwork_url;
   const versions = ser.versions;
   const sv = versions.find((v) => v.version === wantVer) || versions[0];
-  const tabs = versions.length > 1 ? h('div', { class: 'tabs' }, versions.map((v) =>
-    h('button', { class: v === sv ? 'on' : '', title: `Show version ${v.version}`,
-                  onclick: () => { location.replace(`#/series/${id}/${v.version}`); } },
-      `v${v.version}`))) : null;
+  const tabs = versionTabs(versions, sv, `#/series/${id}`, (n) => `Show version ${n}`);
 
   const cards = [];
   if (sv.cover_id) {
@@ -418,10 +445,8 @@ async function viewSeries(id, wantVer) {
       h('div', { class: 'meta' },
         h('a', { class: 'extlink', href: mailHref('cover', sv.cover_id, ser.upstream),
                  title: 'Read the cover letter and its comments' }, 'Read'),
-        pw && h('a', { class: 'extlink', href: `${pw}/cover/${sv.cover_id}/`,
-                       target: '_blank', rel: 'noopener',
-                       title: 'Open the cover letter on patchwork, in a new tab' },
-                'Open in patchwork ↗')));
+        pw && extLink(`${pw}/cover/${sv.cover_id}/`, 'Open in patchwork',
+                      'Open the cover letter on patchwork, in a new tab')));
     card.addEventListener('click', commentToggle(card, 'cover', sv.cover_id, ser.upstream));
     cards.push(card);
   }
@@ -438,9 +463,8 @@ async function viewSeries(id, wantVer) {
         p.patch_id && h('a', { class: 'extlink',
           href: mailHref('patch', p.patch_id, ser.upstream),
           title: 'Read the patch and its comments' }, 'Read'),
-        pw && p.patch_id && h('a', { class: 'extlink',
-          href: `${pw}/patch/${p.patch_id}/`, target: '_blank', rel: 'noopener',
-          title: 'Open the patch on patchwork, in a new tab' }, 'patchwork ↗')));
+        pw && p.patch_id && extLink(`${pw}/patch/${p.patch_id}/`, 'patchwork',
+                                    'Open the patch on patchwork, in a new tab')));
     if (p.patch_id) {
       card.addEventListener('click', commentToggle(card, 'patch', p.patch_id, ser.upstream));
     }
@@ -457,8 +481,7 @@ async function viewSeries(id, wantVer) {
       h('div', { class: 'meta' }, stateChips(sv.states)),
       sv.link && seriesSync(id, sv.version)),
     tabs,
-    h('div', { class: 'section' },
-      `${sv.patches.length} patch${sv.patches.length === 1 ? '' : 'es'}`),
+    h('div', { class: 'section' }, npatches(sv.patches.length)),
     h('div', { class: 'list' }, cards));
 }
 
@@ -511,7 +534,7 @@ function seriesSync(id, version) {
   return h('div', { class: 'actions' }, btn, msg);
 }
 
-// --- Patches ---
+// --- Patches and mail ---
 
 // Number of diff lines to show before asking
 const DIFF_LINES = 1500;
@@ -644,7 +667,7 @@ function diffGap(file, lo, count, after, before) {
         src = { lines: b.lines, first,
                 count: count ?? Math.max(0, b.lines.length - first + 1) };
       } catch (err) {
-        fill(bar, h('span', { class: 'error' }, err.message));
+        fill(bar, errorBox(err, 'span'));
         return;
       }
     }
@@ -738,10 +761,8 @@ async function viewFile(newOid, oldOid, newLine, oldLine, name) {
 
 function renderComments(comments) {
   return comments.length ? comments.map((c) =>
-    h('div', { class: 'card' },
-      h('div', { class: 'who' }, c.name || c.email || 'Unknown',
-        h('span', { class: 'when' }, ago(parseTime(c.date, true)))),
-      renderMail(c.content))) : [h('div', { class: 'empty' }, 'No comments')];
+    h('div', { class: 'card' }, commentHead(c), renderMail(c.content)))
+    : [h('div', { class: 'empty' }, 'No comments')];
 }
 
 // The ID of a patch or cover letter, for a URL path: a patchwork ID, or
@@ -765,7 +786,7 @@ function mailHref(kind, id, ups) {
 // Show a patch or cover letter; 'refresh' reads it from patchwork again rather
 // than using a copy the server read recently
 async function viewMail(kind, id, ups, refresh) {
-  const q = ups ? `?ups=${encodeURIComponent(ups)}` : '';
+  const q = upsQuery(ups);
   const rq = refresh ? `${q ? '&' : '?'}refresh=1` : '';
   const m = await api(`${kind}/${idPath(id)}${q}${rq}`);
   const site = siteName(m.web_url);
@@ -789,9 +810,7 @@ async function viewMail(kind, id, ups, refresh) {
           viewMail(kind, id, ups, true).catch((err) => showError(err));
         } }, 'Refresh')),
       m.web_url && h('div', { class: 'actions' },
-        h('a', { class: 'btn light small', href: m.web_url, target: '_blank',
-                 rel: 'noopener', title: `Open this on ${site}, in a new tab` },
-          `${site} ↗`))),
+        extLink(m.web_url, site, `Open this on ${site}, in a new tab`, 'btn light small'))),
     h('div', { class: 'section' }, kind === 'patch' ? 'Commit message' : 'Cover letter'),
     h('div', { class: 'card' }, renderMail(m.content)),
     m.diff && renderDiff(m.diff),
@@ -800,7 +819,7 @@ async function viewMail(kind, id, ups, refresh) {
   try {
     fill(comments, ...renderComments(await api(`comments/${kind}/${idPath(id)}${q}${rq}`)));
   } catch (err) {
-    fill(comments, h('div', { class: 'error' }, err.message));
+    fill(comments, errorBox(err));
   }
 }
 
@@ -819,14 +838,14 @@ function mailToggle(kind, id, ups) {
     if (!open) { fill(box); return; }
     fill(box, h('div', { class: 'ver' }, 'Loading…'));
     try {
-      const q = ups ? `?ups=${encodeURIComponent(ups)}` : '';
+      const q = upsQuery(ups);
       mail = mail || await api(`${kind}/${idPath(id)}${q}`);
       if (open) {
         fill(box, h('div', {}, renderMail(mail.content),
                               mail.diff && renderDiff(mail.diff)));
       }
     } catch (err) {
-      if (open) fill(box, h('div', { class: 'error' }, err.message));
+      if (open) fill(box, errorBox(err));
     }
   } }, `Show the ${what}`);
   return [btn, box];
@@ -937,7 +956,7 @@ async function viewReviewList() {
           setHidden(r.id, !r.hidden);
         } }, r.hidden ? 'unhide' : 'hide'),
         r.replies_waiting ? h('span', { class: 'chip st-changes-requested' },
-          `${r.replies_waiting} ${r.replies_waiting === 1 ? 'reply' : 'replies'}`)
+          nreplies(r.replies_waiting))
           : null,
         // A series can be applied, e.g. with -a, without being reviewed
         h('span', {}, r.num_reviews ? `${r.approved}/${r.num_reviews} approved`
@@ -1031,11 +1050,8 @@ async function viewReview(id, wantVer) {
   const ser = await api(`reviews/${id}`);
   const versions = ser.versions;
   const sv = versions.find((v) => v.version === wantVer) || versions[0];
-  const tabs = versions.length > 1 ? h('div', { class: 'tabs' }, versions.map((v) =>
-    h('button', { class: v === sv ? 'on' : '',
-                  title: `Show the reviews of version ${v.version}`,
-                  onclick: () => { location.replace(`#/reviews/${id}/${v.version}`); } },
-      `v${v.version}`))) : null;
+  const tabs = versionTabs(versions, sv, `#/reviews/${id}`,
+                           (n) => `Show the reviews of version ${n}`);
   const unsent = (r) => r.status !== 'sent' && r.status !== 'replied';
   // Each review's card, so that a job can be shown on the cards it acts on
   const entries = new Map();
@@ -1112,11 +1128,10 @@ async function viewReview(id, wantVer) {
       ? mailToggle(r.seq ? 'patch' : 'cover', itemId, ser.upstream) : [null, null];
     // A patch which patchwork lacks, e.g. taken from lore for the review, can
     // still be read on lore
-    const loreLink = !itemId && r.msgid && h('a', {
-      class: 'btn light small', target: '_blank', rel: 'noopener',
-      href: `https://lore.kernel.org/all/${encodeURIComponent(r.msgid.replace(/^<|>$/g, '')).replace(/%40/g, '@')}/`,
-      title: `Show the ${r.seq ? 'patch' : 'cover letter'} on lore.kernel.org, in a ` +
-             'new tab, since patchwork does not have it' }, 'lore ↗');
+    const loreLink = !itemId && r.msgid && extLink(
+      `https://lore.kernel.org/all/${encodeURIComponent(r.msgid.replace(/^<|>$/g, '')).replace(/%40/g, '@')}/`,
+      'lore', `Show the ${r.seq ? 'patch' : 'cover letter'} on lore.kernel.org, in a ` +
+              'new tab, since patchwork does not have it', 'btn light small');
     const [commentsBtn, commentsBox] = itemId && sv.link
       ? commentsToggle(ser, sv, r.seq, itemId) : [null, null];
     const responses = commentResponses(sv, r.seq).map((rp) => replyBox(rp, id));
@@ -1187,7 +1202,7 @@ async function viewReview(id, wantVer) {
     reviseForm(null, sv.reviews.some(hasDraft),
                () => fill(reviseAll),
                (note, drafts, msg) => revise([], null, note, drafts, msg))));
-  // Start a job and show it
+  // Review this version again, as a job, and show the job
   const reviewAgain = async (context) => {
     const job = await api('review', { json: { target: sv.link, ups: ser.upstream,
                                               drafts: true, force: true, context,
@@ -1227,11 +1242,10 @@ async function viewReview(id, wantVer) {
                                       : 'Hide this series from the list of active reviews, ' +
                                         'e.g. once you have finished with it' },
         ser.hidden ? 'Unhide' : 'Hide'),
-      ser.patchwork_url && h('a', { class: 'btn light small', target: '_blank',
-        rel: 'noopener', title: 'Open the series on patchwork, in a new tab',
-        href: ser.project ? `${ser.patchwork_url}/project/${ser.project}/list/?series=${sv.link}`
-                        : ser.patchwork_url },
-        'patchwork ↗'));
+      ser.patchwork_url && extLink(
+        ser.project ? `${ser.patchwork_url}/project/${ser.project}/list/?series=${sv.link}`
+                    : ser.patchwork_url,
+        'patchwork', 'Open the series on patchwork, in a new tab', 'btn light small'));
   }
   drawActions();
   setView(ser.desc || ser.name, 'reviews', true,
@@ -1252,13 +1266,6 @@ async function viewReview(id, wantVer) {
                    : h('div', { class: 'empty' }, 'No reviews for this version'));
 }
 
-// A card for the cover letter of a version which has no review of it, e.g.
-// because the agent had nothing to say about the series as a whole. It shows
-// the cover letter and can ask the agent to review just that
-// A button which opens a form to start a review, asking for any context to
-// give the agent, e.g. 'this is an RFC, so ignore style'. 'start(context)'
-// starts it, throwing an error to show if it cannot. Returns the button and
-// the box which holds the form, to go below the row of buttons
 // Copy some text to the clipboard. The page is often served over plain
 // http, where the browser has no clipboard API, so fall back to selecting it
 async function copyText(text) {
@@ -1305,6 +1312,10 @@ function tryButton(link, ups, branch, name) {
   return [btn, box];
 }
 
+// A button which opens a form to start a review, asking for any context to
+// give the agent, e.g. 'this is an RFC, so ignore style'. 'start(context)'
+// starts it, throwing an error to show if it cannot. Returns the button and
+// the box which holds the form, to go below the row of buttons
 function reviewButton(label, cls, tip, start) {
   const box = h('div', {});
   const btn = h('button', { class: cls, title: tip, onclick: () => {
@@ -1418,9 +1429,7 @@ function commentsToggle(ser, sv, seq, itemId) {
       note.focus();
     };
     reset();
-    return h('div', { class: 'comments' },
-      h('div', { class: 'who' }, c.name || c.email,
-        h('span', { class: 'when' }, ago(parseTime(c.date, true)))),
+    return h('div', { class: 'comments' }, commentHead(c),
       renderMail(c.content || ''), strip, slot);
   };
   let open = false;
@@ -1432,8 +1441,8 @@ function commentsToggle(ser, sv, seq, itemId) {
     if (!open) { fill(box); return; }
     fill(box, h('div', { class: 'ver' }, 'Loading…'));
     try {
-      const q = ser.upstream ? `?ups=${encodeURIComponent(ser.upstream)}` : '';
-      const list = await api(`comments/${kind}/${itemId}${q}`);
+      const q = upsQuery(ser.upstream);
+      const list = await api(`comments/${kind}/${idPath(itemId)}${q}`);
       if (open) {
         // Our own comments, such as the review above, need no response
         const others = list.filter((c) => !c.own);
@@ -1446,12 +1455,15 @@ function commentsToggle(ser, sv, seq, itemId) {
                               : `Leaving out your own ${mine} comments`) : null);
       }
     } catch (err) {
-      if (open) fill(box, h('div', { class: 'error' }, err.message));
+      if (open) fill(box, errorBox(err));
     }
   } }, 'Comments');
   return [btn, box];
 }
 
+// A card for the cover letter of a version which has no review of it, e.g.
+// because the agent had nothing to say about the series as a whole. It shows
+// the cover letter and can ask the agent to review just that
 function unreviewedCover(ser, sv) {
   const [showBtn, mailBox] = mailToggle('cover', sv.cover_id, ser.upstream);
   const [commentsBtn, commentsBox] = commentsToggle(ser, sv, 0, sv.cover_id);
@@ -1815,10 +1827,8 @@ function searchCard(s, ups) {
       h('span', { class: 'grow' },
         [s.submitter, s.date && ago(parseTime(s.date, true)),
          s.total && npatches(s.total)].filter(Boolean).join(' · ')),
-      s.web_url && h('a', { class: 'extlink', href: s.web_url, target: '_blank',
-                            rel: 'noopener',
-                            title: `Open the series on ${siteName(s.web_url)}, in a new tab` },
-                     `${siteName(s.web_url)} ↗`),
+      s.web_url && extLink(s.web_url, siteName(s.web_url),
+                           `Open the series on ${siteName(s.web_url)}, in a new tab`),
       btn));
 }
 
@@ -1851,7 +1861,7 @@ function inboxFinder(ups, site, open) {
       inboxSearch = { ups, q, found };
       show(found);
     } catch (err) {
-      fill(results, h('div', { class: 'error' }, String(err.message || err)));
+      fill(results, errorBox(err));
     }
   };
   input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') search(); });
@@ -1956,10 +1966,9 @@ function inboxDetails(s, ups, jobBox) {
           ev.target.disabled = true;
           setAdded(s, ups, false).catch((err) => showError(err, 'inbox'));
         } }, 'Remove'),
-      s.web_url && h('a', { class: 'btn light small', href: s.web_url,
-                            target: '_blank', rel: 'noopener',
-                            title: `Open the series on ${siteName(s.web_url)}, in a new tab` },
-        `${siteName(s.web_url)} ↗`)),
+      s.web_url && extLink(s.web_url, siteName(s.web_url),
+                           `Open the series on ${siteName(s.web_url)}, in a new tab`,
+                           'btn light small')),
     reviewBox, tryBox,
     s.earlier && s.earlier.parts.length > 0 && earlierDetails(s.earlier, ups));
 }
@@ -1970,7 +1979,7 @@ function earlierDetails(e, ups) {
   const replies = (n) => n > 0 && h('a', {
     class: 'chip st-changes-requested', href: `#/reviews/${e.id}`,
     title: 'Show the replies, which are waiting for your response' },
-    `${n} ${n === 1 ? 'reply' : 'replies'}`);
+    nreplies(n));
   return h('div', {},
     h('div', { class: 'section' },
       `Earlier version: v${e.version}` +
@@ -2041,10 +2050,7 @@ function appliedChip(s) {
            a.all ? 'applied' : `applied ${a.count}/${total}`);
 }
 
-// States in which a series needs no review
-const DONE_STATES = ['accepted', 'superseded', 'rejected', 'not-applicable'];
-
-function inboxCard(s, ups, pw) {
+function inboxCard(s, ups) {
   const jobBox = h('span', {});
   const card = h('div', { class: 'card patch', title: 'Tap to show the patches' },
     h('div', { class: 'row' },
@@ -2064,7 +2070,7 @@ function inboxCard(s, ups, pw) {
         class: 'chip st-changes-requested', href: `#/reviews/${s.earlier.id}`,
         title: 'Show the replies to your reviews of the earlier version, which ' +
                'are waiting for your response' },
-        `${s.earlier.replies} ${s.earlier.replies === 1 ? 'reply' : 'replies'}`),
+        nreplies(s.earlier.replies)),
       s.mine && h('span', { class: 'chip st-other' }, 'yours'),
       s.added && h('span', { class: 'chip st-other',
                              title: 'You added this series to the inbox' }, 'added'),
@@ -2082,7 +2088,7 @@ function inboxCard(s, ups, pw) {
   });
   const groups = ['all'];
   const applied = s.applied && (s.applied.all || s.applied.later ||
-                                DONE_STATES.includes(s.applied.state));
+                                FINAL_STATES.has(s.applied.state));
   if (!s.reviewed && !s.mine && !applied) groups.push('todo');
   if (s.earlier) groups.push('newver');
   if (s.applied && (s.applied.count || s.applied.later)) groups.push('applied');
@@ -2100,13 +2106,11 @@ async function viewInbox(more, refresh) {
             h('div', { class: 'spinner' }, 'Loading the inbox…'));
   }
   const upstreams = await api('upstreams').catch(() => []);
-  let ups = null;
-  try { ups = localStorage.getItem('patman-inbox-ups'); } catch (e) { /* ignore */ }
+  let ups = lsGet('patman-inbox-ups');
   if (!upstreams.some((u) => u.name === ups)) {
     ups = (upstreams.find((u) => u.default) || upstreams[0] || {}).name || '';
   }
   const upsInfo = upstreams.find((u) => u.name === ups) || {};
-  const pw = upsInfo.patchwork_url;
   const site = upsInfo.lore_url ? 'lore' : 'patchwork';
   // Going back to the inbox keeps the pages read already
   let kept = null;
@@ -2148,7 +2152,7 @@ async function viewInbox(more, refresh) {
                                        title: `Show the series on ${u.name}'s ` +
                                               (u.lore_url ? 'list' : 'patchwork'),
                                        onclick: () => {
-      try { localStorage.setItem('patman-inbox-ups', u.name); } catch (e) { /* ignore */ }
+      lsSet('patman-inbox-ups', u.name);
       route();
     } }, u.name)));
   const loadMore = !inbox.done && h('div', { class: 'actions' },
@@ -2184,7 +2188,7 @@ async function viewInbox(more, refresh) {
   const hint = inbox.feed === false && !inbox.series.length && h('div', { class: 'empty' },
     `Nothing is in this inbox yet: find a series on ${site} to add it`);
   setView('Inbox', 'inbox', false, upsTabs, fetched, finder,
-    ...(hint ? [hint] : filteredList('inbox', inbox.series.map((s) => inboxCard(s, ups, pw)),
+    ...(hint ? [hint] : filteredList('inbox', inbox.series.map((s) => inboxCard(s, ups)),
                                      filters)),
     loadMore);
 }
@@ -2224,28 +2228,6 @@ function syncOk(state) {
   return !state.cancelled && state.results.every((r) => r.returncode === 0);
 }
 
-// Show the number of jobs which are waiting or running on the Jobs tab,
-// checking again every few seconds while there are any
-let jobCountTimer = null;
-async function refreshJobCount() {
-  clearTimeout(jobCountTimer);
-  let jobs;
-  try {
-    jobs = await api('jobs');
-  } catch (err) {
-    return;
-  }
-  const count = jobs.filter((job) => !job.finished).length;
-  const tab = document.querySelector('nav a[data-tab="jobs"]');
-  let badge = tab.querySelector('.badge');
-  if (!badge) {
-    badge = h('span', { class: 'badge' });
-    tab.append(badge);
-  }
-  badge.textContent = count || '';
-  if (count) jobCountTimer = setTimeout(refreshJobCount, 3000);
-}
-
 // Seconds to wait before asking again when the server does not answer, e.g.
 // because it is restarting
 const SYNC_RETRY = 10;
@@ -2283,46 +2265,7 @@ async function cancelSync() {
   await refreshSync();
 }
 
-// Describe how a command in a job ended
-function cmdStatus(r, st) {
-  if (r.returncode === null) return 'running…';
-  if (r.returncode === 0) return 'ok';
-  if (st.cancelled && r === st.results[st.results.length - 1]) return 'cancelled';
-  return 'exit ' + r.returncode;
-}
-
-// Get the status of a job as [text, chip class]
-function jobStatus(st) {
-  if (st.queued) return st.cancelled ? ['cancelled', 'st-other'] : ['waiting', 'st-other'];
-  if (st.running) return ['running', 'st-under-review'];
-  if (st.cancelled) return ['cancelled', 'st-changes-requested'];
-  return st.results.every((r) => r.returncode === 0) ? ['ok', 'st-accepted']
-                                                    : ['failed', 'st-rejected'];
-}
-
-// Render the output of each command in a job, following the one running.
-// The page is redrawn every few seconds while the job runs, so the returned
-// function puts the page and each log back where the user left them, and
-// keeps a log scrolled to its end there as more output arrives
-function jobOutput(st) {
-  const key = (i) => `${location.hash}:${i}`;
-  const old = new Map([...main.querySelectorAll('.log')].map((log) => [log.dataset.key, {
-    top: log.scrollTop,
-    end: log.scrollTop + log.clientHeight >= log.scrollHeight - 4 }]));
-  const pageY = old.size ? window.scrollY : null;
-  const logs = st.results.map((r, i) =>
-    h('div', { class: 'log mail', 'data-key': key(i) }, r.output.trim() || '(no output yet)'));
-  const follow = () => {
-    if (pageY !== null) window.scrollTo(0, pageY);
-    logs.forEach((log, i) => {
-      const prev = old.get(key(i));
-      if (prev && !prev.end) log.scrollTop = prev.top;
-      else if (prev || (st.running && i === logs.length - 1)) log.scrollTop = log.scrollHeight;
-    });
-  };
-  return [st.results.flatMap((r, i) => [
-    h('div', { class: 'section cmd' }, `${r.cmd} — ${cmdStatus(r, st)}`), logs[i]]), follow];
-}
+syncBtn.addEventListener('click', () => { location.hash = '#/sync'; });
 
 // Show a number of bytes in a short form, e.g. '1.2 MB'
 function fmtBytes(n) {
@@ -2401,6 +2344,71 @@ function viewSync() {
   follow();
 }
 
+// --- Jobs ---
+
+// Show the number of jobs which are waiting or running on the Jobs tab,
+// checking again every few seconds while there are any
+let jobCountTimer = null;
+async function refreshJobCount() {
+  clearTimeout(jobCountTimer);
+  let jobs;
+  try {
+    jobs = await api('jobs');
+  } catch (err) {
+    return;
+  }
+  const count = jobs.filter((job) => !job.finished).length;
+  const tab = document.querySelector('nav a[data-tab="jobs"]');
+  let badge = tab.querySelector('.badge');
+  if (!badge) {
+    badge = h('span', { class: 'badge' });
+    tab.append(badge);
+  }
+  badge.textContent = count || '';
+  if (count) jobCountTimer = setTimeout(refreshJobCount, 3000);
+}
+
+// Describe how a command in a job ended
+function cmdStatus(r, st) {
+  if (r.returncode === null) return 'running…';
+  if (r.returncode === 0) return 'ok';
+  if (st.cancelled && r === st.results[st.results.length - 1]) return 'cancelled';
+  return 'exit ' + r.returncode;
+}
+
+// Get the status of a job as [text, chip class]
+function jobStatus(st) {
+  if (st.queued) return st.cancelled ? ['cancelled', 'st-other'] : ['waiting', 'st-other'];
+  if (st.running) return ['running', 'st-under-review'];
+  if (st.cancelled) return ['cancelled', 'st-changes-requested'];
+  return st.results.every((r) => r.returncode === 0) ? ['ok', 'st-accepted']
+                                                    : ['failed', 'st-rejected'];
+}
+
+// Render the output of each command in a job, following the one running.
+// The page is redrawn every few seconds while the job runs, so the returned
+// function puts the page and each log back where the user left them, and
+// keeps a log scrolled to its end there as more output arrives
+function jobOutput(st) {
+  const key = (i) => `${location.hash}:${i}`;
+  const old = new Map([...main.querySelectorAll('.log')].map((log) => [log.dataset.key, {
+    top: log.scrollTop,
+    end: log.scrollTop + log.clientHeight >= log.scrollHeight - 4 }]));
+  const pageY = old.size ? window.scrollY : null;
+  const logs = st.results.map((r, i) =>
+    h('div', { class: 'log mail', 'data-key': key(i) }, r.output.trim() || '(no output yet)'));
+  const follow = () => {
+    if (pageY !== null) window.scrollTo(0, pageY);
+    logs.forEach((log, i) => {
+      const prev = old.get(key(i));
+      if (prev && !prev.end) log.scrollTop = prev.top;
+      else if (prev || (st.running && i === logs.length - 1)) log.scrollTop = log.scrollHeight;
+    });
+  };
+  return [st.results.flatMap((r, i) => [
+    h('div', { class: 'section cmd' }, `${r.cmd} — ${cmdStatus(r, st)}`), logs[i]]), follow];
+}
+
 let jobTimer = null;
 function pollJobs(hash, active) {
   clearTimeout(jobTimer);
@@ -2477,7 +2485,6 @@ async function viewJob(id) {
     output);
   follow();
 }
-syncBtn.addEventListener('click', () => { location.hash = '#/sync'; });
 
 // --- Routing ---
 
