@@ -1433,7 +1433,7 @@ function commentsToggle(ser, sv, seq, itemId) {
     fill(box, h('div', { class: 'ver' }, 'Loading…'));
     try {
       const q = ser.upstream ? `?ups=${encodeURIComponent(ser.upstream)}` : '';
-      const list = await api(`comments/${kind}/${itemId}${q}`);
+      const list = await api(`comments/${kind}/${idPath(itemId)}${q}`);
       if (open) {
         // Our own comments, such as the review above, need no response
         const others = list.filter((c) => !c.own);
