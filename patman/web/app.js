@@ -129,11 +129,9 @@ function stateChips(states) {
 function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
 function npatches(n) { return `${n} patch${n === 1 ? '' : 'es'}`; }
 
-// Render an email body, with quoted lines dimmed and long runs of
-// quoted text folded away
-// Show an email, collapsing long quotes. If onChunk is given, each comment
-// which follows a quote gets a button which calls onChunk() with the quote
-// and the comment
+// Render an email body, with quoted lines dimmed and long runs of quoted text
+// folded away. If onChunk is given, each comment which follows a quote gets a
+// button which calls onChunk() with the quote and the comment
 //
 // onChunk(part) is called when 'Revise this' is tapped under a comment, with
 // the comment and the end of the quote it is about.
@@ -341,6 +339,8 @@ function filteredList(key, items, filters) {
 // Patchwork series IDs increase over time, so give a good recency order
 function linkNum(link) { return parseInt(link, 10) || 0; }
 
+// States of a patch which is finished with, so that its series needs no more
+// work or review
 const FINAL_STATES = new Set(['accepted', 'rejected', 'superseded',
                               'not-applicable']);
 
@@ -457,8 +457,7 @@ async function viewSeries(id, wantVer) {
       h('div', { class: 'meta' }, stateChips(sv.states)),
       sv.link && seriesSync(id, sv.version)),
     tabs,
-    h('div', { class: 'section' },
-      `${sv.patches.length} patch${sv.patches.length === 1 ? '' : 'es'}`),
+    h('div', { class: 'section' }, npatches(sv.patches.length)),
     h('div', { class: 'list' }, cards));
 }
 
@@ -1187,7 +1186,7 @@ async function viewReview(id, wantVer) {
     reviseForm(null, sv.reviews.some(hasDraft),
                () => fill(reviseAll),
                (note, drafts, msg) => revise([], null, note, drafts, msg))));
-  // Start a job and show it
+  // Review this version again, as a job, and show the job
   const reviewAgain = async (context) => {
     const job = await api('review', { json: { target: sv.link, ups: ser.upstream,
                                               drafts: true, force: true, context,
@@ -1252,13 +1251,6 @@ async function viewReview(id, wantVer) {
                    : h('div', { class: 'empty' }, 'No reviews for this version'));
 }
 
-// A card for the cover letter of a version which has no review of it, e.g.
-// because the agent had nothing to say about the series as a whole. It shows
-// the cover letter and can ask the agent to review just that
-// A button which opens a form to start a review, asking for any context to
-// give the agent, e.g. 'this is an RFC, so ignore style'. 'start(context)'
-// starts it, throwing an error to show if it cannot. Returns the button and
-// the box which holds the form, to go below the row of buttons
 // Copy some text to the clipboard. The page is often served over plain
 // http, where the browser has no clipboard API, so fall back to selecting it
 async function copyText(text) {
@@ -1305,6 +1297,10 @@ function tryButton(link, ups, branch, name) {
   return [btn, box];
 }
 
+// A button which opens a form to start a review, asking for any context to
+// give the agent, e.g. 'this is an RFC, so ignore style'. 'start(context)'
+// starts it, throwing an error to show if it cannot. Returns the button and
+// the box which holds the form, to go below the row of buttons
 function reviewButton(label, cls, tip, start) {
   const box = h('div', {});
   const btn = h('button', { class: cls, title: tip, onclick: () => {
@@ -1452,6 +1448,9 @@ function commentsToggle(ser, sv, seq, itemId) {
   return [btn, box];
 }
 
+// A card for the cover letter of a version which has no review of it, e.g.
+// because the agent had nothing to say about the series as a whole. It shows
+// the cover letter and can ask the agent to review just that
 function unreviewedCover(ser, sv) {
   const [showBtn, mailBox] = mailToggle('cover', sv.cover_id, ser.upstream);
   const [commentsBtn, commentsBox] = commentsToggle(ser, sv, 0, sv.cover_id);
@@ -2041,10 +2040,7 @@ function appliedChip(s) {
            a.all ? 'applied' : `applied ${a.count}/${total}`);
 }
 
-// States in which a series needs no review
-const DONE_STATES = ['accepted', 'superseded', 'rejected', 'not-applicable'];
-
-function inboxCard(s, ups, pw) {
+function inboxCard(s, ups) {
   const jobBox = h('span', {});
   const card = h('div', { class: 'card patch', title: 'Tap to show the patches' },
     h('div', { class: 'row' },
@@ -2082,7 +2078,7 @@ function inboxCard(s, ups, pw) {
   });
   const groups = ['all'];
   const applied = s.applied && (s.applied.all || s.applied.later ||
-                                DONE_STATES.includes(s.applied.state));
+                                FINAL_STATES.has(s.applied.state));
   if (!s.reviewed && !s.mine && !applied) groups.push('todo');
   if (s.earlier) groups.push('newver');
   if (s.applied && (s.applied.count || s.applied.later)) groups.push('applied');
@@ -2106,7 +2102,6 @@ async function viewInbox(more, refresh) {
     ups = (upstreams.find((u) => u.default) || upstreams[0] || {}).name || '';
   }
   const upsInfo = upstreams.find((u) => u.name === ups) || {};
-  const pw = upsInfo.patchwork_url;
   const site = upsInfo.lore_url ? 'lore' : 'patchwork';
   // Going back to the inbox keeps the pages read already
   let kept = null;
@@ -2184,7 +2179,7 @@ async function viewInbox(more, refresh) {
   const hint = inbox.feed === false && !inbox.series.length && h('div', { class: 'empty' },
     `Nothing is in this inbox yet: find a series on ${site} to add it`);
   setView('Inbox', 'inbox', false, upsTabs, fetched, finder,
-    ...(hint ? [hint] : filteredList('inbox', inbox.series.map((s) => inboxCard(s, ups, pw)),
+    ...(hint ? [hint] : filteredList('inbox', inbox.series.map((s) => inboxCard(s, ups)),
                                      filters)),
     loadMore);
 }
