@@ -437,6 +437,8 @@ class TestDatabase(CseriesTester):
         self.assertEqual('2026-10-19 08:05:03',
                          times.to_str(datetime(2026, 10, 19, 8, 5, 3)))
         self.assertRegex(times.now_str(), r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$')
+        self.assertEqual((times.to_str(datetime.fromtimestamp(1000)), None),
+                         (times.stamp_str(1000), times.stamp_str(None)))
         zone = timezone(timedelta(hours=5, minutes=30))
         with mock.patch.object(times, 'datetime') as fake:
             fake.now.return_value.astimezone.return_value = datetime(

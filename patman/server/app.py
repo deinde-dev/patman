@@ -503,7 +503,7 @@ class Server(jobs.JobRunner):
             ValueError: The series does not exist
         """
         data = info.get_series_detail(self.cser,
-                                      int(request.match_info['idnum']))
+                                      _idnum(request))
         data['patchwork_url'] = self.get_pw_url(data['upstream'])
         return web.json_response(data)
 
@@ -525,7 +525,7 @@ class Server(jobs.JobRunner):
                 has no patchwork link
             JobBusyError: The version is already being synced
         """
-        idnum = int(request.match_info['idnum'])
+        idnum = _idnum(request)
         data = await self._read_json(request)
         version = params.get_int(data, 'version')
         name, version = info.get_series_link(self.cser, idnum, version)
@@ -607,13 +607,13 @@ class Server(jobs.JobRunner):
         Raises:
             ValueError: The series does not exist
         """
-        idnum = int(request.match_info['idnum'])
+        idnum = _idnum(request)
         data = info.get_review_detail(self.rcser, idnum)
         # Mark the reviews which a job is acting on, so the page can wait
         for ver in data['versions']:
             pending = self.pending_jobs(idnum, ver['version'])
             for item in ver['reviews']:
-                done = item['status'] in ('sent', 'replied')
+                done = item['status'] in database.REVIEW_DONE
                 item['job'] = pending.get(item['seq'],
                                           None if done else pending.get(None))
         # 'patman review' uses the default upstream when none is given, so
@@ -755,8 +755,7 @@ class Server(jobs.JobRunner):
             else:
                 data = await pwork.get_cover(client, item_id)
         out = info.mail_info(data)
-        out['fetched'] = (times.to_str(datetime.fromtimestamp(read)) if read
-                          else times.now_str())
+        out['fetched'] = times.stamp_str(read) or times.now_str()
         return web.json_response(out)
 
     async def _blob(self, request):
@@ -836,13 +835,11 @@ class Server(jobs.JobRunner):
                 'default', its 'patchwork_url' and its 'lore_url', which is
                 None if it has a patchwork URL
         """
-        out = []
-        for name, (_, is_default, pw_url, *_, lore_url) in \
-                self.cser.db.upstream_get_dict().items():
-            if pw_url or lore_url:
-                out.append({'name': name, 'default': bool(is_default),
-                            'patchwork_url': pw_url or None,
-                            'lore_url': None if pw_url else lore_url})
+        out = [{'name': name, 'default': bool(is_default),
+                'patchwork_url': pw_url or None,
+                'lore_url': None if pw_url else lore_url}
+               for name, (_, is_default, pw_url, *_, lore_url) in
+               self._served_upstreams().items()]
         return web.json_response(out)
 
     async def _inbox(self, request):
@@ -912,8 +909,7 @@ class Server(jobs.JobRunner):
         return web.json_response({
             'ups': ups, 'page': page, 'per_page': INBOX_PAGE, 'feed': feed,
             'more': more,
-            'fetched': (times.to_str(datetime.fromtimestamp(read)) if read
-                        else times.now_str()),
+            'fetched': times.stamp_str(read) or times.now_str(),
             'upstream_fetched': self._fetched_str(ups),
             'series': series})
 
@@ -972,7 +968,7 @@ class Server(jobs.JobRunner):
             self.cser, self.rcser, series_list,
             info.get_patch_status(series_list, commits, states),
             self.get_own_emails())
-        links = {link for link, *_ in self.cser.db.inbox_get(ups)}
+        links = self._inbox_links(ups)
         for item in series:
             item['job'] = self._reviewing(item['id'])
             item['added'] = str(item['id']) in links
@@ -1039,7 +1035,7 @@ class Server(jobs.JobRunner):
         project = self._inbox_project(ups, pwork)
         async with aiohttp.ClientSession() as client:
             found = await pwork.search_series(client, project, text)
-        links = {link for link, *_ in self.cser.db.inbox_get(ups)}
+        links = self._inbox_links(ups)
         series = []
         for data in found:
             submitter = data.get('submitter') or {}
@@ -1100,6 +1096,27 @@ class Server(jobs.JobRunner):
         self.cser.commit()
         return web.json_response({'ups': ups, 'id': link})
 
+    def _served_upstreams(self):
+        """Get the upstreams which have a patchwork server or a list on lore
+
+        Return:
+            dict: Upstreams, as from Database.upstream_get_dict()
+        """
+        return {name: info for name, info in
+                self.cser.db.upstream_get_dict().items()
+                if info[2] or info[-1]}
+
+    def _inbox_links(self, ups):
+        """Get the links of the series added to the inbox of an upstream
+
+        Args:
+            ups (str): Upstream name
+
+        Return:
+            set of str: Links, e.g. patchwork series IDs or Message-IDs
+        """
+        return {link for link, *_ in self.cser.db.inbox_get(ups)}
+
     def _default_upstream(self):
         """Get the upstream to use for a request which does not give one
 
@@ -1113,9 +1130,7 @@ class Server(jobs.JobRunner):
         ups = self.cser.db.upstream_get_default()
         if ups:
             return ups
-        names = [name for name, (_, _, pw_url, *_, lore_url) in
-                 self.cser.db.upstream_get_dict().items()
-                 if pw_url or lore_url]
+        names = list(self._served_upstreams())
         if len(names) != 1:
             raise ValueError("There is no default upstream, so give one with "
                              "'ups'")
@@ -1287,7 +1302,7 @@ class Server(jobs.JobRunner):
                 has not fetched it since the server started
         """
         done = (self._fetches.get(ups) or {}).get('done')
-        return times.to_str(datetime.fromtimestamp(done)) if done else None
+        return times.stamp_str(done)
 
     def _job_state(self, job):
         """Get the state of a job, with the reviewed series it acts on
@@ -1308,9 +1323,9 @@ class Server(jobs.JobRunner):
                 review = target['series']
             else:
                 for cmd in job.cmds:
-                    if '-s' in cmd[:-1]:
-                        found = self.rcser.db.series_find_by_link(
-                            cmd[cmd.index('-s') + 1])
+                    link = cmd_series(cmd)
+                    if link:
+                        found = self.rcser.db.series_find_by_link(link)
                         review = found[0] if found else None
         state['review'] = review
         if review:
@@ -1342,7 +1357,7 @@ class Server(jobs.JobRunner):
         Raises:
             ValueError: The job does not exist
         """
-        job = self.get_job(int(request.match_info['idnum']))
+        job = self.get_job(_idnum(request))
         return web.json_response(self._job_state(job))
 
     async def _job_cancel(self, request):
@@ -1358,7 +1373,7 @@ class Server(jobs.JobRunner):
         Raises:
             ValueError: The job does not exist
         """
-        job = self.get_job(int(request.match_info['idnum']))
+        job = self.get_job(_idnum(request))
         status = 202 if self.cancel_job(job) else 409
         return web.json_response(job.state, status=status)
 
@@ -1420,8 +1435,7 @@ class Server(jobs.JobRunner):
             if not job.active or job.kind != 'review':
                 continue
             for cmd in job.cmds:
-                if ('-s' in cmd[:-1] and
-                        cmd[cmd.index('-s') + 1] == str(link) and
+                if (cmd_series(cmd) == str(link) and
                         not REVIEW_ACTIONS & set(cmd)):
                     return job.idnum
         return None
@@ -1445,8 +1459,8 @@ class Server(jobs.JobRunner):
         data = await self._read_json(request)
         args, title = params.parse_review_req(
             data, list(self.cser.db.upstream_get_dict()))
-        if '-s' in args:
-            link = args[args.index('-s') + 1]
+        link = cmd_series(args)
+        if link:
             busy = self._reviewing(link)
             if busy:
                 raise jobs.JobBusyError(
@@ -1493,21 +1507,14 @@ class Server(jobs.JobRunner):
         Raises:
             ValueError: The series or version does not exist, or has no link
         """
-        name, desc, ups = self.rcser.db.series_get_info(idnum)
-        version = version or self.rcser.db.series_get_max_version(idnum)
-        link = self.rcser.db.ser_ver_get_link(idnum, version)
-        if not link:
-            raise ValueError(f"Series '{name}' v{version} has no link")
-        args = ['-s', str(link), '--respond-comment', str(comment_id),
-                '-i', str(seq)]
-        if ups:
-            args += ['-U', ups]
+        label, version, args = self._version_args(
+            idnum, version, '--respond-comment', str(comment_id), '-i',
+            str(seq))
         if note:
             args += ['-c', note]
         what = f'patch {seq}' if seq else 'the cover letter'
         return self._review_job(
-            f"Respond to a comment on {what} of '{desc or name}' v{version}",
-            *args)
+            f'Respond to a comment on {what} of {label}', *args)
 
     async def _respond(self, request):
         """Handle 'POST /api/reviews/<id>/respond': respond to a comment
@@ -1528,7 +1535,7 @@ class Server(jobs.JobRunner):
             BadRequest: The request is invalid
             ValueError: The series or version does not exist, or has no link
         """
-        idnum = int(request.match_info['idnum'])
+        idnum = _idnum(request)
         data = await self._read_json(request)
         seq = data.get('seq')
         if isinstance(seq, bool) or not isinstance(seq, int) or seq < 0:
@@ -1560,7 +1567,7 @@ class Server(jobs.JobRunner):
             ValueError: The series or version does not exist, or has no link
             JobBusyError: A job is already acting on one of the reviews
         """
-        idnum = int(request.match_info['idnum'])
+        idnum = _idnum(request)
         data = await self._read_json(request)
         return self._redraft_job(idnum, params.get_int(data, 'version'),
                                  data.get('seqs') or [])
@@ -1589,19 +1596,40 @@ class Server(jobs.JobRunner):
         if not isinstance(seqs, list) or not all(
                 isinstance(seq, int) and seq >= 0 for seq in seqs):
             raise params.BadRequest('Invalid seqs')
+        if seqs:
+            action = [*action, '-i',
+                      ','.join(str(seq) for seq in sorted(seqs))]
+        label, version, args = self._version_args(idnum, version, *action)
+        self.check_free(idnum, version, seqs, self._unsent(idnum, version))
+        target = {'series': idnum, 'version': version, 'seqs': sorted(seqs)}
+        return args, label, target
+
+    def _version_args(self, idnum, version, *action):
+        """Get the 'patman review' arguments which act on a reviewed version
+
+        Args:
+            idnum (int): Series ID in the review database
+            version (int or None): Version, or None for the latest
+            action (list of str): Arguments giving the action, which go
+                after the series and before its upstream
+
+        Return:
+            tuple:
+                str: Series and version, for a job title, e.g. "'foo' v2"
+                int: Version
+                list of str: Arguments giving the series, the action and the
+                    upstream
+
+        Raises:
+            ValueError: The series or version does not exist, or has no link
+        """
         name, desc, ups = self.rcser.db.series_get_info(idnum)
         version = version or self.rcser.db.series_get_max_version(idnum)
         link = self.rcser.db.ser_ver_get_link(idnum, version)
         if not link:
             raise ValueError(f"Series '{name}' v{version} has no link")
-        self.check_free(idnum, version, seqs, self._unsent(idnum, version))
-        args = ['-s', str(link), *action]
-        if seqs:
-            args += ['-i', ','.join(str(seq) for seq in sorted(seqs))]
-        if ups:
-            args += ['-U', ups]
-        target = {'series': idnum, 'version': version, 'seqs': sorted(seqs)}
-        return args, f"'{desc or name}' v{version}", target
+        args = ['-s', str(link), *action] + (['-U', ups] if ups else [])
+        return f"'{desc or name}' v{version}", version, args
 
     def _unsent(self, idnum, version):
         """Get the patches whose reviews have not been sent
@@ -1615,7 +1643,7 @@ class Server(jobs.JobRunner):
         """
         svr = self.rcser.get_ser_ver(idnum, version)
         return [rev.seq for rev in self.rcser.db.review_get_for_version(
-            svr.idnum) if rev.status not in ('sent', 'replied')]
+            svr.idnum) if rev.status not in database.REVIEW_DONE]
 
     def _redraft_job(self, idnum, version, seqs):
         """Start a job which recreates the Gmail drafts for a review
@@ -1651,7 +1679,7 @@ class Server(jobs.JobRunner):
             ValueError: The series or version does not exist, or has no link
             JobBusyError: A job is already acting on one of the reviews
         """
-        idnum = int(request.match_info['idnum'])
+        idnum = _idnum(request)
         data = await self._read_json(request)
         seqs = data.get('seqs') or []
         args, what, target = self._series_review_args(
@@ -1676,7 +1704,7 @@ class Server(jobs.JobRunner):
             BadRequest: 'hidden' is missing or not true or false
             ValueError: The series does not exist
         """
-        idnum = int(request.match_info['idnum'])
+        idnum = _idnum(request)
         data = await self._read_json(request)
         hidden = data.get('hidden')
         if not isinstance(hidden, bool):
@@ -1705,7 +1733,7 @@ class Server(jobs.JobRunner):
             ValueError: The series or version does not exist, or has no link
             JobBusyError: A job is already acting on one of the reviews
         """
-        idnum = int(request.match_info['idnum'])
+        idnum = _idnum(request)
         data = await self._read_json(request)
         seqs = data.get('seqs') or []
         if not seqs:
@@ -1735,7 +1763,7 @@ class Server(jobs.JobRunner):
             ValueError: The series or version does not exist, or has no link
             JobBusyError: A job is already acting on one of the reviews
         """
-        idnum = int(request.match_info['idnum'])
+        idnum = _idnum(request)
         data = await self._read_json(request)
         note = data.get('note')
         if not isinstance(note, str) or not note.strip():
@@ -1775,11 +1803,10 @@ class Server(jobs.JobRunner):
             JobBusyError: A job is acting on the review
         """
         db = self.rcser.db
-        rev = db.review_get(int(request.match_info['idnum']))
+        rev = db.review_get(_idnum(request))
         data = await self._read_json(request)
-        if rev.status in ('sent', 'replied'):
-            return web.json_response(
-                {'error': 'This review has already been sent'}, status=409)
+        if rev.status in database.REVIEW_DONE:
+            return _already_sent('This review')
         body = data.get('body', rev.body)
         if not isinstance(body, str) or not body.strip():
             raise params.BadRequest('The review cannot be empty')
@@ -1813,11 +1840,10 @@ class Server(jobs.JobRunner):
             ValueError: The reply does not exist
         """
         db = self.rcser.db
-        reply = db.reply_get(int(request.match_info['idnum']))
+        reply = db.reply_get(_idnum(request))
         data = await self._read_json(request)
         if reply.status == database.REPLY_SENT:
-            return web.json_response(
-                {'error': 'The response has already been sent'}, status=409)
+            return _already_sent('The response')
         if 'response' in data:
             response = data['response']
             if not isinstance(response, str):
@@ -1849,7 +1875,7 @@ class Server(jobs.JobRunner):
         Raises:
             ValueError: The reply does not exist
         """
-        reply = self.rcser.db.reply_get(int(request.match_info['idnum']))
+        reply = self.rcser.db.reply_get(_idnum(request))
         if reply.comment_id:
             # A comment on patchwork is read again, to respond to it
             svr = self.rcser.db.ser_ver_get_by_id(reply.svid)
@@ -1872,10 +1898,9 @@ class Server(jobs.JobRunner):
             BadRequest: There is no response to send
             ValueError: The reply does not exist
         """
-        reply = self.rcser.db.reply_get(int(request.match_info['idnum']))
+        reply = self.rcser.db.reply_get(_idnum(request))
         if reply.status == database.REPLY_SENT:
-            return web.json_response(
-                {'error': 'The response has already been sent'}, status=409)
+            return _already_sent('The response')
         if not (reply.response or '').strip():
             raise params.BadRequest('There is no response to send')
         return self._review_job(f'Send the response to reply {reply.idnum}',
@@ -1961,6 +1986,45 @@ def _item_id(request):
     """
     item_id = request.match_info['item_id']
     return int(item_id) if item_id.isdigit() else item_id
+
+
+def _idnum(request):
+    """Get the ID of the series, job, review or reply which a request is for
+
+    Args:
+        request (web.Request): Request, with the ID as 'idnum'
+
+    Return:
+        int: ID
+    """
+    return int(request.match_info['idnum'])
+
+
+def _already_sent(what):
+    """Refuse to change something which has been sent
+
+    Args:
+        what (str): What it is, e.g. 'This review'
+
+    Return:
+        web.Response: Error, with status 409
+    """
+    return web.json_response({'error': f'{what} has already been sent'},
+                             status=409)
+
+
+def cmd_series(cmd):
+    """Get the series which a 'patman review' command acts on
+
+    Args:
+        cmd (list of str): Command, or its arguments
+
+    Return:
+        str or None: Series link given with '-s', or None if there is none
+    """
+    if '-s' in cmd[:-1]:
+        return cmd[cmd.index('-s') + 1]
+    return None
 
 
 def is_loopback(host):

@@ -33,6 +33,9 @@ REVIEW_SENT = 'sent'        # Draft was sent
 REVIEW_DELETED = 'deleted'  # Draft was deleted without sending
 REVIEW_REPLIED = 'replied'  # Author has replied to our review
 
+# Statuses of a review which has been sent
+REVIEW_DONE = (REVIEW_SENT, REVIEW_REPLIED)
+
 Review = namedtuple(
     'REVIEW',
     'idnum,svid,seq,body,approved,timestamp,draft_id,status,'

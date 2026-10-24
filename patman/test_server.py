@@ -2398,6 +2398,13 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertFalse(server.app.is_loopback('100.64.1.2'))
         self.assertFalse(server.app.is_loopback('myhost'))
 
+    def test_cmd_series(self):
+        """The series which a review command acts on is found"""
+        self.assertEqual(['123', None, None], [
+            server.app.cmd_series(['patman', 'review', '-s', '123', '-d']),
+            server.app.cmd_series(['patman', 'review', '--scan']),
+            server.app.cmd_series(['patman', 'review', '-s'])])
+
     def test_serve_cmdline(self):
         """The serve command passes its options through to the server"""
         # Use a separate database, since setUp() already has one open
