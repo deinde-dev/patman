@@ -733,6 +733,20 @@ class Database:  # pylint:disable=R0904
         self.execute('DELETE FROM series WHERE id = ?', (idnum,))
         assert self.rowcount() == 1
 
+    def series_remove_if_empty(self, idnum):
+        """Remove a series if it has no versions left
+
+        Args:
+            idnum (int): ID num of the series
+
+        Return:
+            bool: True if the series was removed
+        """
+        self.execute('DELETE FROM series WHERE id = ? AND NOT EXISTS '
+                     '(SELECT 1 FROM ser_ver sv WHERE sv.series_id = ?)',
+                     (idnum, idnum))
+        return self.rowcount() == 1
+
     def series_remove_by_name(self, name):
         """Remove a series from the database
 

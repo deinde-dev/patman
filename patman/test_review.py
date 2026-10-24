@@ -447,6 +447,10 @@ class TestReview(CseriesTester):
         self.db_open()
         self.assertIsNone(cser.db.series_find_by_link(str(self.REVIEW_LINK)))
 
+        # The series goes too, since it has no versions left
+        self.assertFalse(cser.db.series_get_dict(include_archived=True,
+                                                 reviews_only=True))
+
     def test_review_already_reviewed(self):
         """Test that reviewing the same link again is detected"""
         cser = self.get_cser()
@@ -525,7 +529,7 @@ class TestReview(CseriesTester):
             result = review.apply.apply_and_check(ctx, '526073')
         # None means 'nothing to review', not a failure
         self.assertIsNone(result)
-        ctx.cser.db.ser_ver_remove.assert_called_once_with(5, 1)
+        ctx.drop_version.assert_called_once_with()
 
     def test_review_apply_check_failure(self):
         """A genuine apply failure still returns False"""
@@ -537,7 +541,7 @@ class TestReview(CseriesTester):
                 terminal.capture():
             result = review.apply.apply_and_check(ctx, '526073')
         self.assertFalse(result)
-        ctx.cser.db.ser_ver_remove.assert_called_once_with(5, 1)
+        ctx.drop_version.assert_called_once_with()
 
     def test_review_apply_other_project(self):
         """A series for another project is not applied, saving agent time"""
@@ -598,7 +602,7 @@ class TestReview(CseriesTester):
             with terminal.capture() as (out, _):
                 self.assertIsNone(apply.apply_and_check(ctx, 'x@y'))
         self.assertIn('not for this project', out.getvalue())
-        ctx.cser.db.ser_ver_remove.assert_called_once_with(5, 1)
+        ctx.drop_version.assert_called_once_with()
 
     def test_review_nothing_tidied(self):
         """A series with nothing to review leaves no worktree or branch"""

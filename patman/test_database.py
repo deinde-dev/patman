@@ -283,6 +283,17 @@ class TestDatabase(CseriesTester):
                           db.series_is_own(int(f'{rev}1')),
                           db.series_is_own('999')))
 
+    def test_series_remove_if_empty(self):
+        """A series is removed only if it has no versions"""
+        db = self.get_database().db
+        rev = self.add_db_series(db, 'rev', [1], review=True)
+        empty = self.add_db_series(db, 'empty', [], review=True)
+        self.assertEqual((False, True),
+                         (db.series_remove_if_empty(rev),
+                          db.series_remove_if_empty(empty)))
+        self.assertEqual([rev], [ser.idnum for ser in db.series_get_dict(
+            include_archived=True, reviews_only=True).values()])
+
     def test_migrate(self):
         """Test migration to later schema versions"""
         db = database.Database(f'{self.tmpdir}/.patman.db')

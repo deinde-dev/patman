@@ -234,6 +234,16 @@ class ReviewContext:  # pylint: disable=R0902
         """Get the series date string"""
         return self.series_data.get('date', '')
 
+    def drop_version(self):
+        """Remove the version being reviewed, since it is not to be reviewed
+
+        The series goes too if it has no other versions, so that it does
+        not look reviewed, e.g. as an earlier version in the inbox
+        """
+        self.cser.db.ser_ver_remove(self.series_id, self.version)
+        self.cser.db.series_remove_if_empty(self.series_id)
+        self.cser.commit()
+
 
 def read_context(spec):
     """Resolve a --context argument value to literal text

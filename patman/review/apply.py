@@ -386,16 +386,14 @@ def apply_and_check(ctx, link):
     except OtherProjectError as exc:
         tout.notice(f"Nothing to review for '{ctx.branch_name}': it is not "
                     f'for this project, since {exc}')
-        ctx.cser.db.ser_ver_remove(ctx.series_id, ctx.version)
-        ctx.cser.commit()
+        ctx.drop_version()
         return None
 
     if not success:
         # The agent hit a real problem, or was interrupted (which leaves
         # the branch missing); either way there is nothing to review
         tout.error('Failed to apply patches to branch')
-        ctx.cser.db.ser_ver_remove(ctx.series_id, ctx.version)
-        ctx.cser.commit()
+        ctx.drop_version()
         return False
 
     applied = gitutil.count_revs(
@@ -407,8 +405,7 @@ def apply_and_check(ctx, link):
         # simply nothing to review
         tout.notice(f"Nothing to review for '{ctx.branch_name}': every "
                     'patch is already applied upstream')
-        ctx.cser.db.ser_ver_remove(ctx.series_id, ctx.version)
-        ctx.cser.commit()
+        ctx.drop_version()
         return None
     if applied != ctx.patch_count:
         # Common with kernel-import series: the agent legitimately skips

@@ -809,8 +809,7 @@ def _review_link(args, pwork, cser, link, own_db=None):
         # The agent applies and reviews the patches, so check for it before
         # making the worktree, leaving no record of a review not done
         if not claude_mod.check_available():
-            cser.db.ser_ver_remove(ctx.series_id, ctx.version)
-            cser.commit()
+            ctx.drop_version()
             raise ValueError(AGENT_MISSING)
 
         ctx.upstream_branch = apply.get_upstream_branch(args, cser)

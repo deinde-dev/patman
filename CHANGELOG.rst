@@ -146,6 +146,10 @@ Fixed
   If only the bundled copy is present, this is reported.
 - A sync of series on more than one patchwork server follows the events
   of each server's project, rather than only those of the first server.
+- ``patman review`` no longer leaves a series with no versions in the
+  review database when there is nothing to review, e.g. a series for another
+  project, or when applying it fails. The inbox on the ``patman serve`` page
+  took such a series for an earlier review of the next version.
 
 0.5.0 - 2026-10-19
 ------------------
