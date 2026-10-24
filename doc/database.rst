@@ -6,7 +6,7 @@ The patman database
 Patman stores series tracking, review and workflow state in a SQLite
 database (``.patman.db``) in the top-level git directory. The schema is
 versioned and migrated automatically when patman starts; it is currently at
-v18. The :doc:`db` chapter of the manual covers where the database is
+v19. The :doc:`db` chapter of the manual covers where the database is
 kept, the separate review database and sharing it between patman runs.
 
 The database allows patman to track a patch series across multiple
@@ -40,6 +40,9 @@ Entity relationships
     ser_ver  1---* review           (review.svid -> ser_ver.id)
 
     series   1---* workflow          (workflow.series_id -> series.id)
+
+    upstream 1---* inbox            (inbox.upstream references
+                                     upstream.name)
 
 A **series** represents a named patch series across all its versions.
 Each **ser_ver** is one version of that series (e.g. v1, v2), linked to
@@ -214,6 +217,8 @@ series_to         TEXT      Default To: alias for series (added v6)
 no_maintainers    BIT       Skip get_maintainer.pl (added v6)
 no_tags           BIT       Skip subject-tag processing (added v6)
 lore_url          TEXT      Mailing list on lore (added v18)
+no_feed           BIT       The inbox lists only the series added to
+                            it (added v19)
 ================  ========  ==========================================
 
 patchwork
@@ -271,6 +276,26 @@ requests        INTEGER   Number of requests sent, including retries
 bytes           INTEGER   Number of bytes received in responses
 ==============  ========  ==========================================
 
+inbox
+~~~~~
+
+The series which you have added to the inbox of an upstream on the
+``patman serve`` page, from a search of its patchwork server or of lore.
+They stay in the inbox until you remove them. Added in v19.
+
+==============  ========  ==========================================
+Column          Type      Description
+==============  ========  ==========================================
+id              INTEGER   Primary key (auto-increment)
+upstream        TEXT      Upstream name
+link            TEXT      Patchwork series ID, or the Message-ID of
+                          the series on lore
+name            TEXT      Name of the series, as found by the search
+timestamp       TEXT      When it was added
+==============  ========  ==========================================
+
+Each series is only in the inbox of an upstream once.
+
 schema_version
 ~~~~~~~~~~~~~~
 
@@ -281,5 +306,5 @@ automatically.
 ==============  ========  ==========================================
 Column          Type      Description
 ==============  ========  ==========================================
-version         INTEGER   Current schema version (currently 16)
+version         INTEGER   Current schema version (currently 19)
 ==============  ========  ==========================================

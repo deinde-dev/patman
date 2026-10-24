@@ -233,8 +233,9 @@ class TestDatabase(CseriesTester):
         self.add_db_series(ocser.db, 'rev', [1], review=True)
         ocser.db.upstream_add('us', 'https://elsewhere')
         ocser.db.upstream_add('ci', 'https://ci', 'https://pw.ci',
-                              lore_url='https://lore.ci')
+                              lore_url='https://lore.ci', no_feed=True)
         ocser.db.upstream_set_default('ci')
+        ocser.db.inbox_add('ci', 12, 'Added', '2026-10-24 10:00:00')
         ocser.db.patchwork_update('U-Boot', 1, 'uboot', 'ci')
         ocser.commit()
         ocser.close_database()
@@ -257,6 +258,9 @@ class TestDatabase(CseriesTester):
         self.assertEqual(('https://ci', False, 'https://pw.ci'),
                          ups['ci'][:3])
         self.assertEqual('https://lore.ci', ups['ci'][7])
+        self.assertTrue(main.db.upstream_get_no_feed('ci'))
+        self.assertEqual([('12', 'Added', '2026-10-24 10:00:00')],
+                         main.db.inbox_get('ci'))
         self.assertEqual('uboot', main.project_get('ci')[2])
         main.close_database()
 
@@ -341,9 +345,41 @@ class TestDatabase(CseriesTester):
                 db.execute("INSERT INTO traffic (hour, url, requests, bytes) "
                            "VALUES ('2026-10-18 09', 'https://pw', 5, 100)")
                 db.commit()
-        self.assertEqual(18, database.LATEST)
+        self.assertEqual(19, database.LATEST)
         self.assertEqual({('https://pw', ''): (5, 100)},
                          db.traffic_get_kinds('2026-10-18 00'))
+
+    def test_inbox(self):
+        """Series can be added to the inbox of an upstream, and removed"""
+        db = self.get_database().db
+        db.upstream_add('us', 'https://us', lore_url='https://lore/all',
+                        no_feed=True)
+        db.upstream_add('ci', 'https://ci')
+        self.assertEqual((True, False), (db.upstream_get_no_feed('us'),
+                                         db.upstream_get_no_feed('ci')))
+        db.upstream_set('ci', no_feed=True)
+        self.assertTrue(db.upstream_get_no_feed('ci'))
+
+        db.inbox_add('us', 'a@b', 'First', '2026-10-24 10:00:00')
+        db.inbox_add('us', 'c@d', 'Second', '2026-10-24 11:00:00')
+        db.inbox_add('ci', 123, 'Other', '2026-10-24 12:00:00')
+
+        # Adding it again keeps when it was first added, but takes the name
+        db.inbox_add('us', 'a@b', 'First, renamed', '2026-10-24 13:00:00')
+        self.assertEqual([('c@d', 'Second', '2026-10-24 11:00:00'),
+                          ('a@b', 'First, renamed', '2026-10-24 10:00:00')],
+                         db.inbox_get('us'))
+        self.assertEqual([('123', 'Other', '2026-10-24 12:00:00')],
+                         db.inbox_get('ci'))
+
+        self.assertEqual((True, False), (db.inbox_remove('us', 'c@d'),
+                                         db.inbox_remove('us', 'c@d')))
+        self.assertEqual(['a@b'], [link for link, *_ in db.inbox_get('us')])
+
+        # The series go with their upstream
+        db.upstream_delete('us')
+        self.assertEqual([], db.inbox_get('us'))
+        self.assertEqual(1, len(db.inbox_get('ci')))
 
     def test_traffic(self):
         """Requests to patchwork are counted by the hour"""
