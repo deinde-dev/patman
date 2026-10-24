@@ -3,11 +3,16 @@
 // Token handling: a ?token=... in the URL is remembered, then removed
 // from the address bar so it does not end up in screenshots or history
 const TOKEN_KEY = 'patman-token';
-function getToken() {
-  try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; }
+function getToken() { return lsGet(TOKEN_KEY) || ''; }
+function setToken(tok) { lsSet(TOKEN_KEY, tok); }
+
+// Read and write the browser's storage, which may not be allowed, e.g. in a
+// private window, in which case nothing is kept
+function lsGet(key) {
+  try { return localStorage.getItem(key); } catch (e) { return null; }
 }
-function setToken(tok) {
-  try { localStorage.setItem(TOKEN_KEY, tok); } catch (e) { /* ignore */ }
+function lsSet(key, value) {
+  try { localStorage.setItem(key, value); } catch (e) { /* ignore */ }
 }
 (function () {
   const params = new URLSearchParams(location.search);
@@ -128,6 +133,36 @@ function stateChips(states) {
 }
 function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
 function npatches(n) { return `${n} patch${n === 1 ? '' : 'es'}`; }
+function nreplies(n) { return `${n} ${n === 1 ? 'reply' : 'replies'}`; }
+
+// The query giving the upstream to use, if any
+function upsQuery(ups) { return ups ? `?ups=${encodeURIComponent(ups)}` : ''; }
+
+// An error message to show in place of something which cannot be shown
+function errorBox(err, tag = 'div') {
+  return h(tag, { class: 'error' }, String(err.message || err));
+}
+
+// A link which opens a page on another site, e.g. patchwork, in a new tab
+function extLink(href, label, tip, cls = 'extlink') {
+  return h('a', { class: cls, href, target: '_blank', rel: 'noopener', title: tip },
+           `${label} ↗`);
+}
+
+// Who sent a comment and when
+function commentHead(c) {
+  return h('div', { class: 'who' }, c.name || c.email || 'Unknown',
+           h('span', { class: 'when' }, ago(parseTime(c.date, true))));
+}
+
+// Tabs to choose a version, e.g. of a series. Each replaces the page's address
+// with 'base/<version>', so that going back does not step through them
+function versionTabs(versions, sv, base, tip) {
+  return versions.length > 1 ? h('div', { class: 'tabs' }, versions.map((v) =>
+    h('button', { class: v === sv ? 'on' : '', title: tip(v.version),
+                  onclick: () => { location.replace(`${base}/${v.version}`); } },
+      `v${v.version}`))) : null;
+}
 
 // Render an email body, with quoted lines dimmed and long runs of quoted text
 // folded away. If onChunk is given, each comment which follows a quote gets a
@@ -288,7 +323,7 @@ function showError(err, tab) {
                            title: 'Use this token for the server' }, 'Save')));
     return;
   }
-  setView('patman', tab, false, h('div', { class: 'error' }, String(err.message || err)));
+  setView('patman', tab, false, errorBox(err));
 }
 
 // A search box and optional filter chips above a list of cards. Each item
@@ -296,10 +331,8 @@ function showError(err, tab) {
 // filters the item belongs to. Each filter is [id, label, tooltip]
 function filteredList(key, items, filters) {
   let current = filters ? filters[0][0] : null;
-  try {
-    const saved = localStorage.getItem(`patman-filter-${key}`);
-    if (filters && filters.some(([id]) => id === saved)) current = saved;
-  } catch (e) { /* ignore */ }
+  const saved = lsGet(`patman-filter-${key}`);
+  if (filters && filters.some(([id]) => id === saved)) current = saved;
   const search = h('input', { type: 'search', class: 'search',
                               placeholder: 'Search', 'aria-label': 'Search' });
   const count = h('div', { class: 'section' });
@@ -321,8 +354,7 @@ function filteredList(key, items, filters) {
         class: id === current ? 'on' : '', title: tip,
         onclick: () => {
           current = id;
-          try { localStorage.setItem(`patman-filter-${key}`, id); }
-          catch (e) { /* ignore */ }
+          lsSet(`patman-filter-${key}`, id);
           update();
         } }, label)));
     }
@@ -384,15 +416,13 @@ function commentToggle(card, kind, itemId, ups) {
     box = h('div', { class: 'comments' }, h('div', { class: 'ver' }, 'Loading…'));
     card.append(box);
     try {
-      const q = ups ? `?ups=${encodeURIComponent(ups)}` : '';
+      const q = upsQuery(ups);
       const comments = await api(`comments/${kind}/${idPath(itemId)}${q}`);
       fill(box, ...(comments.length ? comments.map((c) =>
-        h('div', {},
-          h('div', { class: 'who' }, c.name || c.email || 'Unknown',
-            h('span', { class: 'when' }, ago(parseTime(c.date, true)))),
-          renderMail(c.content))) : [h('div', { class: 'ver' }, 'No comments')]));
+        h('div', {}, commentHead(c), renderMail(c.content)))
+        : [h('div', { class: 'ver' }, 'No comments')]));
     } catch (err) {
-      fill(box, h('div', { class: 'error' }, err.message));
+      fill(box, errorBox(err));
     }
   };
 }
@@ -402,10 +432,7 @@ async function viewSeries(id, wantVer) {
   const pw = ser.patchwork_url;
   const versions = ser.versions;
   const sv = versions.find((v) => v.version === wantVer) || versions[0];
-  const tabs = versions.length > 1 ? h('div', { class: 'tabs' }, versions.map((v) =>
-    h('button', { class: v === sv ? 'on' : '', title: `Show version ${v.version}`,
-                  onclick: () => { location.replace(`#/series/${id}/${v.version}`); } },
-      `v${v.version}`))) : null;
+  const tabs = versionTabs(versions, sv, `#/series/${id}`, (n) => `Show version ${n}`);
 
   const cards = [];
   if (sv.cover_id) {
@@ -418,10 +445,8 @@ async function viewSeries(id, wantVer) {
       h('div', { class: 'meta' },
         h('a', { class: 'extlink', href: mailHref('cover', sv.cover_id, ser.upstream),
                  title: 'Read the cover letter and its comments' }, 'Read'),
-        pw && h('a', { class: 'extlink', href: `${pw}/cover/${sv.cover_id}/`,
-                       target: '_blank', rel: 'noopener',
-                       title: 'Open the cover letter on patchwork, in a new tab' },
-                'Open in patchwork ↗')));
+        pw && extLink(`${pw}/cover/${sv.cover_id}/`, 'Open in patchwork',
+                      'Open the cover letter on patchwork, in a new tab')));
     card.addEventListener('click', commentToggle(card, 'cover', sv.cover_id, ser.upstream));
     cards.push(card);
   }
@@ -438,9 +463,8 @@ async function viewSeries(id, wantVer) {
         p.patch_id && h('a', { class: 'extlink',
           href: mailHref('patch', p.patch_id, ser.upstream),
           title: 'Read the patch and its comments' }, 'Read'),
-        pw && p.patch_id && h('a', { class: 'extlink',
-          href: `${pw}/patch/${p.patch_id}/`, target: '_blank', rel: 'noopener',
-          title: 'Open the patch on patchwork, in a new tab' }, 'patchwork ↗')));
+        pw && p.patch_id && extLink(`${pw}/patch/${p.patch_id}/`, 'patchwork',
+                                    'Open the patch on patchwork, in a new tab')));
     if (p.patch_id) {
       card.addEventListener('click', commentToggle(card, 'patch', p.patch_id, ser.upstream));
     }
@@ -643,7 +667,7 @@ function diffGap(file, lo, count, after, before) {
         src = { lines: b.lines, first,
                 count: count ?? Math.max(0, b.lines.length - first + 1) };
       } catch (err) {
-        fill(bar, h('span', { class: 'error' }, err.message));
+        fill(bar, errorBox(err, 'span'));
         return;
       }
     }
@@ -737,10 +761,8 @@ async function viewFile(newOid, oldOid, newLine, oldLine, name) {
 
 function renderComments(comments) {
   return comments.length ? comments.map((c) =>
-    h('div', { class: 'card' },
-      h('div', { class: 'who' }, c.name || c.email || 'Unknown',
-        h('span', { class: 'when' }, ago(parseTime(c.date, true)))),
-      renderMail(c.content))) : [h('div', { class: 'empty' }, 'No comments')];
+    h('div', { class: 'card' }, commentHead(c), renderMail(c.content)))
+    : [h('div', { class: 'empty' }, 'No comments')];
 }
 
 // The ID of a patch or cover letter, for a URL path: a patchwork ID, or
@@ -764,7 +786,7 @@ function mailHref(kind, id, ups) {
 // Show a patch or cover letter; 'refresh' reads it from patchwork again rather
 // than using a copy the server read recently
 async function viewMail(kind, id, ups, refresh) {
-  const q = ups ? `?ups=${encodeURIComponent(ups)}` : '';
+  const q = upsQuery(ups);
   const rq = refresh ? `${q ? '&' : '?'}refresh=1` : '';
   const m = await api(`${kind}/${idPath(id)}${q}${rq}`);
   const site = siteName(m.web_url);
@@ -788,9 +810,7 @@ async function viewMail(kind, id, ups, refresh) {
           viewMail(kind, id, ups, true).catch((err) => showError(err));
         } }, 'Refresh')),
       m.web_url && h('div', { class: 'actions' },
-        h('a', { class: 'btn light small', href: m.web_url, target: '_blank',
-                 rel: 'noopener', title: `Open this on ${site}, in a new tab` },
-          `${site} ↗`))),
+        extLink(m.web_url, site, `Open this on ${site}, in a new tab`, 'btn light small'))),
     h('div', { class: 'section' }, kind === 'patch' ? 'Commit message' : 'Cover letter'),
     h('div', { class: 'card' }, renderMail(m.content)),
     m.diff && renderDiff(m.diff),
@@ -799,7 +819,7 @@ async function viewMail(kind, id, ups, refresh) {
   try {
     fill(comments, ...renderComments(await api(`comments/${kind}/${idPath(id)}${q}${rq}`)));
   } catch (err) {
-    fill(comments, h('div', { class: 'error' }, err.message));
+    fill(comments, errorBox(err));
   }
 }
 
@@ -818,14 +838,14 @@ function mailToggle(kind, id, ups) {
     if (!open) { fill(box); return; }
     fill(box, h('div', { class: 'ver' }, 'Loading…'));
     try {
-      const q = ups ? `?ups=${encodeURIComponent(ups)}` : '';
+      const q = upsQuery(ups);
       mail = mail || await api(`${kind}/${idPath(id)}${q}`);
       if (open) {
         fill(box, h('div', {}, renderMail(mail.content),
                               mail.diff && renderDiff(mail.diff)));
       }
     } catch (err) {
-      if (open) fill(box, h('div', { class: 'error' }, err.message));
+      if (open) fill(box, errorBox(err));
     }
   } }, `Show the ${what}`);
   return [btn, box];
@@ -936,7 +956,7 @@ async function viewReviewList() {
           setHidden(r.id, !r.hidden);
         } }, r.hidden ? 'unhide' : 'hide'),
         r.replies_waiting ? h('span', { class: 'chip st-changes-requested' },
-          `${r.replies_waiting} ${r.replies_waiting === 1 ? 'reply' : 'replies'}`)
+          nreplies(r.replies_waiting))
           : null,
         // A series can be applied, e.g. with -a, without being reviewed
         h('span', {}, r.num_reviews ? `${r.approved}/${r.num_reviews} approved`
@@ -1030,11 +1050,8 @@ async function viewReview(id, wantVer) {
   const ser = await api(`reviews/${id}`);
   const versions = ser.versions;
   const sv = versions.find((v) => v.version === wantVer) || versions[0];
-  const tabs = versions.length > 1 ? h('div', { class: 'tabs' }, versions.map((v) =>
-    h('button', { class: v === sv ? 'on' : '',
-                  title: `Show the reviews of version ${v.version}`,
-                  onclick: () => { location.replace(`#/reviews/${id}/${v.version}`); } },
-      `v${v.version}`))) : null;
+  const tabs = versionTabs(versions, sv, `#/reviews/${id}`,
+                           (n) => `Show the reviews of version ${n}`);
   const unsent = (r) => r.status !== 'sent' && r.status !== 'replied';
   // Each review's card, so that a job can be shown on the cards it acts on
   const entries = new Map();
@@ -1111,11 +1128,10 @@ async function viewReview(id, wantVer) {
       ? mailToggle(r.seq ? 'patch' : 'cover', itemId, ser.upstream) : [null, null];
     // A patch which patchwork lacks, e.g. taken from lore for the review, can
     // still be read on lore
-    const loreLink = !itemId && r.msgid && h('a', {
-      class: 'btn light small', target: '_blank', rel: 'noopener',
-      href: `https://lore.kernel.org/all/${encodeURIComponent(r.msgid.replace(/^<|>$/g, '')).replace(/%40/g, '@')}/`,
-      title: `Show the ${r.seq ? 'patch' : 'cover letter'} on lore.kernel.org, in a ` +
-             'new tab, since patchwork does not have it' }, 'lore ↗');
+    const loreLink = !itemId && r.msgid && extLink(
+      `https://lore.kernel.org/all/${encodeURIComponent(r.msgid.replace(/^<|>$/g, '')).replace(/%40/g, '@')}/`,
+      'lore', `Show the ${r.seq ? 'patch' : 'cover letter'} on lore.kernel.org, in a ` +
+              'new tab, since patchwork does not have it', 'btn light small');
     const [commentsBtn, commentsBox] = itemId && sv.link
       ? commentsToggle(ser, sv, r.seq, itemId) : [null, null];
     const responses = commentResponses(sv, r.seq).map((rp) => replyBox(rp, id));
@@ -1226,11 +1242,10 @@ async function viewReview(id, wantVer) {
                                       : 'Hide this series from the list of active reviews, ' +
                                         'e.g. once you have finished with it' },
         ser.hidden ? 'Unhide' : 'Hide'),
-      ser.patchwork_url && h('a', { class: 'btn light small', target: '_blank',
-        rel: 'noopener', title: 'Open the series on patchwork, in a new tab',
-        href: ser.project ? `${ser.patchwork_url}/project/${ser.project}/list/?series=${sv.link}`
-                        : ser.patchwork_url },
-        'patchwork ↗'));
+      ser.patchwork_url && extLink(
+        ser.project ? `${ser.patchwork_url}/project/${ser.project}/list/?series=${sv.link}`
+                    : ser.patchwork_url,
+        'patchwork', 'Open the series on patchwork, in a new tab', 'btn light small'));
   }
   drawActions();
   setView(ser.desc || ser.name, 'reviews', true,
@@ -1414,9 +1429,7 @@ function commentsToggle(ser, sv, seq, itemId) {
       note.focus();
     };
     reset();
-    return h('div', { class: 'comments' },
-      h('div', { class: 'who' }, c.name || c.email,
-        h('span', { class: 'when' }, ago(parseTime(c.date, true)))),
+    return h('div', { class: 'comments' }, commentHead(c),
       renderMail(c.content || ''), strip, slot);
   };
   let open = false;
@@ -1428,7 +1441,7 @@ function commentsToggle(ser, sv, seq, itemId) {
     if (!open) { fill(box); return; }
     fill(box, h('div', { class: 'ver' }, 'Loading…'));
     try {
-      const q = ser.upstream ? `?ups=${encodeURIComponent(ser.upstream)}` : '';
+      const q = upsQuery(ser.upstream);
       const list = await api(`comments/${kind}/${idPath(itemId)}${q}`);
       if (open) {
         // Our own comments, such as the review above, need no response
@@ -1442,7 +1455,7 @@ function commentsToggle(ser, sv, seq, itemId) {
                               : `Leaving out your own ${mine} comments`) : null);
       }
     } catch (err) {
-      if (open) fill(box, h('div', { class: 'error' }, err.message));
+      if (open) fill(box, errorBox(err));
     }
   } }, 'Comments');
   return [btn, box];
@@ -1814,10 +1827,8 @@ function searchCard(s, ups) {
       h('span', { class: 'grow' },
         [s.submitter, s.date && ago(parseTime(s.date, true)),
          s.total && npatches(s.total)].filter(Boolean).join(' · ')),
-      s.web_url && h('a', { class: 'extlink', href: s.web_url, target: '_blank',
-                            rel: 'noopener',
-                            title: `Open the series on ${siteName(s.web_url)}, in a new tab` },
-                     `${siteName(s.web_url)} ↗`),
+      s.web_url && extLink(s.web_url, siteName(s.web_url),
+                           `Open the series on ${siteName(s.web_url)}, in a new tab`),
       btn));
 }
 
@@ -1850,7 +1861,7 @@ function inboxFinder(ups, site, open) {
       inboxSearch = { ups, q, found };
       show(found);
     } catch (err) {
-      fill(results, h('div', { class: 'error' }, String(err.message || err)));
+      fill(results, errorBox(err));
     }
   };
   input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') search(); });
@@ -1955,10 +1966,9 @@ function inboxDetails(s, ups, jobBox) {
           ev.target.disabled = true;
           setAdded(s, ups, false).catch((err) => showError(err, 'inbox'));
         } }, 'Remove'),
-      s.web_url && h('a', { class: 'btn light small', href: s.web_url,
-                            target: '_blank', rel: 'noopener',
-                            title: `Open the series on ${siteName(s.web_url)}, in a new tab` },
-        `${siteName(s.web_url)} ↗`)),
+      s.web_url && extLink(s.web_url, siteName(s.web_url),
+                           `Open the series on ${siteName(s.web_url)}, in a new tab`,
+                           'btn light small')),
     reviewBox, tryBox,
     s.earlier && s.earlier.parts.length > 0 && earlierDetails(s.earlier, ups));
 }
@@ -1969,7 +1979,7 @@ function earlierDetails(e, ups) {
   const replies = (n) => n > 0 && h('a', {
     class: 'chip st-changes-requested', href: `#/reviews/${e.id}`,
     title: 'Show the replies, which are waiting for your response' },
-    `${n} ${n === 1 ? 'reply' : 'replies'}`);
+    nreplies(n));
   return h('div', {},
     h('div', { class: 'section' },
       `Earlier version: v${e.version}` +
@@ -2060,7 +2070,7 @@ function inboxCard(s, ups) {
         class: 'chip st-changes-requested', href: `#/reviews/${s.earlier.id}`,
         title: 'Show the replies to your reviews of the earlier version, which ' +
                'are waiting for your response' },
-        `${s.earlier.replies} ${s.earlier.replies === 1 ? 'reply' : 'replies'}`),
+        nreplies(s.earlier.replies)),
       s.mine && h('span', { class: 'chip st-other' }, 'yours'),
       s.added && h('span', { class: 'chip st-other',
                              title: 'You added this series to the inbox' }, 'added'),
@@ -2096,8 +2106,7 @@ async function viewInbox(more, refresh) {
             h('div', { class: 'spinner' }, 'Loading the inbox…'));
   }
   const upstreams = await api('upstreams').catch(() => []);
-  let ups = null;
-  try { ups = localStorage.getItem('patman-inbox-ups'); } catch (e) { /* ignore */ }
+  let ups = lsGet('patman-inbox-ups');
   if (!upstreams.some((u) => u.name === ups)) {
     ups = (upstreams.find((u) => u.default) || upstreams[0] || {}).name || '';
   }
@@ -2143,7 +2152,7 @@ async function viewInbox(more, refresh) {
                                        title: `Show the series on ${u.name}'s ` +
                                               (u.lore_url ? 'list' : 'patchwork'),
                                        onclick: () => {
-      try { localStorage.setItem('patman-inbox-ups', u.name); } catch (e) { /* ignore */ }
+      lsSet('patman-inbox-ups', u.name);
       route();
     } }, u.name)));
   const loadMore = !inbox.done && h('div', { class: 'actions' },
