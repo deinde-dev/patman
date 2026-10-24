@@ -156,6 +156,8 @@ Fixed
   it has a review, not if it was only applied, e.g. with ``--apply-only``,
   so it can be reviewed from there. A later version shows the review of the
   latest version which has one.
+- The Reviews tab on the ``patman serve`` page says 'not reviewed' on a
+  series which is applied but not reviewed, rather than '0/0 approved'.
 
 0.5.0 - 2026-10-19
 ------------------

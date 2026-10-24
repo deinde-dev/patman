@@ -11,7 +11,9 @@ page has these tabs:
   Tap a series to see each version's patches, then tap a patch or the cover
   letter to read its comments, which are fetched from patchwork
 - **Reviews**: series you have reviewed with ``patman review``, showing the
-  review of each patch and whether it has been drafted, sent or replied to
+  review of each patch and whether it has been drafted, sent or replied to.
+  A series which is applied but not reviewed, e.g. with ``--apply-only``,
+  says 'not reviewed'
 - **Inbox**: recent series on patchwork, showing which you have reviewed
   and which are applied upstream
 - **Jobs**: reviews and other commands started from the page, and the syncs,

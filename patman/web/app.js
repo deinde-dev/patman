@@ -934,7 +934,9 @@ async function viewReviewList() {
         r.replies_waiting ? h('span', { class: 'chip st-changes-requested' },
           `${r.replies_waiting} ${r.replies_waiting === 1 ? 'reply' : 'replies'}`)
           : null,
-        h('span', {}, `${r.approved}/${r.num_reviews} approved`),
+        // A series can be applied, e.g. with -a, without being reviewed
+        h('span', {}, r.num_reviews ? `${r.approved}/${r.num_reviews} approved`
+                                    : 'not reviewed'),
         Object.entries(r.statuses).map(([st, n]) =>
           h('span', { class: REVIEW_STATUS_CLASS[st] }, `${n} ${REVIEW_STATUS[st] || st}`)),
         r.timestamp && h('span', {}, ago(parseTime(r.timestamp))))) })),
