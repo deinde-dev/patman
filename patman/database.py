@@ -397,40 +397,8 @@ class Database:  # pylint:disable=R0904
             self.open_it()
             if version == 1:
                 self.create_v1()
-            elif version == 2:
-                self._migrate_to_v2()
-            elif version == 3:
-                self._migrate_to_v3()
-            elif version == 4:
-                self._migrate_to_v4()
-            elif version == 5:
-                self._migrate_to_v5()
-            elif version == 6:
-                self._migrate_to_v6()
-            elif version == 7:
-                self._migrate_to_v7()
-            elif version == 8:
-                self._migrate_to_v8()
-            elif version == 9:
-                self._migrate_to_v9()
-            elif version == 10:
-                self._migrate_to_v10()
-            elif version == 11:
-                self._migrate_to_v11()
-            elif version == 12:
-                self._migrate_to_v12()
-            elif version == 13:
-                self._migrate_to_v13()
-            elif version == 14:
-                self._migrate_to_v14()
-            elif version == 15:
-                self._migrate_to_v15()
-            elif version == 16:
-                self._migrate_to_v16()
-            elif version == 17:
-                self._migrate_to_v17()
-            elif version == 18:
-                self._migrate_to_v18()
+            else:
+                getattr(self, f'_migrate_to_v{version}')()
 
             # Save the new version if we have a schema_version table
             if version > 1:
