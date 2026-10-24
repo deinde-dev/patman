@@ -305,6 +305,18 @@ class TestDatabase(CseriesTester):
         self.assertEqual([mine, rev], [ser.idnum for ser in db.series_get_dict(
             include_archived=True, include_reviews=True).values()])
 
+    def test_series_get_max_reviewed_versions(self):
+        """Only the versions with a review count as reviewed"""
+        db = self.get_database().db
+        rev = self.add_db_series(db, 'rev', [1, 2], review=True)
+        applied = self.add_db_series(db, 'applied', [], review=True)
+        db.ser_ver_add(applied, 1, link='a1')
+        svid = db.ser_ver_add(rev, 3, link='r3')
+        self.assertEqual(
+            [(rev, 2)], [(sid, version) for _, sid, version in
+                         db.series_get_max_reviewed_versions()])
+        self.assertIn((svid, rev, 3), db.series_get_all_max_versions())
+
     def test_migrate(self):
         """Test migration to later schema versions"""
         db = database.Database(f'{self.tmpdir}/.patman.db')

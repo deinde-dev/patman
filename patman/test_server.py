@@ -1593,6 +1593,47 @@ class TestWebServer(unittest.TestCase, TestCommon):
             f'Series 400 is already being reviewed, by job {reviewing.idnum}',
             data['error'])
 
+    def test_inbox_not_reviewed(self):
+        """A version applied but not reviewed is not an earlier review"""
+        db = self.cser.db
+        rev_id, svids = self.add_series(
+            'rev', 'video: Add a driver',
+            {1: [('a', 'new', 6, 0)], 2: [('a', 'new', 7, 0)]},
+            source='review')
+        db.review_add(svids[1], 1, 'Please fix', False, '2026-10-01 10:00:00')
+
+        # A series left with no versions by a review with nothing to review
+        db.series_set_source(db.series_add('empty', 'net: Add a driver'),
+                             'review')
+        db.upstream_add('us', 'https://us', 'https://pw.us')
+        db.upstream_set_default('us')
+        db.patchwork_update('U-Boot', 6, 'uboot', 'us')
+        db.commit()
+
+        def series(idnum, name, version):
+            return {'id': idnum, 'name': name, 'version': version,
+                    'total': 1, 'patches': [{'id': idnum * 10, 'name': name}]}
+
+        pages = {
+            'series/?project=uboot&order=-date&page=1&per_page=50': [
+                series(300, '[v3] video: Add a driver', 3),
+                series(200, '[v2] video: Add a driver', 2),
+                series(500, 'net: Add a driver', 1)],
+        }
+        srv = self.make_server()
+        srv.pwork_for_testing.fake_request = pages.get
+        _, data = self.call(srv, 'GET', '/api/inbox')
+        items = {item['id']: item for item in data['series']}
+
+        # v2 is only applied, so it can be reviewed, and v1 is the review
+        # to show for it and for v3
+        self.assertEqual((None, 1), (items[200]['reviewed'],
+                                     items[200]['earlier']['version']))
+        self.assertEqual((rev_id, 1), (items[300]['earlier']['id'],
+                                       items[300]['earlier']['version']))
+        self.assertEqual((None, None), (items[500]['reviewed'],
+                                        items[500]['earlier']))
+
     def test_inbox_applied(self):
         """The inbox says which patches are applied upstream"""
         def git(*args, date='2026-10-05T10:00:00'):

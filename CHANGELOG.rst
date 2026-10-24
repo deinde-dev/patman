@@ -152,6 +152,10 @@ Fixed
   took such a series for an earlier review of the next version.
 - ``patman review --relink`` removes the series with no versions from an
   older review database.
+- The inbox on the ``patman serve`` page only counts a series as reviewed if
+  it has a review, not if it was only applied, e.g. with ``--apply-only``,
+  so it can be reviewed from there. A later version shows the review of the
+  latest version which has one.
 
 0.5.0 - 2026-10-19
 ------------------

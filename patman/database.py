@@ -704,6 +704,20 @@ class Database:  # pylint:disable=R0904
             'GROUP BY series_id')
         return res.fetchall()
 
+    def series_get_max_reviewed_versions(self):
+        """Find the latest version of each series which has a review
+
+        Return: list of:
+            int: ser_ver ID
+            int: series ID
+            int: Maximum version with a review
+        """
+        res = self.execute(
+            'SELECT sv.id, sv.series_id, MAX(sv.version) FROM ser_ver sv '
+            'WHERE EXISTS (SELECT 1 FROM review r WHERE r.svid = sv.id) '
+            'GROUP BY sv.series_id')
+        return res.fetchall()
+
     def series_add(self, name, desc, ups=None):
         """Add a new series record
 
