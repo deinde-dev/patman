@@ -309,13 +309,19 @@ the patches and cover letters sent to the list, which has 200 messages in each
 page, however many series they make. Each series is known by the Message-ID of
 its cover letter, or of its first patch.
 
+The first page starts with the series added to the inbox (see
+`POST /api/inbox/add`_), the latest added first, and these are not listed
+again among the others. For an upstream with no feed (see
+``patman upstream add --no-feed``), they are all it lists.
+
 The server keeps each page it reads from patchwork in the cache for ten
 minutes, timed from when it read the first page; a later page is read again
 if it is older than the first. With ``refresh=1``, it reads the page from
-patchwork whatever it has kept.
+patchwork whatever it has kept, and the series added to the inbox too.
 
-The response has ``ups``, ``page``, ``per_page``, ``more`` (true if there may
-be another page), ``fetched`` (when the server read the first page from
+The response has ``ups``, ``page``, ``per_page``, ``feed`` (false for an
+upstream with no feed), ``more`` (true if there may be another page),
+``fetched`` (when the server read the first page from
 patchwork, as a local time like ``2026-10-19 11:00:00``) and ``series``, a list
 of objects with:
 
@@ -341,6 +347,47 @@ of objects with:
   running
 - ``review_branch`` (str or null): the series' review branch, if it has one
 - ``review_name`` (str): the name of the branch which a review of it makes
+- ``added`` (bool): true if it was added to the inbox
+
+A series added to the inbox which cannot be read has just its ``id`` and
+``name``, and no patches.
+
+``GET /api/search``
+~~~~~~~~~~~~~~~~~~~
+
+Search for series to add to the inbox. The ``ups`` query parameter gives the
+upstream, as for the inbox, and ``q`` the text to search for.
+
+On a patchwork server, a series is found if its name, or that of one of its
+patches, has the text in it. On lore, each word must be in the subject of a
+patch or cover letter of the series, and text with a term of a lore query is
+passed to lore as it is, e.g. ``dfn:scripts/make_fit.py`` to find the series
+which change that file, or ``f:fred`` for those from Fred. Only the newest 30 series and patches on patchwork, or 200 patches
+and cover letters on lore, are searched. The results are kept for ten minutes.
+
+The response has ``ups``, ``q``, ``where`` (what was searched, e.g.
+``uboot on patchwork.ozlabs.org`` or ``lore.kernel.org/all``) and ``series``,
+newest first, each with
+``id``, ``name``, ``version``, ``date``, ``submitter``, ``total`` (null for a
+series which patchwork found by a patch), ``web_url`` and ``added`` (true if
+it is in the inbox already).
+
+``POST /api/inbox/add``
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Add a series to the inbox of an upstream, given as a JSON object with
+``ups``, ``id`` (the patchwork series ID, or the Message-ID of a series on
+lore, or its URL there) and ``name`` (optional), which is shown if the series
+cannot be read. Adding a series which is there already updates its name. The
+series stays in the inbox until it is removed. The response has ``ups`` and
+``id``, as stored.
+
+``POST /api/inbox/remove``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Remove a series from the inbox of an upstream, given as a JSON object with
+``ups`` and ``id``, as for adding it. A series which is not in the inbox gives
+an error.
 
 Files
 -----
