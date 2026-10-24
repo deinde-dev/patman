@@ -43,6 +43,99 @@ def get_int(data, key):
     return int(val)
 
 
+def get_str(data, key, required=None):
+    """Get an optional string from a request
+
+    Args:
+        data (dict): Request data
+        key (str): Key to read
+        required (str or None): Error to give if the string is missing or
+            empty, or None if it is optional
+
+    Return:
+        str or None: Value with surrounding white space removed, or None if
+            it is missing or empty
+
+    Raises:
+        BadRequest: The value is not a string, or is required but missing
+    """
+    val = data.get(key)
+    if val is not None and not isinstance(val, str):
+        raise BadRequest(f'Invalid {key}')
+    val = (val or '').strip() or None
+    if not val and required:
+        raise BadRequest(required)
+    return val
+
+
+def get_bool(data, key, error):
+    """Get a value which must be true or false from a request
+
+    Args:
+        data (dict): Request data
+        key (str): Key to read
+        error (str): Error to give if it is missing or not true or false
+
+    Return:
+        bool: Value
+
+    Raises:
+        BadRequest: The value is missing or not true or false
+    """
+    val = data.get(key)
+    if not isinstance(val, bool):
+        raise BadRequest(error)
+    return val
+
+
+def _is_seq(val):
+    """Check whether a value is a patch number, 0 for the cover letter
+
+    Args:
+        val: Value to check
+
+    Return:
+        bool: True if it is a non-negative integer, not a bool
+    """
+    return isinstance(val, int) and not isinstance(val, bool) and val >= 0
+
+
+def get_seq(data):
+    """Get the patch which a request is about, 0 for the cover letter
+
+    Args:
+        data (dict): Request data, with the patch as 'seq'
+
+    Return:
+        int: Patch number
+
+    Raises:
+        BadRequest: The patch is missing or invalid
+    """
+    seq = data.get('seq')
+    if not _is_seq(seq):
+        raise BadRequest(f"Invalid seq '{seq}'")
+    return seq
+
+
+def get_seqs(data):
+    """Get the patches which a request acts on, 0 for the cover letter
+
+    Args:
+        data (dict): Request data, with the patches as 'seqs'
+
+    Return:
+        list of int: Patch numbers, or empty for all of them
+
+    Raises:
+        BadRequest: The patches are invalid
+    """
+    seqs = data.get('seqs') or []
+    if not isinstance(seqs, list) or not all(_is_seq(seq) for seq in seqs):
+        raise BadRequest('Invalid seqs')
+    return seqs
+
+
 def parts_text(seqs):
     """Describe which parts of a review a job acts on
 

@@ -851,6 +851,41 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual('start\n', state['results'][0]['output'])
         self.assertEqual(-signal.SIGTERM, state['results'][0]['returncode'])
 
+    def test_params(self):
+        """Fields of a request are checked"""
+        prm = server.params
+
+        def error(func, *args):
+            with self.assertRaises(prm.BadRequest) as exc:
+                func(*args)
+            return str(exc.exception)
+
+        self.assertEqual(('fix it', None, None),
+                         (prm.get_str({'note': ' fix it '}, 'note'),
+                          prm.get_str({'note': ' '}, 'note'),
+                          prm.get_str({}, 'note')))
+        self.assertEqual('Invalid note',
+                         error(prm.get_str, {'note': 3}, 'note'))
+        self.assertEqual('Say what', error(prm.get_str, {'note': ''}, 'note',
+                                           'Say what'))
+
+        self.assertFalse(prm.get_bool({'hidden': False}, 'hidden', 'Oops'))
+        for val in (None, 0, 'yes'):
+            self.assertEqual('Oops', error(prm.get_bool, {'hidden': val},
+                                           'hidden', 'Oops'))
+
+        self.assertEqual((0, 3), (prm.get_seq({'seq': 0}),
+                                  prm.get_seq({'seq': 3})))
+        for val in (None, -1, True, '1'):
+            self.assertEqual(f"Invalid seq '{val}'",
+                             error(prm.get_seq, {'seq': val}))
+
+        self.assertEqual(([], [0, 2]), (prm.get_seqs({}),
+                                        prm.get_seqs({'seqs': [0, 2]})))
+        for val in ('1', [1, -1], [True], [None]):
+            self.assertEqual('Invalid seqs',
+                             error(prm.get_seqs, {'seqs': val}))
+
     def test_parse_review_req(self):
         """Review requests are turned into 'patman review' arguments"""
         ups = ['us', 'ci']
