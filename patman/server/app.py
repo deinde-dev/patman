@@ -1468,9 +1468,8 @@ class Server(jobs.JobRunner):
         # Each review has its own worktree, so several can run at once
         # The page may give the series' name, which is shown until the
         # review has recorded the series
-        name = data.get('name')
-        name = name.strip() if isinstance(name, str) else None
-        return self._review_job(title, *args, parallel=True, name=name)
+        return self._review_job(title, *args, parallel=True,
+                                name=params.get_str(data, 'name'))
 
     async def _review_scan(self, request):
         """Handle 'POST /api/review/scan': look for new versions to review
@@ -1537,17 +1536,12 @@ class Server(jobs.JobRunner):
         """
         idnum = _idnum(request)
         data = await self._read_json(request)
-        seq = data.get('seq')
-        if isinstance(seq, bool) or not isinstance(seq, int) or seq < 0:
-            raise params.BadRequest(f"Invalid seq '{seq}'")
+        seq = params.get_seq(data)
         comment = params.get_int(data, 'comment')
         if not comment:
             raise params.BadRequest('Please give the comment to respond to')
-        note = data.get('note')
-        if note is not None and not isinstance(note, str):
-            raise params.BadRequest('Invalid note')
         return self._respond_job(idnum, params.get_int(data, 'version'), seq,
-                                 comment, (note or '').strip() or None)
+                                 comment, params.get_str(data, 'note'))
 
     async def _redraft(self, request):
         """Handle 'POST /api/reviews/<id>/redraft': recreate review drafts
@@ -1570,7 +1564,7 @@ class Server(jobs.JobRunner):
         idnum = _idnum(request)
         data = await self._read_json(request)
         return self._redraft_job(idnum, params.get_int(data, 'version'),
-                                 data.get('seqs') or [])
+                                 params.get_seqs(data))
 
     def _series_review_args(self, idnum, version, seqs, *action):
         """Get the 'patman review' arguments to act on a reviewed series
@@ -1589,13 +1583,9 @@ class Server(jobs.JobRunner):
                 dict: Reviews which the job acts on, as a job target
 
         Raises:
-            BadRequest: The seqs are invalid
             ValueError: The version has no link
             JobBusyError: A job is already acting on one of the reviews
         """
-        if not isinstance(seqs, list) or not all(
-                isinstance(seq, int) and seq >= 0 for seq in seqs):
-            raise params.BadRequest('Invalid seqs')
         if seqs:
             action = [*action, '-i',
                       ','.join(str(seq) for seq in sorted(seqs))]
@@ -1681,7 +1671,7 @@ class Server(jobs.JobRunner):
         """
         idnum = _idnum(request)
         data = await self._read_json(request)
-        seqs = data.get('seqs') or []
+        seqs = params.get_seqs(data)
         args, what, target = self._series_review_args(
             idnum, params.get_int(data, 'version'), seqs, '--send')
         return self._review_job(f'Send {params.parts_text(seqs)} of {what}',
@@ -1706,9 +1696,8 @@ class Server(jobs.JobRunner):
         """
         idnum = _idnum(request)
         data = await self._read_json(request)
-        hidden = data.get('hidden')
-        if not isinstance(hidden, bool):
-            raise params.BadRequest("Please say whether it is 'hidden'")
+        hidden = params.get_bool(data, 'hidden',
+                                 "Please say whether it is 'hidden'")
         self.rcser.db.series_get_info(idnum)
         self.rcser.db.series_set_hidden(idnum, hidden)
         self.rcser.commit()
@@ -1735,7 +1724,7 @@ class Server(jobs.JobRunner):
         """
         idnum = _idnum(request)
         data = await self._read_json(request)
-        seqs = data.get('seqs') or []
+        seqs = params.get_seqs(data)
         if not seqs:
             raise params.BadRequest('Please say which reviews to delete')
         args, what, target = self._series_review_args(
@@ -1765,17 +1754,11 @@ class Server(jobs.JobRunner):
         """
         idnum = _idnum(request)
         data = await self._read_json(request)
-        note = data.get('note')
-        if not isinstance(note, str) or not note.strip():
-            raise params.BadRequest('Please say what to change')
-        note = note.strip()
-        part = data.get('part')
+        note = params.get_str(data, 'note', 'Please say what to change')
+        part = params.get_str(data, 'part')
         if part:
-            if not isinstance(part, str):
-                raise params.BadRequest('Invalid part')
-            note = f'About this part of the review:\n\n{part.strip()}' \
-                   f'\n\n{note}'
-        seqs = data.get('seqs') or []
+            note = f'About this part of the review:\n\n{part}\n\n{note}'
+        seqs = params.get_seqs(data)
         args, what, target = self._series_review_args(
             idnum, params.get_int(data, 'version'), seqs, '--revise', note)
         if data.get('drafts'):
