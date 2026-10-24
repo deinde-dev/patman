@@ -202,6 +202,11 @@ series which spans two pages may show only some of its patches. The patches,
 cover letters and comments are read from lore, and 'Review' and 'Try it' work
 as they do for patchwork.
 
+The top of the page, and the name of the browser tab, give the project which
+the server is for, from the ``project`` setting in the ``[review]`` section of
+the config (see :ref:`review_project`), so that the servers for two projects
+are easy to tell apart.
+
 'Review' on a series starts the review as a job, but the inbox stays where it
 is, so you can start reviews of other series too. Each series shows how its
 review is getting on, with a link to the job's output, and offers 'Being

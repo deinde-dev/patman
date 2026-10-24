@@ -64,6 +64,10 @@ header h1 {
   flex: 1; margin: 0; font-size: 17px; font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+#project {
+  font-size: 13px; font-weight: 600; white-space: nowrap; opacity: 0.85;
+}
+#project:empty { display: none; }
 #sync {
   display: flex; align-items: center; gap: 6px;
   background: rgba(255,255,255,0.12); border: 0; border-radius: 16px;

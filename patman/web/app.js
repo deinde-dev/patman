@@ -222,14 +222,19 @@ function renderMail(text, onChunk, onEdit) {
 const main = document.getElementById('main');
 const titleEl = document.getElementById('title');
 
-// patman's version, shown below each screen once the server has given it
+// patman's version, shown below each screen once the server has given it,
+// and the project which the server is for, shown at the top and in the name
+// of the browser tab, to tell servers apart
 const versionEl = h('div', { class: 'version' });
+const projectEl = document.getElementById('project');
 let versionAsked = false;
 function showVersion() {
   if (versionAsked) return;
   versionAsked = true;
   api('version').then((v) => {
     versionEl.textContent = v.version ? `patman ${v.version}` : '';
+    projectEl.textContent = v.project || '';
+    document.title = v.project ? `patman: ${v.project}` : 'patman';
   }).catch(() => { versionAsked = false; });
 }
 const backBtn = document.getElementById('back');
