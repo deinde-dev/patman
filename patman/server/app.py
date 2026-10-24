@@ -76,7 +76,7 @@ RE_REVIEWED_BY = re.compile(r'^Reviewed-by:', re.MULTILINE)
 ITEM_ID = r'\d+|lore:[^/]+'
 
 
-# pylint: disable=R0902
+# pylint: disable-next=R0902
 class Server(jobs.JobRunner):
     """Web server providing patman information as JSON
 
@@ -96,7 +96,7 @@ class Server(jobs.JobRunner):
         own_emails (set of str or None): Our own email addresses, in lower
             case, or None if not yet found
     """
-    # pylint: disable=R0913,R0917
+    # pylint: disable-next=R0913,R0917
     def __init__(self, cser, pw_url=None, sync_interval=0, review_sync=False,
                  token=None, rcser=None, jobs_fname=None, max_parallel=None):
         """Set up the server
@@ -1389,7 +1389,6 @@ class Server(jobs.JobRunner):
             raise params.BadRequest('Request must be a JSON object')
         return data
 
-    # pylint: disable=R0913
     def _review_job(self, title, *args, target=None, parallel=False,
                     name=None):
         """Start a job which runs 'patman review'
@@ -1480,6 +1479,7 @@ class Server(jobs.JobRunner):
         args = ['--scan'] + (['-d'] if data.get('drafts') else [])
         return self._review_job('Scan for new versions', *args)
 
+    # pylint: disable-next=R0913,R0917
     def _respond_job(self, idnum, version, seq, comment_id, note=None):
         """Start a job which suggests a response to a comment on patchwork
 
@@ -1984,7 +1984,7 @@ def is_loopback(host):
         return False
 
 
-# pylint: disable=R0913,R0917
+# pylint: disable-next=R0913,R0917
 def serve(cser, host, port, pw_url, sync_interval, review_sync, token,
           rcser=None, max_reviews=None):
     """Run the web server until interrupted
