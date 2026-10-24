@@ -66,6 +66,25 @@ one upstream (see :doc:`upstreams`).
 The branch name gives the version: ``binj-us`` is v1, and v2 goes in
 ``binj-us2``. So the name for v1 must not end in a number.
 
+Checking it before sending
+--------------------------
+
+Before sending the series, you can have the review agent look at it, as it
+would at someone else's series (see :doc:`reviewing`). With the series'
+branch checked out::
+
+    $ patman series review
+
+This reviews each patch, and the cover letter, and stores what it finds in
+the database against v1, so that it can be read again at any time without
+running the agent::
+
+    $ patman series info -r
+
+Fix what needs fixing in the commits, then send the series. A review of the
+next version is given this one's findings, so that it can check they were
+dealt with. See :ref:`review_before_send` for the options.
+
 Sending it
 ----------
 

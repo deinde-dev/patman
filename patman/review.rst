@@ -363,19 +363,38 @@ again::
 With ``-d``, the Gmail drafts from the previous review are deleted too,
 so the re-review does not leave duplicates in the thread.
 
+.. _review_before_send:
+
 Reviewing your own series before sending
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To have your own series reviewed before sending it, add the series with
-``patman series add`` and then run::
+``patman series add``, check out its branch and run::
 
     patman series review
 
-This reviews the commits on the current branch (or ``-s <name>``) with
-the same agent, along with the cover letter (stored as patch 0), and
-saves the findings in the database, keyed by version. Because the
-review is expensive, it is saved so you can read it later without
-re-running::
+This reviews each commit on the branch, from the upstream branch which it
+tracks, with the same agent as ``patman review``, along with the cover letter
+(stored as patch 0), and saves the findings in the database, keyed by
+version. To review another series, give its name to ``patman series``, before
+the subcommand::
+
+    patman series -s video review
+
+The agent works in your checkout rather than a worktree, reading the code
+around each change from the files there, so check out the series' branch
+first. It checks the patches against the project's conventions, from the
+``[review]`` section of the config (see :ref:`review_project`), so a series
+in a Linux tree is checked against Linux's rules rather than U-Boot's.
+
+Give the agent anything it should know with ``-c``, as text or ``@file``,
+e.g. that the series is an RFC; ``--spelling`` and ``--em-dash`` work as for
+``patman review``::
+
+    patman series review -c 'This is an RFC; ignore style for now'
+
+Because the review is expensive, it is saved so you can read it later
+without re-running::
 
     patman series info -r          # show the stored review
     patman series info -r 2 3      # just patches 2 and 3
@@ -384,7 +403,8 @@ Re-running is refused when a review is already stored; pass ``-f`` to
 review again, replacing the stored one. Unlike ``patman review``, this
 needs no patchwork link and creates no drafts -- it is purely a local
 pre-send check. Reviews from the previous version are used as context,
-so a follow-up review focuses on what changed.
+so a follow-up review focuses on what changed. The ``patman serve`` page
+cannot start such a review or show it yet; use the commands above.
 
 Working with the reviews
 ------------------------
