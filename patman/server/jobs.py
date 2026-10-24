@@ -460,7 +460,7 @@ class JobRunner:
             unsent (list of int): Patches whose reviews have not been sent
 
         Raises:
-            ValueError: A job is waiting or running for one of the reviews
+            JobBusyError: A job is waiting or running for one of the reviews
         """
         pending = self.pending_jobs(idnum, version)
         busy = None in pending or any(seq in pending

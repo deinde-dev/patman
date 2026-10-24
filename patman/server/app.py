@@ -132,9 +132,8 @@ class Server(jobs.JobRunner):
 
         # Fetches of each upstream started by the inbox: key (str): upstream
         # name; value: dict with 'started' (time the last fetch began, or
-        # None to fetch at once),
-        # 'task' (asyncio.Task running it) and 'done' (time the last one
-        # which worked finished, or None)
+        # None to fetch at once), 'task' (asyncio.Task running it) and 'done'
+        # (time the last one which worked finished, or None)
         self._fetches = {}
 
         # patman's version, found when first asked for, or '' if not known
@@ -142,10 +141,6 @@ class Server(jobs.JobRunner):
 
         # Reviewed versions which patchwork says have no cover letter
         self._no_cover = set()
-
-        # The inbox for each patchwork server and project, as read from it:
-        # a dict with 'read' (monotonic time), 'fetched' (time, as in the
-        # database) and 'pages' (dict of page number to list of series)
 
     def get_pw_url(self, ups):
         """Get the patchwork URL for an upstream
@@ -670,13 +665,13 @@ class Server(jobs.JobRunner):
         minutes are taken from the cache, unless the 'refresh' query parameter
         is 1.
 
+        Each comment says whether we sent it, from our git user.email
+        address, which is how a review we sent appears on patchwork
+
         Args:
             request (web.Request): Request, with 'kind' ('patch' or 'cover')
                 and the patchwork ID as 'item_id', or 'lore:<msgid>' for one
                 on lore
-
-        Each comment says whether we sent it, from our git user.email
-        address, which is how a review we sent appears on patchwork
 
         Return:
             web.Response: List of comments on the patch or cover letter
@@ -782,7 +777,7 @@ class Server(jobs.JobRunner):
                 the file is too large or not text
         """
         oid, text = await info.read_blob(self.cser.topdir,
-                                    request.query.getall('hash', []))
+                                         request.query.getall('hash', []))
         return web.json_response({'hash': oid, 'text': text})
 
     async def _sync_get(self, _request):
@@ -1587,7 +1582,8 @@ class Server(jobs.JobRunner):
                 dict: Reviews which the job acts on, as a job target
 
         Raises:
-            ValueError: The seqs are invalid, or the version has no link
+            BadRequest: The seqs are invalid
+            ValueError: The version has no link
             JobBusyError: A job is already acting on one of the reviews
         """
         if not isinstance(seqs, list) or not all(
