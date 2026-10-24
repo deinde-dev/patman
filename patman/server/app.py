@@ -809,7 +809,7 @@ class Server(jobs.JobRunner):
         job = self._start_sync()
         if not job:
             return web.json_response(self.sync_state, status=409)
-        asyncio.create_task(self.run_job(job))
+        self.start_job(job)
 
         # Let the sync start, so the response shows it running
         await asyncio.sleep(0)
