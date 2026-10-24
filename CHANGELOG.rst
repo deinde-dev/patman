@@ -10,6 +10,9 @@ Unreleased
 
 Added
 ~~~~~
+- The top of the ``patman serve`` page, and the name of the browser tab, give
+  the project which the server is for, such as dtc or U-Boot, so that servers
+  for different projects are easy to tell apart.
 - The ``patman serve`` page works for an upstream whose list is on lore, such
   as dtc: its inbox lists the newest series sent to the list, read from
   lore's feed, and their patches, cover letters and comments are read from

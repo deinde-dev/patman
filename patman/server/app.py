@@ -28,6 +28,7 @@ from patman import interpreter
 from patman import lorelist
 from patman import patchwork
 from patman import pwcache
+from patman import settings
 from patman import times
 from patman import traffic
 from patman.patchwork import Patchwork
@@ -644,7 +645,7 @@ class Server(jobs.JobRunner):
         return web.json_response(info.get_todo_list(self.cser))
 
     async def _version(self, _request):
-        """Handle 'GET /api/version': give patman's version
+        """Handle 'GET /api/version': give patman's version and the project
 
         The version is worked out on the first request and kept.
 
@@ -653,11 +654,13 @@ class Server(jobs.JobRunner):
 
         Return:
             web.Response: Object with the 'version', which is None if it is
-                not known
+                not known, and the 'project' which the server is for, from
+                the 'project' review setting, e.g. 'dtc'
         """
         if self._version_str is None:
             self._version_str = info.get_version() or ''
-        return web.json_response({'version': self._version_str or None})
+        return web.json_response({'version': self._version_str or None,
+                                  'project': settings.review_project()})
 
     async def _comments(self, request):
         """Handle 'GET /api/comments/<kind>/<id>': read comments from patchwork

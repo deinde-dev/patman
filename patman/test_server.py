@@ -32,6 +32,7 @@ from patman import patchwork
 from patman.patchwork import Patchwork
 from patman import pwcache
 from patman import server
+from patman import settings
 from patman import times
 from patman import traffic
 from patman.test_common import TestCommon
@@ -407,11 +408,14 @@ class TestWebServer(unittest.TestCase, TestCommon):
                                return_value='1.2.3 (v1.2.3-4-gabcdef0)'):
             status, data = self.call(self.make_server(), 'GET', '/api/version')
         self.assertEqual(200, status)
-        self.assertEqual({'version': '1.2.3 (v1.2.3-4-gabcdef0)'}, data)
+        self.assertEqual({'version': '1.2.3 (v1.2.3-4-gabcdef0)',
+                          'project': 'U-Boot'}, data)
 
-        with mock.patch.object(server.info, 'get_version', return_value=None):
+        # The project comes from the review settings
+        with mock.patch.object(server.info, 'get_version', return_value=None), \
+                mock.patch.dict(settings.review, {'project': 'dtc'}):
             _, data = self.call(self.make_server(), 'GET', '/api/version')
-        self.assertEqual({'version': None}, data)
+        self.assertEqual({'version': None, 'project': 'dtc'}, data)
 
     def test_utc_offset(self):
         """API responses say how far the server's time zone is from UTC"""

@@ -195,10 +195,15 @@ The server
 ``GET /api/version``
 ~~~~~~~~~~~~~~~~~~~~
 
-The version of patman which the server runs, as an object with ``version``,
-e.g. ``{"version": "0.4.0"}``, or null if it is not known. When the server
-runs from a git checkout which is not at a release, the output of ``git
-describe`` follows, e.g. ``"0.4.0 (v0.4.0-3-g1234abc)"``.
+The version of patman which the server runs, and the project which it is
+for, as an object, e.g. ``{"version": "0.4.0", "project": "U-Boot"}``.
+``version`` is null if it is not known. When the server runs from a git
+checkout which is not at a release, the output of ``git describe`` follows,
+e.g. ``"0.4.0 (v0.4.0-3-g1234abc)"``.
+
+``project`` is the project which the server is for, from the ``project``
+setting in the ``[review]`` section of the config, or ``U-Boot`` if there is
+none. The page shows it at the top and in the name of the browser tab.
 
 Your series
 -----------
