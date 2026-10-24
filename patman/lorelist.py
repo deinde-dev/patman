@@ -24,6 +24,7 @@ e.g. 'https://lore.kernel.org/devicetree-compiler'
 
 import asyncio
 import email.utils
+import re
 from urllib.parse import quote_plus, unquote, urlparse
 import xml.etree.ElementTree as ET
 
@@ -39,6 +40,9 @@ FEED_QUERY = 's:PATCH AND NOT s:Re'
 
 # Number of messages in each page of lore's feed
 FEED_PAGE = 200
+
+# How long to keep the results of a search, in seconds
+SEARCH_KEEP = 10 * 60
 
 # Namespaces of the elements in lore's Atom feed
 ATOM = '{http://www.w3.org/2005/Atom}'
@@ -175,6 +179,43 @@ def parse_feed(data):
     return out
 
 
+# A term of a query for lore, e.g. 'dfn:scripts/make_fit.py' for the patches
+# changing that file, or 'f:fred' for those from Fred. A subject often has a
+# colon too, e.g. 'arm64: dts: Add a board', so only these prefixes count
+RE_LORE_TERM = re.compile(
+    r'(?:^|[\s(])(?:s|d|dt|rt|b|bs|nq|f|t|c|a|tc|l|m|dfn|dfa|dfb|dfhh|'
+    r'dfctx|dfpre|dfpost|dfblob|patchid):\S')
+
+
+def search_query(text):
+    """Get the lore query which searches for the series matching some text
+
+    Each word must be in the subject of a patch or cover letter. Text which
+    has a term of a lore query (see RE_LORE_TERM) is taken to be a query for
+    lore already, e.g. 'dfn:scripts/make_fit.py', which finds the patches
+    changing that file
+
+    Args:
+        text (str): Text to search for, e.g. 'make_fit compress'
+
+    Returns:
+        str: Query, e.g.
+            's:"make_fit" AND s:"compress" AND s:PATCH AND NOT s:Re'
+
+    Raises:
+        ValueError: There is no text
+    """
+    text = ' '.join(text.split())
+    if RE_LORE_TERM.search(text):
+        query = f'({text})'
+    else:
+        words = [word.replace('"', '') for word in text.split()]
+        query = ' AND '.join(f's:"{word}"' for word in words if word)
+    if not query.strip('()'):
+        raise ValueError('Please give some text to search for')
+    return f'{query} AND {FEED_QUERY}'
+
+
 def _series_link(entry, by_msgid):
     """Find the Message-ID which a series in the feed is known by
 
@@ -280,7 +321,7 @@ def _find_patches(messages, root, info):
     return found
 
 
-class LoreList:
+class LoreList:  # pylint: disable=R0904
     """Reads series from a mailing list on lore, standing in for Patchwork
 
     Only what a review needs is provided. Lore has no patch states, so every
@@ -475,6 +516,55 @@ class LoreList:
                 cache.put(self.url, subpath, data)
         return data
 
+    @staticmethod
+    def _search_path(text):
+        """Get the path of a search, e.g. for read_time()
+
+        Args:
+            text (str): Text to search for (see search_query())
+
+        Returns:
+            str: Path within the list
+        """
+        return f'?q={quote_plus(search_query(text))}&x=A'
+
+    async def search_series(self, client, project, text, max_age=SEARCH_KEEP):
+        """Search the list for series whose subjects match some text
+
+        Only the newest FEED_PAGE patches and cover letters which match are
+        read. The series are not completed from their threads (see
+        complete_series()), so some may lack patches, but each has its name
+        and number of patches
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            project (str): Project link name (not used)
+            text (str): Text to search for (see search_query())
+            max_age (float or None): Oldest cached copy to use, in seconds; 0
+                to read lore, or None to use any
+
+        Returns:
+            list of dict: Series, newest first, as from get_recent_series()
+
+        Raises:
+            ValueError: There is no text, or lore cannot be searched
+        """
+        del project
+        subpath = self._search_path(text)
+        cache = pwcache.get()
+        data = (cache.get(self.url, subpath, max_age)
+                if cache and max_age != 0 else None)
+        if data is None:
+            content = await self.lore.read(client, subpath, kind='search')
+            if content is None:
+                raise ValueError(f'Cannot search {self.url}')
+            # Lore says that nothing matches with a 404
+            data = (feed_series(parse_feed(content), self.url) if content
+                    else [])
+            if cache:
+                cache.put(self.url, subpath, data)
+        return data
+
     async def complete_series(self, client, ser):
         """Fill in a series which is only partly in a page of the feed
 
@@ -531,7 +621,9 @@ class LoreList:
             client (aiohttp.ClientSession): Session to use
             link (str): Message-ID of the cover letter, or of the first patch
                 if there is no cover letter
-            max_age (float or None): Not used
+            max_age (float or None): 0 to read the thread from lore again,
+                e.g. for patches which have arrived since; otherwise the copy
+                read already is used
 
         Returns:
             dict: Series, as Patchwork.get_series() gives it, with 'id' set to
@@ -540,8 +632,9 @@ class LoreList:
         Raises:
             ValueError: The message is not a cover letter or first patch
         """
-        del max_age
         link = parse_link(link)
+        if max_age == 0:
+            self._threads.pop(link, None)
         root = await self._message(client, link)
         info = subject_info(root)
         if not info:

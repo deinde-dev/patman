@@ -473,8 +473,12 @@ class TestLore(unittest.TestCase):
         self.assertIsNone(llist.lore_mbox(data))
         self.assertIs(data, run(llist.fill_from_lore(None, data)))
 
-        # The thread is read just once
+        # The thread is read just once, unless asked to read it again
         self.assertEqual(['cover@x'], reads)
+        self.assertEqual(data, run(llist.get_series(None, 'cover@x',
+                                                    max_age=0)))
+        self.assertEqual(['cover@x', 'cover@x'], reads)
+        reads.pop()
 
         # A review reads the series the same way
         with mock.patch.object(lookup.tout, 'notice'):
@@ -603,6 +607,50 @@ class TestLore(unittest.TestCase):
         self.assertEqual({}, llist.get_states(['lore:p1@x']))
         self.assertIsNone(run(llist.follow_events(client)))
         self.assertEqual('p1@x/', llist.patch_path('lore:p1@x'))
+
+    def test_lorelist_search(self):
+        """A list on lore can be searched for series by their subjects"""
+        self.assertEqual(
+            's:"make_fit" AND s:"compress" AND s:PATCH AND NOT s:Re',
+            lorelist.search_query('  make_fit\t"compress" '))
+        self.assertEqual('(dfn:scripts/make_fit.py) AND s:PATCH AND NOT s:Re',
+                         lorelist.search_query('dfn:scripts/make_fit.py'))
+        self.assertEqual('(fit f:dianders) AND s:PATCH AND NOT s:Re',
+                         lorelist.search_query('fit f:dianders'))
+
+        # The colon of a subject's prefix does not make it a query for lore
+        self.assertEqual(
+            's:"arm64:" AND s:"Add" AND s:"fit" AND s:PATCH AND NOT s:Re',
+            lorelist.search_query('arm64: Add fit'))
+        for text in ('', ' ', '""'):
+            with self.assertRaises(ValueError) as exc:
+                lorelist.search_query(text)
+            self.assertEqual('Please give some text to search for',
+                             str(exc.exception))
+
+        # The series are not completed from their threads, and the results
+        # are kept for a while
+        llist = lorelist.LoreList(LIST)
+        cache = pwcache.Cache(os.path.join(self.tmpdir, 'pw.db'))
+        client = Client(Response(200, FEED), Response(404))
+        with mock.patch.object(pwcache, 'get', return_value=cache):
+            got = run(llist.search_series(client, None, 'dm'))
+            self.assertEqual(
+                lorelist.feed_series(lorelist.parse_feed(FEED), LIST), got)
+            self.assertEqual(got, run(llist.search_series(client, None,
+                                                          'dm')))
+            self.assertEqual([f'{LIST}/?q=s%3A%22dm%22+AND+s%3APATCH+AND+NOT'
+                              '+s%3ARe&x=A'], client.urls)
+
+            # Lore says when nothing matches
+            self.assertEqual([], run(llist.search_series(client, None,
+                                                         'nothing')))
+
+            # A search which cannot be read says so
+            with mock.patch.object(lore, 'RETRIES', 0), \
+                    self.assertRaises(ValueError) as exc:
+                run(llist.search_series(Client(Response(500)), None, 'x'))
+        self.assertEqual(f'Cannot search {LIST}', str(exc.exception))
 
     def test_strip_signature(self):
         """The signature at the end of a patch is not part of its diff"""

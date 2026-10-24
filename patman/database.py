@@ -22,7 +22,7 @@ from u_boot_pylib import tout
 from patman.series import Series
 
 # Schema version (version 0 means there is no database yet)
-LATEST = 18
+LATEST = 19
 
 # Information about a review record
 # Review status values
@@ -363,6 +363,14 @@ class Database:  # pylint:disable=R0904
         """Allow an upstream to have its mailing list on lore"""
         self.cur.execute('ALTER TABLE upstream ADD COLUMN lore_url')
 
+    def _migrate_to_v19(self):
+        """Allow series to be added to the inbox, and an inbox with no feed"""
+        self.cur.execute('ALTER TABLE upstream ADD COLUMN no_feed BIT')
+        self.cur.execute(
+            'CREATE TABLE inbox (id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            'upstream TEXT, link TEXT, name TEXT, timestamp TEXT, '
+            'UNIQUE (upstream, link))')
+
     # pylint: disable=R0912
     def migrate_to(self, dest_version):
         """Migrate the database to the selected version
@@ -397,40 +405,8 @@ class Database:  # pylint:disable=R0904
             self.open_it()
             if version == 1:
                 self.create_v1()
-            elif version == 2:
-                self._migrate_to_v2()
-            elif version == 3:
-                self._migrate_to_v3()
-            elif version == 4:
-                self._migrate_to_v4()
-            elif version == 5:
-                self._migrate_to_v5()
-            elif version == 6:
-                self._migrate_to_v6()
-            elif version == 7:
-                self._migrate_to_v7()
-            elif version == 8:
-                self._migrate_to_v8()
-            elif version == 9:
-                self._migrate_to_v9()
-            elif version == 10:
-                self._migrate_to_v10()
-            elif version == 11:
-                self._migrate_to_v11()
-            elif version == 12:
-                self._migrate_to_v12()
-            elif version == 13:
-                self._migrate_to_v13()
-            elif version == 14:
-                self._migrate_to_v14()
-            elif version == 15:
-                self._migrate_to_v15()
-            elif version == 16:
-                self._migrate_to_v16()
-            elif version == 17:
-                self._migrate_to_v17()
-            elif version == 18:
-                self._migrate_to_v18()
+            else:
+                getattr(self, f'_migrate_to_v{version}')()
 
             # Save the new version if we have a schema_version table
             if version > 1:
@@ -1232,7 +1208,7 @@ class Database:  # pylint:disable=R0904
     # pylint: disable=R0913,R0917
     def upstream_add(self, name, url, patchwork_url=None, identity=None,
                      series_to=None, no_maintainers=False, no_tags=False,
-                     lore_url=None):
+                     lore_url=None, no_feed=False):
         """Add a new upstream record
 
         Args:
@@ -1245,6 +1221,8 @@ class Database:  # pylint:disable=R0904
             no_tags (bool): True to skip subject-tag alias processing
             lore_url (str or None): URL of the mailing list on lore, e.g.
                 'https://lore.kernel.org/devicetree-compiler'
+            no_feed (bool): True if the inbox lists only the series added to
+                it, not those sent to the list
 
         Raises:
             ValueError if the name already exists in the database
@@ -1252,10 +1230,10 @@ class Database:  # pylint:disable=R0904
         try:
             self.execute(
                 'INSERT INTO upstream (name, url, patchwork_url, identity,'
-                ' series_to, no_maintainers, no_tags, lore_url) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                ' series_to, no_maintainers, no_tags, lore_url, no_feed) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 (name, url, patchwork_url, identity, series_to,
-                 no_maintainers, no_tags, lore_url))
+                 no_maintainers, no_tags, lore_url, no_feed))
         except sqlite3.IntegrityError as exc:
             if 'UNIQUE constraint failed: upstream.name' in str(exc):
                 raise ValueError(f"Upstream '{name}' already exists") from exc
@@ -1304,6 +1282,7 @@ class Database:  # pylint:disable=R0904
         if self.rowcount() != 1:
             self.rollback()
             raise ValueError(f"No such upstream '{name}'")
+        self.execute('DELETE FROM inbox WHERE upstream = ?', (name,))
 
     def upstream_set(self, name, **kwargs):
         """Update fields on an existing upstream
@@ -1324,12 +1303,14 @@ class Database:  # pylint:disable=R0904
                     tags (e.g. 'dm:') when sending
                 lore_url (str): URL of the mailing list on lore, e.g.
                     'https://lore.kernel.org/devicetree-compiler'
+                no_feed (bool): True if the inbox lists only the series
+                    added to it
 
         Raises:
             ValueError: Upstream does not exist or invalid field
         """
         valid = {'patchwork_url', 'identity', 'series_to',
-                 'no_maintainers', 'no_tags', 'lore_url'}
+                 'no_maintainers', 'no_tags', 'lore_url', 'no_feed'}
         invalid = set(kwargs) - valid
         if invalid:
             raise ValueError(f"Invalid upstream field(s): {invalid}")
@@ -1372,6 +1353,21 @@ class Database:  # pylint:disable=R0904
         if rec:
             return rec[0]
         return None
+
+    def upstream_get_no_feed(self, name):
+        """Check whether the inbox of an upstream lists only added series
+
+        Args:
+            name (str): Upstream name
+
+        Return:
+            bool: True if the inbox has no feed of the series sent to the
+                list, but only the series added to it
+        """
+        res = self.execute(
+            'SELECT no_feed FROM upstream WHERE name = ?', (name,))
+        rec = res.fetchone()
+        return bool(rec and rec[0])
 
     def upstream_get_identity(self, name):
         """Get the sendemail identity for an upstream
@@ -1433,6 +1429,57 @@ class Database:  # pylint:disable=R0904
         for rec in res.fetchall():
             udict[rec[0]] = rec[1:]
         return udict
+
+    # inbox functions
+
+    def inbox_add(self, ups, link, name, timestamp):
+        """Add a series to the inbox of an upstream
+
+        Adding a series which is there already updates its name
+
+        Args:
+            ups (str): Upstream name
+            link (str): Series link, e.g. a patchwork series ID, or the
+                Message-ID of a series on lore
+            name (str): Name of the series, to show until it is read
+            timestamp (str): When it was added, 'YYYY-MM-DD HH:MM:SS'
+        """
+        self.execute(
+            'INSERT INTO inbox (upstream, link, name, timestamp) '
+            'VALUES (?, ?, ?, ?) ON CONFLICT (upstream, link) '
+            'DO UPDATE SET name = excluded.name',
+            (ups, str(link), name, timestamp))
+
+    def inbox_remove(self, ups, link):
+        """Remove a series from the inbox of an upstream
+
+        Args:
+            ups (str): Upstream name
+            link (str): Series link
+
+        Return:
+            bool: True if it was there
+        """
+        self.execute('DELETE FROM inbox WHERE upstream = ? AND link = ?',
+                     (ups, str(link)))
+        return self.rowcount() == 1
+
+    def inbox_get(self, ups):
+        """Get the series added to the inbox of an upstream
+
+        Args:
+            ups (str): Upstream name
+
+        Return:
+            list of tuple: One for each series, latest added first:
+                str: Series link
+                str: Name of the series
+                str: When it was added
+        """
+        res = self.execute(
+            'SELECT link, name, timestamp FROM inbox WHERE upstream = ? '
+            'ORDER BY timestamp DESC, id DESC', (ups,))
+        return res.fetchall()
 
     # patchwork functions
 

@@ -1778,6 +1778,102 @@ async function viewReviewForm() {
 // Pages of the inbox read so far, so 'Load more' can add to them
 let inbox = null;
 
+// The last search for series to add to the inbox, so that it shows again when
+// the inbox does, e.g. after adding one: the upstream, the text and what the
+// server found
+let inboxSearch = null;
+
+// Add a series to the inbox, or remove it, then show the inbox again
+async function setAdded(s, ups, add) {
+  await api(add ? 'inbox/add' : 'inbox/remove',
+            { json: { ups, id: String(s.id), name: s.name } });
+  s.added = add;
+  // The same series may be in the inbox and among the search results
+  for (const x of inboxSearch ? inboxSearch.found.series : []) {
+    if (String(x.id) === String(s.id)) x.added = add;
+  }
+  // Pages kept from before would otherwise bring it back
+  if (!add && inbox) inbox.series = inbox.series.filter((x) => String(x.id) !== String(s.id));
+  await viewInbox();
+}
+
+// A series found by a search, with a button to add it to the inbox
+function searchCard(s, ups) {
+  const btn = h('button', {
+    class: s.added ? 'btn light small' : 'btn small',
+    title: s.added ? 'Take this series out of the inbox'
+                   : 'Keep this series in the inbox, until you remove it',
+    onclick: (ev) => {
+      ev.target.disabled = true;
+      setAdded(s, ups, !s.added).catch((err) => showError(err, 'inbox'));
+    } }, s.added ? 'Remove' : 'Add');
+  return h('div', { class: 'card' },
+    h('div', { class: 'row' },
+      h('div', { class: 'grow name' }, s.name),
+      s.version && h('div', { class: 'ver' }, `v${s.version}`)),
+    h('div', { class: 'row meta' },
+      h('span', { class: 'grow' },
+        [s.submitter, s.date && ago(parseTime(s.date, true)),
+         s.total && npatches(s.total)].filter(Boolean).join(' · ')),
+      s.web_url && h('a', { class: 'extlink', href: s.web_url, target: '_blank',
+                            rel: 'noopener',
+                            title: `Open the series on ${siteName(s.web_url)}, in a new tab` },
+                     `${siteName(s.web_url)} ↗`),
+      btn));
+}
+
+// Search the upstream's patchwork server, or its list on lore, for series to
+// add to the inbox. It starts open if there is no feed, or a search to show
+function inboxFinder(ups, site, open) {
+  const results = h('div', {});
+  const input = h('input', {
+    type: 'search', class: 'search', enterkeyhint: 'search',
+    placeholder: `Find a series on ${site}`, 'aria-label': `Find a series on ${site}`,
+    title: site === 'lore'
+      ? "Words to find in the subjects of the patches, or a query for lore, e.g. " +
+        "'dfn:scripts/make_fit.py' for the series changing that file, or 'f:fred' " +
+        'for those from Fred'
+      : 'Words to find in the names of the series or of their patches' });
+  const show = (found) => fill(results,
+    h('div', { class: 'section' }, `${found.series.length} found in ${found.where || site}`),
+    found.series.length ? h('div', { class: 'list' }, found.series.map((s) => searchCard(s, ups)))
+                        : h('div', { class: 'empty' }, 'Nothing matches'));
+  const search = async () => {
+    const q = input.value.trim();
+    if (!q) {
+      inboxSearch = null;
+      fill(results);
+      return;
+    }
+    fill(results, h('div', { class: 'spinner' }, `Searching ${site}…`));
+    try {
+      const found = await api(`search?ups=${encodeURIComponent(ups)}&q=${encodeURIComponent(q)}`);
+      inboxSearch = { ups, q, found };
+      show(found);
+    } catch (err) {
+      fill(results, h('div', { class: 'error' }, String(err.message || err)));
+    }
+  };
+  input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') search(); });
+  const box = h('div', { class: 'finder', hidden: !open },
+    h('div', { class: 'row' }, input,
+      h('button', { class: 'btn small', onclick: search,
+                    title: `Search ${site} for series to add to the inbox` }, 'Find')),
+    results);
+  if (inboxSearch && inboxSearch.ups === ups) {
+    input.value = inboxSearch.q;
+    show(inboxSearch.found);
+    box.hidden = false;
+  }
+  const toggle = h('button', {
+    class: 'btn light small', title: `Find a series on ${site} to add to the inbox`,
+    onclick: () => {
+      box.hidden = !box.hidden;
+      if (!box.hidden) input.focus();
+    } }, 'Add a series');
+  return [toggle, box];
+}
+
 // Jobs reviewing series in the inbox, so each series can show how its review
 // is getting on, even after the inbox is shown again. The server says which
 // series are being reviewed, in case the review was started elsewhere
@@ -1854,6 +1950,12 @@ function inboxDetails(s, ups, jobBox) {
     h('div', { class: 'actions' },
       jobId && !inboxDone.has(jobId) ? busyLink(jobId) : reviewBtn,
       tryBtn,
+      s.added && h('button', {
+        class: 'btn light small', title: 'Take this series out of the inbox',
+        onclick: (ev) => {
+          ev.target.disabled = true;
+          setAdded(s, ups, false).catch((err) => showError(err, 'inbox'));
+        } }, 'Remove'),
       s.web_url && h('a', { class: 'btn light small', href: s.web_url,
                             target: '_blank', rel: 'noopener',
                             title: `Open the series on ${siteName(s.web_url)}, in a new tab` },
@@ -1964,6 +2066,8 @@ function inboxCard(s, ups, pw) {
                'are waiting for your response' },
         `${s.earlier.replies} ${s.earlier.replies === 1 ? 'reply' : 'replies'}`),
       s.mine && h('span', { class: 'chip st-other' }, 'yours'),
+      s.added && h('span', { class: 'chip st-other',
+                             title: 'You added this series to the inbox' }, 'added'),
       appliedChip(s),
       !s.received_all && h('span', { class: 'chip st-changes-requested' }, 'incomplete'),
       jobBox));
@@ -1982,6 +2086,7 @@ function inboxCard(s, ups, pw) {
   if (!s.reviewed && !s.mine && !applied) groups.push('todo');
   if (s.earlier) groups.push('newver');
   if (s.applied && (s.applied.count || s.applied.later)) groups.push('applied');
+  if (s.added) groups.push('added');
   return { card, text: `${s.name} ${s.submitter || ''}`, groups };
 }
 
@@ -2014,6 +2119,7 @@ async function viewInbox(more, refresh) {
   // Leave alone whatever screen was chosen while waiting
   if (location.hash !== hash) return;
   if (inbox.page === 0) inbox.fetched = data.fetched;
+  inbox.feed = data.feed;
   inbox.upstreamFetched = data.upstream_fetched || inbox.upstreamFetched;
   inbox.page = data.page;
   // New series move the others down, so a later page may repeat some
@@ -2065,13 +2171,21 @@ async function viewInbox(more, refresh) {
       ev.target.disabled = true;
       viewInbox(false, true).catch((err) => showError(err, 'inbox'));
     } }, 'Refresh'));
-  setView('Inbox', 'inbox', false, upsTabs, fetched,
-    ...filteredList('inbox', inbox.series.map((s) => inboxCard(s, ups, pw)),
-                    [['todo', 'To review',
-                      'Series which you have not reviewed and are not yours'],
-                     ['newver', 'New versions', 'New versions of series you reviewed earlier'],
-                     ['applied', 'Applied', 'Series with patches applied upstream'],
-                     ['all', 'All', 'All the series listed']]),
+  const [addBtn, finder] = inboxFinder(ups, site, inbox.feed === false);
+  fetched.append(addBtn);
+  const filters = [['todo', 'To review', 'Series which you have not reviewed and are not yours'],
+                   ['newver', 'New versions', 'New versions of series you reviewed earlier'],
+                   ['applied', 'Applied', 'Series with patches applied upstream'],
+                   ['all', 'All', 'All the series listed']];
+  if (inbox.series.some((s) => s.added)) {
+    filters.splice(3, 0, ['added', 'Added', 'Series which you added to the inbox']);
+  }
+  // With no feed, the inbox has only what is added to it
+  const hint = inbox.feed === false && !inbox.series.length && h('div', { class: 'empty' },
+    `Nothing is in this inbox yet: find a series on ${site} to add it`);
+  setView('Inbox', 'inbox', false, upsTabs, fetched, finder,
+    ...(hint ? [hint] : filteredList('inbox', inbox.series.map((s) => inboxCard(s, ups, pw)),
+                                     filters)),
     loadMore);
 }
 

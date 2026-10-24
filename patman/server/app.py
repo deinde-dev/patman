@@ -870,9 +870,14 @@ class Server(jobs.JobRunner):
         For an upstream whose list is on lore, the series are read from lore
         (see LoreList.get_recent_series()), which has no patch states.
 
+        The first page starts with the series added to the inbox (see
+        _read_added()), each marked as 'added'. For an upstream with no feed
+        (see 'patman upstream add --no-feed'), these are all it lists.
+
         Return:
             web.Response: Object with the upstream, page, page size, whether
-                there may be 'more' pages, and a list of series
+                there may be 'more' pages, whether it has a 'feed', and a list
+                of series
 
         Raises:
             BadRequest: The page is invalid
@@ -882,6 +887,7 @@ class Server(jobs.JobRunner):
         page = params.get_int(request.query, 'page') or 1
         pwork = self.get_pwork(ups)
         project = self._inbox_project(ups, pwork)
+        feed = not self.cser.db.upstream_get_no_feed(ups)
         first = pwork.recent_series_path(project, 1, INBOX_PAGE)
         if request.query.get('refresh') == '1':
             max_age = 0
@@ -899,13 +905,71 @@ class Server(jobs.JobRunner):
         # other
         fetching = asyncio.ensure_future(self._fetch_upstream(ups))
         try:
-            series_list = await self._read_inbox(pwork, project, page,
-                                                 max_age)
+            series_list, more = await self._read_inbox_page(
+                pwork, ups, project, page, max_age, feed)
         except BaseException:
             # The fetch carries on; this only stops waiting for it
             fetching.cancel()
             raise
-        read = pwork.read_time(first)
+        read = pwork.read_time(first) if feed else None
+        # This waits for the fetch, so comes before the time of the fetch
+        series = await self._inbox_items(series_list, ups, pwork, fetching)
+        return web.json_response({
+            'ups': ups, 'page': page, 'per_page': INBOX_PAGE, 'feed': feed,
+            'more': more,
+            'fetched': (times.to_str(datetime.fromtimestamp(read)) if read
+                        else times.now_str()),
+            'upstream_fetched': self._fetched_str(ups),
+            'series': series})
+
+    # pylint: disable-next=R0913,R0917
+    async def _read_inbox_page(self, pwork, ups, project, page, max_age,
+                               feed):
+        """Read a page of the inbox: the series added to it, then the feed
+
+        Args:
+            pwork (Patchwork or LoreList): Object to read the series with
+            ups (str): Upstream name
+            project (str): Patchwork project's link name, or the list's name
+            page (int): Page to read, from 1; only the first has the series
+                added to the inbox
+            max_age (float or None): Oldest copy of the feed to use from the
+                cache, in seconds, 0 to read it, and the added series, again,
+                or None for any
+            feed (bool): True to read the feed, False if the inbox has only
+                the added series
+
+        Return:
+            tuple:
+                list of dict: Series, as from get_recent_series()
+                bool: True if there may be more pages
+        """
+        added = (await self._read_added(pwork, ups, max_age == 0)
+                 if page == 1 else [])
+        found = (await self._read_inbox(pwork, project, page, max_age)
+                 if feed else [])
+        # Each page of lore's feed has a set number of messages, not series
+        more = feed and (bool(found) if isinstance(pwork, lorelist.LoreList)
+                         else len(found) >= INBOX_PAGE)
+        # A series which is added comes first, so is left out of the feed
+        ids = {str(ser['id']) for ser in added}
+        return added + [ser for ser in found if str(ser['id']) not in ids], more
+
+    async def _inbox_items(self, series_list, ups, pwork, fetching):
+        """Get the information about the series in the inbox, to show them
+
+        Args:
+            series_list (list of dict): Series, as from _read_inbox_page()
+            ups (str): Upstream name
+            pwork (Patchwork or LoreList): Object the series were read with
+            fetching (asyncio.Future): Completes when the upstream is fetched
+                (see _upstream_commits())
+
+        Return:
+            list of dict: Series, as from info.get_inbox(), each with the
+                'job' reviewing it, if any, whether it is 'added' to the
+                inbox and its review branch (see _set_review_branches())
+        """
         commits = await self._upstream_commits(series_list, ups, fetching)
         states = pwork.get_states([pat['id'] for ser in series_list
                                    for pat in ser.get('patches') or []])
@@ -913,20 +977,133 @@ class Server(jobs.JobRunner):
             self.cser, self.rcser, series_list,
             info.get_patch_status(series_list, commits, states),
             self.get_own_emails())
+        links = {link for link, *_ in self.cser.db.inbox_get(ups)}
         for item in series:
             item['job'] = self._reviewing(item['id'])
+            item['added'] = str(item['id']) in links
         await self._set_review_branches(series, ups, 'id')
-        return web.json_response({
-            'ups': ups, 'page': page, 'per_page': INBOX_PAGE,
-            # Each page of lore's feed has a set number of messages, not
-            # series
-            'more': (bool(series_list)
-                     if isinstance(pwork, lorelist.LoreList)
-                     else len(series_list) >= INBOX_PAGE),
-            'fetched': (times.to_str(datetime.fromtimestamp(read)) if read
-                        else times.now_str()),
-            'upstream_fetched': self._fetched_str(ups),
-            'series': series})
+        return series
+
+    async def _read_added(self, pwork, ups, refresh):
+        """Read the series added to the inbox of an upstream
+
+        Args:
+            pwork (Patchwork or LoreList): Object to read the series with
+            ups (str): Upstream name
+            refresh (bool): True to read each series again, rather than use
+                a recent copy
+
+        Return:
+            list of dict: Series, as from get_series(), latest added first.
+                One which cannot be read has only its 'id' and 'name'
+        """
+        added = self.cser.db.inbox_get(ups)
+        if not added:
+            return []
+        kwargs = {'max_age': 0} if refresh else {}
+        async with aiohttp.ClientSession() as client:
+            results = await asyncio.gather(
+                *[pwork.get_series(client, link, **kwargs)
+                  for link, *_ in added], return_exceptions=True)
+        out = []
+        for (link, name, _), result in zip(added, results):
+            if isinstance(result, Exception):
+                tout.warning(f"Cannot read series {link}: {result}")
+                result = {'id': int(link) if link.isdigit() else link,
+                          'name': name, 'patches': [], 'received_all': True}
+            out.append(result)
+        return out
+
+    async def _search(self, request):
+        """Handle 'GET /api/search': search for series to add to the inbox
+
+        The 'ups' query parameter selects the upstream, as for the inbox, and
+        'q' gives the text to search for: on patchwork, in the names of the
+        series and their patches (see Patchwork.search_series()), or on
+        lore, in the subjects of the patches and cover letters (see
+        LoreList.search_series())
+
+        Args:
+            request (web.Request): Request
+
+        Return:
+            web.Response: Object with the upstream, the text, 'where' it was
+                searched for, e.g. 'uboot on patchwork.ozlabs.org', and a
+                list of series, newest first, each saying whether it is
+                'added' to the inbox
+
+        Raises:
+            BadRequest: There is no text to search for
+            ValueError: The upstream has no patchwork project
+        """
+        ups = request.query.get('ups') or self._default_upstream()
+        text = ' '.join((request.query.get('q') or '').split())
+        if not text:
+            raise params.BadRequest('Please give some text to search for')
+        pwork = self.get_pwork(ups)
+        project = self._inbox_project(ups, pwork)
+        async with aiohttp.ClientSession() as client:
+            found = await pwork.search_series(client, project, text)
+        links = {link for link, *_ in self.cser.db.inbox_get(ups)}
+        series = []
+        for data in found:
+            submitter = data.get('submitter') or {}
+            series.append({
+                'id': data['id'], 'name': data.get('name') or '',
+                'version': data.get('version'), 'date': data.get('date'),
+                'submitter': submitter.get('name') or submitter.get('email'),
+                'total': data.get('total'), 'web_url': data.get('web_url'),
+                'added': str(data['id']) in links})
+        site = pwork.url.split('://', 1)[-1]
+        where = (site if isinstance(pwork, lorelist.LoreList)
+                 else f'{project} on {site}')
+        return web.json_response({'ups': ups, 'q': text, 'where': where,
+                                  'series': series})
+
+    async def _inbox_add(self, request):
+        """Handle 'POST /api/inbox/add': add a series to an upstream's inbox
+
+        Args:
+            request (web.Request): Request, whose body is checked by
+                params.parse_inbox_req()
+
+        Return:
+            web.Response: Object with the upstream and the series 'id'
+
+        Raises:
+            BadRequest: The request is invalid
+        """
+        ups, link, name = params.parse_inbox_req(
+            await self._read_json(request), self.cser.db.upstream_get_dict())
+        lore = isinstance(self.get_pwork(ups), lorelist.LoreList)
+        if lore != ('@' in link):
+            raise params.BadRequest(
+                f"Series '{link}' is not on {ups}'s "
+                f"{'list' if lore else 'patchwork server'}")
+        self.cser.db.inbox_add(ups, link, name, times.now_str())
+        self.cser.commit()
+        return web.json_response({'ups': ups, 'id': link})
+
+    async def _inbox_remove(self, request):
+        """Handle 'POST /api/inbox/remove': remove a series from an inbox
+
+        Args:
+            request (web.Request): Request, whose body is checked by
+                params.parse_inbox_req()
+
+        Return:
+            web.Response: Object with the upstream and the series 'id'
+
+        Raises:
+            BadRequest: The request is invalid
+            ValueError: The series is not in the inbox
+        """
+        ups, link, _ = params.parse_inbox_req(
+            await self._read_json(request), self.cser.db.upstream_get_dict())
+        if not self.cser.db.inbox_remove(ups, link):
+            raise ValueError(f"Series '{link}' is not in {ups}'s inbox")
+        self.cser.commit()
+        return web.json_response({'ups': ups, 'id': link})
 
     def _default_upstream(self):
         """Get the upstream to use for a request which does not give one
@@ -1745,6 +1922,9 @@ class Server(jobs.JobRunner):
         app.router.add_post('/api/sync/cancel', self._sync_cancel_post)
         app.router.add_get('/api/upstreams', self._upstreams)
         app.router.add_get('/api/inbox', self._inbox)
+        app.router.add_post('/api/inbox/add', self._inbox_add)
+        app.router.add_post('/api/inbox/remove', self._inbox_remove)
+        app.router.add_get('/api/search', self._search)
         app.router.add_get('/api/jobs', self._job_list)
         app.router.add_get(r'/api/jobs/{idnum:\d+}', self._job_detail)
         app.router.add_post(r'/api/jobs/{idnum:\d+}/cancel', self._job_cancel)

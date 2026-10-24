@@ -68,6 +68,10 @@ fetches the upstream at most every hour, unless you tap 'Refresh'; the top of
 the inbox says when it did each. 'Load more' at the bottom reads the next 50
 series, and going to another tab and back keeps them.
 
+For a series which is too old to be among them, tap 'Add a series' and search
+for it by name. 'Add' keeps it at the top of the inbox until you remove it
+(see :ref:`adding a series <serve_search>`).
+
 A series is 'applied' once all its patches are on the upstream's main or next
 branch, found by their subjects in the git repo which the server runs in, or
 are accepted on patchwork, e.g. into a custodian's tree. A series which is

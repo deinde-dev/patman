@@ -272,7 +272,8 @@ def _copy_one(src, dst, sid, name, fields, stats, move):
 def copy_upstreams(src, dst, stats):
     """Copy upstreams, and their patchwork projects, missing from dst
 
-    The default upstream in dst is not changed.
+    The series added to the inbox of each upstream are copied too. The
+    default upstream in dst is not changed.
 
     Args:
         src (Database): Database to copy from
@@ -282,13 +283,14 @@ def copy_upstreams(src, dst, stats):
     have = {row[0] for row in dst.execute('SELECT name FROM upstream')}
     for row in src.execute(
             'SELECT name, url, patchwork_url, identity, series_to, '
-            'no_maintainers, no_tags, lore_url FROM upstream').fetchall():
+            'no_maintainers, no_tags, lore_url, no_feed FROM upstream'
+            ).fetchall():
         if row[0] in have:
             continue
         dst.execute('INSERT INTO upstream (name, url, is_default, '
                     'patchwork_url, identity, series_to, no_maintainers, '
-                    'no_tags, lore_url) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?)',
-                    row)
+                    'no_tags, lore_url, no_feed) '
+                    'VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?)', row)
         stats.upstreams += 1
     have = {row[0] for row in dst.execute('SELECT upstream FROM patchwork')}
     for row in src.execute(
@@ -297,6 +299,10 @@ def copy_upstreams(src, dst, stats):
         if row[3] not in have:
             dst.execute('INSERT INTO patchwork (name, proj_id, link_name, '
                         'upstream) VALUES (?, ?, ?, ?)', row)
+    for row in src.execute(
+            'SELECT upstream, link, name, timestamp FROM inbox').fetchall():
+        dst.execute('INSERT OR IGNORE INTO inbox (upstream, link, name, '
+                    'timestamp) VALUES (?, ?, ?, ?)', row)
 
 
 def _remove_series(db, sid):

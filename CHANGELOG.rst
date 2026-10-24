@@ -13,6 +13,11 @@ Added
 - The top of the ``patman serve`` page, and the name of the browser tab, give
   the project which the server is for, such as dtc or U-Boot, so that servers
   for different projects are easy to tell apart.
+- The inbox on the ``patman serve`` page can find a series by searching the
+  upstream's patchwork project, or its list on lore, and keep it at the top of
+  the inbox until you remove it. ``patman upstream add --no-feed`` gives an
+  inbox which lists only these, e.g. for Linux, with the whole of
+  ``https://lore.kernel.org/all`` as its list. This is database schema v19.
 - The ``patman serve`` page works for an upstream whose list is on lore, such
   as dtc: its inbox lists the newest series sent to the list, read from
   lore's feed, and their patches, cover letters and comments are read from

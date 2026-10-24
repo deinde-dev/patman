@@ -1638,6 +1638,164 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual((None, None), (items[500]['reviewed'],
                                         items[500]['earlier']))
 
+    def setup_inbox_ups(self):
+        """Add an upstream with a patchwork project, for the inbox"""
+        db = self.cser.db
+        db.upstream_add('us', 'https://us', 'https://pw.us')
+        db.upstream_set_default('us')
+        db.patchwork_update('U-Boot', 6, 'uboot', 'us')
+        db.commit()
+
+    def test_inbox_added(self):
+        """Series added to the inbox come first, or are all it lists"""
+        self.setup_inbox_ups()
+
+        def series(idnum, name):
+            return {'id': idnum, 'name': name, 'version': 1, 'total': 1,
+                    'date': '2026-10-01T10:00:00', 'received_all': True,
+                    'patches': [{'id': idnum * 10, 'name': name}]}
+
+        feed = 'series/?project=uboot&order=-date&page=1&per_page=50'
+        pages = {
+            feed: [series(300, 'video: New'), series(200, 'video: Added')],
+            'series/200/': series(200, 'video: Added'),
+            'series/150/': series(150, 'net: Old'),
+        }
+        requests = []
+
+        def fake(subpath):
+            requests.append(subpath)
+            if subpath not in pages:
+                raise ValueError(f"Unexpected request '{subpath}'")
+            return pages[subpath]
+
+        srv = self.make_server()
+        srv.pwork_for_testing.fake_request = fake
+
+        def add(link, name=None, ups='us'):
+            return self.call(srv, 'POST', '/api/inbox/add',
+                             json={'ups': ups, 'id': link, 'name': name})
+
+        self.assertEqual((200, {'ups': 'us', 'id': '150'}),
+                         add(150, 'net: Old'))
+        self.assertEqual(200, add('999', 'Gone')[0])
+        self.assertEqual(200, add('200')[0])
+        for args, error in (
+                (('x@y',), "Series 'x@y' is not on us's patchwork server"),
+                (('abc',), "Invalid series 'abc'"),
+                (('1', None, 'other'), "Unknown upstream 'other'")):
+            self.assertEqual((400, error), (add(*args)[0],
+                                            add(*args)[1]['error']))
+
+        # The latest added comes first, and is not listed again in the feed.
+        # One which cannot be read keeps its name
+        with terminal.capture():
+            _, data = self.call(srv, 'GET', '/api/inbox')
+        self.assertEqual((True, False), (data['feed'], data['more']))
+        self.assertEqual(
+            [(200, 'video: Added', True), (999, 'Gone', True),
+             (150, 'net: Old', True), (300, 'video: New', False)],
+            [(ser['id'], ser['name'], ser['added']) for ser in data['series']])
+
+        # With no feed, only the added series are listed
+        self.cser.db.upstream_set('us', no_feed=True)
+        self.cser.db.commit()
+        requests.clear()
+        with terminal.capture():
+            _, data = self.call(srv, 'GET', '/api/inbox')
+        self.assertEqual((False, False), (data['feed'], data['more']))
+        self.assertEqual([200, 999, 150],
+                         [ser['id'] for ser in data['series']])
+        self.assertNotIn(feed, requests)
+        _, data = self.call(srv, 'GET', '/api/inbox?page=2')
+        self.assertEqual([], data['series'])
+
+        # A series can be removed, once
+        def remove(link):
+            return self.call(srv, 'POST', '/api/inbox/remove',
+                             json={'ups': 'us', 'id': link})
+        self.assertEqual((200, {'ups': 'us', 'id': '999'}), remove('999'))
+        self.assertEqual((404, "Series '999' is not in us's inbox"),
+                         (remove('999')[0], remove('999')[1]['error']))
+        self.assertEqual(['200', '150'],
+                         [link for link, *_ in self.cser.db.inbox_get('us')])
+
+    def test_search(self):
+        """Series can be searched for, to add them to the inbox"""
+        self.setup_inbox_ups()
+        self.cser.db.inbox_add('us', '200', 'video: Added',
+                               '2026-10-01 10:00:00')
+        self.cser.db.commit()
+        query = 'project=uboot&q=video&order=-date&per_page=30'
+        pages = {
+            f'series/?{query}': [
+                {'id': 200, 'name': 'video: Added', 'version': 2, 'total': 3,
+                 'date': '2026-10-02T10:00:00', 'web_url': 'https://pw/200',
+                 'submitter': {'name': 'Fred', 'email': 'f@x'}}],
+            f'patches/?{query}': [
+                {'id': 1001, 'date': '2026-10-01T10:00:00',
+                 'submitter': {'email': 'ann@x'},
+                 'series': [{'id': 100, 'name': 'video: Old', 'version': 1}]}],
+        }
+        srv = self.make_server()
+        srv.pwork_for_testing.fake_request = pages.get
+        status, data = self.call(srv, 'GET', '/api/search?q=+video+')
+        self.assertEqual(200, status)
+        self.assertEqual(
+            {'ups': 'us', 'q': 'video', 'where': 'uboot on my-fake-url',
+             'series': [
+                {'id': 200, 'name': 'video: Added', 'version': 2,
+                 'date': '2026-10-02T10:00:00', 'submitter': 'Fred',
+                 'total': 3, 'web_url': 'https://pw/200', 'added': True},
+                {'id': 100, 'name': 'video: Old', 'version': 1,
+                 'date': '2026-10-01T10:00:00', 'submitter': 'ann@x',
+                 'total': None, 'web_url': None, 'added': False}]},
+            data)
+
+        status, data = self.call(srv, 'GET', '/api/search?q=+')
+        self.assertEqual((400, 'Please give some text to search for'),
+                         (status, data['error']))
+
+    def test_search_lore(self):
+        """A list on lore is searched there, and its series added"""
+        with terminal.capture():
+            self.cser.upstream_add('linux', 'https://linux',
+                                   lore_url='https://lore/all', no_feed=True)
+        srv = self.make_server()
+        srv.pwork_for_testing = None
+        found = [{'id': 'c@x', 'name': '[v2] fit: Add images', 'version': 2,
+                  'total': 7, 'date': '2026-10-20T15:36:52',
+                  'submitter': {'name': 'Doug', 'email': 'd@x'},
+                  'web_url': 'https://lore/all/c@x/'}]
+        with mock.patch.object(lorelist.LoreList, 'search_series',
+                               mock.AsyncMock(return_value=found)) as search:
+            _, data = self.call(srv, 'GET', '/api/search?ups=linux&q=fit')
+        self.assertEqual(('all', 'fit'), search.call_args.args[1:])
+        self.assertEqual('lore/all', data['where'])
+        self.assertEqual([('c@x', 'Doug', False)],
+                         [(ser['id'], ser['submitter'], ser['added'])
+                          for ser in data['series']])
+
+        # A series is added by its Message-ID, or its URL on lore
+        status, data = self.call(srv, 'POST', '/api/inbox/add', json={
+            'ups': 'linux', 'id': 'https://lore/all/c@x/T/#u',
+            'name': found[0]['name']})
+        self.assertEqual((200, 'c@x'), (status, data['id']))
+        status, data = self.call(srv, 'POST', '/api/inbox/add',
+                                 json={'ups': 'linux', 'id': '123'})
+        self.assertEqual((400, "Series '123' is not on linux's list"),
+                         (status, data['error']))
+
+        # The inbox reads it from its thread
+        with mock.patch.object(lorelist.LoreList, 'get_series',
+                               mock.AsyncMock(return_value={
+                                   **found[0], 'patches': []})) as get:
+            _, data = self.call(srv, 'GET', '/api/inbox?ups=linux')
+        self.assertEqual('c@x', get.call_args.args[1])
+        self.assertEqual([('c@x', True)], [(ser['id'], ser['added'])
+                                           for ser in data['series']])
+        self.assertFalse(data['feed'])
+
     def test_inbox_applied(self):
         """The inbox says which patches are applied upstream"""
         def git(*args, date='2026-10-05T10:00:00'):

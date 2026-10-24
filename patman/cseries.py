@@ -1749,7 +1749,8 @@ class Cseries(cser_helper.CseriesHelper):
 
     def upstream_add(self, name, url, project=None, pwork=None,
                      patchwork_url=None, identity=None, series_to=None,
-                     no_maintainers=False, no_tags=False, lore_url=None):
+                     no_maintainers=False, no_tags=False, lore_url=None,
+                     no_feed=False):
         """Add a new upstream tree
 
         Args:
@@ -1766,11 +1767,14 @@ class Cseries(cser_helper.CseriesHelper):
             no_tags (bool): True to skip subject-tag alias processing
             lore_url (str or None): URL of the mailing list on lore, e.g.
                 'https://lore.kernel.org/devicetree-compiler'
+            no_feed (bool): True if the inbox lists only the series added to
+                it
         """
         self.db.upstream_add(name, url, patchwork_url, identity=identity,
                              series_to=series_to,
                              no_maintainers=no_maintainers,
-                             no_tags=no_tags, lore_url=lore_url)
+                             no_tags=no_tags, lore_url=lore_url,
+                             no_feed=no_feed)
         if project:
             if not pwork:
                 if not patchwork_url:
@@ -1792,6 +1796,8 @@ class Cseries(cser_helper.CseriesHelper):
             msg += ' no-maintainers'
         if no_tags:
             msg += ' no-tags'
+        if no_feed:
+            msg += ' no-feed'
         if project:
             msg += f" project '{project}'"
         tout.notice(msg)
@@ -1827,6 +1833,8 @@ class Cseries(cser_helper.CseriesHelper):
                 opts.append('no-maintainers')
             if no_tags:
                 opts.append('no-tags')
+            if self.db.upstream_get_no_feed(name):
+                opts.append('no-feed')
             print(f'{name:6} {default:3} {proj_name:10} {url:44} '
                   f'{" ".join(opts)}')
 

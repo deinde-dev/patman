@@ -57,6 +57,42 @@ def parts_text(seqs):
     return f'patch {seqs[0]}' if seqs[0] else 'the cover letter'
 
 
+def parse_inbox_req(data, upstreams):
+    """Check a request to add a series to the inbox of an upstream, or remove
+
+    The request is a dict with these keys:
+        ups (str): Upstream whose inbox it is
+        id (str or int): Patchwork series ID, or the Message-ID of a series
+            on lore, or its URL there
+        name (str): Name of the series, when adding it (optional)
+
+    Args:
+        data (dict): Request
+        upstreams (list of str): Names of the known upstreams
+
+    Return:
+        tuple:
+            str: Upstream name
+            str: Series link: the patchwork series ID or the Message-ID
+            str: Name of the series, or the link if there is none
+
+    Raises:
+        BadRequest: The request is not valid
+    """
+    ups = data.get('ups')
+    if ups not in upstreams:
+        raise BadRequest(f"Unknown upstream '{ups}'")
+    link = str(data.get('id') or '').strip()
+    if '@' in link:
+        link = lorelist.parse_link(link)
+    elif not link.isdigit():
+        raise BadRequest(f"Invalid series '{link}'")
+    name = data.get('name')
+    if name is not None and not isinstance(name, str):
+        raise BadRequest('Invalid name')
+    return ups, link, (name or '').strip() or link
+
+
 def parse_review_req(data, upstreams):
     """Work out the 'patman review' arguments for a review request
 

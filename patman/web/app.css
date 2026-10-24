@@ -247,6 +247,11 @@ input.search {
   margin-bottom: 8px;
 }
 .section:empty { display: none; }
+/* Finding a series to add to the inbox */
+.finder { margin-bottom: 12px; }
+.finder > .row { align-items: center; margin-bottom: 8px; }
+.finder input.search { flex: 1; margin-bottom: 0; }
+.finder .card .meta { align-items: center; }
 input[type=password] {
   width: 100%; padding: 10px; border-radius: 8px; font: inherit;
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
