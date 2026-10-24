@@ -828,7 +828,8 @@ def add_review_subparser(subparsers):
     review.add_argument(
         '--relink', action='store_true',
         help='Repair the database by merging review series that were split '
-             'across versions, so follow-up reviews see earlier feedback')
+             'across versions, so follow-up reviews see earlier feedback, '
+             'and removing those with no versions')
     review.add_argument(
         '-j', '--jobs', type=int, default=4,
         help='Number of series to review in parallel with --scan '

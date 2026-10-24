@@ -704,6 +704,20 @@ class Database:  # pylint:disable=R0904
             'GROUP BY series_id')
         return res.fetchall()
 
+    def series_get_max_reviewed_versions(self):
+        """Find the latest version of each series which has a review
+
+        Return: list of:
+            int: ser_ver ID
+            int: series ID
+            int: Maximum version with a review
+        """
+        res = self.execute(
+            'SELECT sv.id, sv.series_id, MAX(sv.version) FROM ser_ver sv '
+            'WHERE EXISTS (SELECT 1 FROM review r WHERE r.svid = sv.id) '
+            'GROUP BY sv.series_id')
+        return res.fetchall()
+
     def series_add(self, name, desc, ups=None):
         """Add a new series record
 
@@ -732,6 +746,31 @@ class Database:  # pylint:disable=R0904
         """
         self.execute('DELETE FROM series WHERE id = ?', (idnum,))
         assert self.rowcount() == 1
+
+    def series_remove_if_empty(self, idnum):
+        """Remove a series if it has no versions left
+
+        Args:
+            idnum (int): ID num of the series
+
+        Return:
+            bool: True if the series was removed
+        """
+        self.execute('DELETE FROM series WHERE id = ? AND NOT EXISTS '
+                     '(SELECT 1 FROM ser_ver sv WHERE sv.series_id = ?)',
+                     (idnum, idnum))
+        return self.rowcount() == 1
+
+    def series_remove_empty_reviews(self):
+        """Remove the review series which have no versions
+
+        Return:
+            int: Number of series removed
+        """
+        self.execute("DELETE FROM series WHERE source = 'review' AND NOT "
+                     'EXISTS (SELECT 1 FROM ser_ver sv '
+                     'WHERE sv.series_id = series.id)')
+        return self.rowcount()
 
     def series_remove_by_name(self, name):
         """Remove a series from the database

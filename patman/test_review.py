@@ -447,6 +447,10 @@ class TestReview(CseriesTester):
         self.db_open()
         self.assertIsNone(cser.db.series_find_by_link(str(self.REVIEW_LINK)))
 
+        # The series goes too, since it has no versions left
+        self.assertFalse(cser.db.series_get_dict(include_archived=True,
+                                                 reviews_only=True))
+
     def test_review_already_reviewed(self):
         """Test that reviewing the same link again is detected"""
         cser = self.get_cser()
@@ -525,7 +529,7 @@ class TestReview(CseriesTester):
             result = review.apply.apply_and_check(ctx, '526073')
         # None means 'nothing to review', not a failure
         self.assertIsNone(result)
-        ctx.cser.db.ser_ver_remove.assert_called_once_with(5, 1)
+        ctx.drop_version.assert_called_once_with()
 
     def test_review_apply_check_failure(self):
         """A genuine apply failure still returns False"""
@@ -537,7 +541,7 @@ class TestReview(CseriesTester):
                 terminal.capture():
             result = review.apply.apply_and_check(ctx, '526073')
         self.assertFalse(result)
-        ctx.cser.db.ser_ver_remove.assert_called_once_with(5, 1)
+        ctx.drop_version.assert_called_once_with()
 
     def test_review_apply_other_project(self):
         """A series for another project is not applied, saving agent time"""
@@ -598,7 +602,7 @@ class TestReview(CseriesTester):
             with terminal.capture() as (out, _):
                 self.assertIsNone(apply.apply_and_check(ctx, 'x@y'))
         self.assertIn('not for this project', out.getvalue())
-        ctx.cser.db.ser_ver_remove.assert_called_once_with(5, 1)
+        ctx.drop_version.assert_called_once_with()
 
     def test_review_nothing_tidied(self):
         """A series with nothing to review leaves no worktree or branch"""
@@ -2381,6 +2385,11 @@ class TestReview(CseriesTester):
         db.series_set_source(s2, 'review')
         sv2 = db.ser_ver_add(s2, 2, link='2')
         db.review_add(sv2, 1, 'v2 body', 1, '2026-01-02')
+
+        # A review series left with no versions, and one of your own
+        db.series_set_source(db.series_add('pw-3-review', 'foo bar'),
+                             'review')
+        own = db.series_add('mine', 'My series')
         cser.commit()
 
         # Before: separate series, v2 has no prior context
@@ -2390,6 +2399,7 @@ class TestReview(CseriesTester):
         with terminal.capture() as (out, _):
             self.run_review('--relink')
         self.assertIn('Relinked 1', out.getvalue())
+        self.assertIn('removed 1 empty', out.getvalue())
 
         # After: one series with both versions; v2 now sees v1's review
         self.db_open()
@@ -2399,6 +2409,12 @@ class TestReview(CseriesTester):
         prev = cser.db.review_get_previous(v1[0], 2)
         self.assertEqual(1, len(prev))
         self.assertEqual('v1 body', prev[0].body)
+
+        # The empty review series is removed, but not your own series
+        reviews = cser.db.series_get_dict(include_archived=True,
+                                          reviews_only=True)
+        self.assertEqual([v1[0]], [ser.idnum for ser in reviews.values()])
+        self.assertIn(own, cser.db.series_get_dict_by_id())
 
     def test_review_lock_in_progress(self):
         """Test a review is refused when one is already running for it"""

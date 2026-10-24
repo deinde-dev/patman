@@ -345,8 +345,11 @@ raising fresh points the earlier versions did not. Versions are linked
 by their cleaned cover-letter title.
 
 An older database may have stored each version as a separate, unlinked
-record, leaving follow-up reviews without this context. Repair it by
-merging the split records, which backs up the database (to
+record, leaving follow-up reviews without this context. It may also hold a
+series with no versions, left by a review which found nothing to review,
+such as a series for another project, which looks like an earlier review
+of the next version in the inbox. Repair it by merging the split records
+and removing the empty ones, which backs up the database (to
 ``<db>.bak``) first::
 
     patman review --relink

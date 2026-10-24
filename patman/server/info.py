@@ -254,19 +254,21 @@ def comment_info(comment, own=frozenset()):
     }
 
 
-def _latest_versions(cser):
+def _latest_versions(cser, reviewed=False):
     """Get the ser_ver record for the latest version of each series
 
     Args:
         cser (Cseries): Open cseries instance
+        reviewed (bool): True to consider only the versions with a review
 
     Return:
         dict: key (int): series ID
             value (SerVer): latest version of that series
     """
     svdict = cser.get_ser_ver_dict()
-    return {series_id: svdict[svid]
-            for svid, series_id, _ in cser.db.series_get_all_max_versions()}
+    found = (cser.db.series_get_max_reviewed_versions() if reviewed
+             else cser.db.series_get_all_max_versions())
+    return {series_id: svdict[svid] for svid, series_id, _ in found}
 
 
 def _last_sent(cser):
@@ -559,15 +561,18 @@ def _reviews_by_title(rcser, reviews):
         dict: key (str): Normalised title (see _norm_title())
             value (tuple):
                 int: Series ID
-                SerVer or None: Latest version reviewed
+                SerVer: Latest version reviewed
                 int: Number of replies waiting for a response
     """
-    latest = _latest_versions(rcser)
+    latest = _latest_versions(rcser, reviewed=True)
     waiting = rcser.db.reply_count_waiting()
     by_title = {}
     for ser in reviews:
-        by_title.setdefault(_norm_title(ser.desc), (
-            ser.idnum, latest.get(ser.idnum), waiting.get(ser.idnum, 0)))
+        # A series may have been applied but not reviewed, e.g. with -a
+        svr = latest.get(ser.idnum)
+        if svr:
+            by_title.setdefault(_norm_title(ser.desc), (
+                ser.idnum, svr, waiting.get(ser.idnum, 0)))
     return by_title
 
 
@@ -593,10 +598,8 @@ def _earlier_info(rcser, found):
     if not found:
         return None
     idnum, svr, replies = found
-    out = {'id': idnum, 'version': svr.version if svr else None,
-           'link': None, 'date': None, 'replies': replies, 'parts': []}
-    if not svr:
-        return out
+    out = {'id': idnum, 'version': svr.version, 'link': None, 'date': None,
+           'replies': replies, 'parts': []}
     reviews = {rev.seq: rev for rev in
                rcser.db.review_get_for_version(svr.idnum)}
     waiting = Counter(rp.seq for rp in rcser.db.reply_get_comments(svr.idnum)
@@ -651,7 +654,10 @@ def get_inbox(cser, rcser, series_list, status=None,
     for data in series_list:
         link = str(data['id'])
         found = rcser.db.series_find_by_link(link)
-        reviewed = found[0] if found and found[0] in review_ids else None
+        # A version which was applied but not reviewed, e.g. with -a, can
+        # be reviewed as if it were new
+        reviewed = (found[0] if found and found[0] in review_ids and
+                    rcser.db.review_get_for_version(found[3]) else None)
         submitter = data.get('submitter') or {}
         out.append({
             'id': data['id'],
