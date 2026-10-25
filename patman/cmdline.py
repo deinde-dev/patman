@@ -842,6 +842,11 @@ def add_review_subparser(subparsers):
              'across versions, so follow-up reviews see earlier feedback, '
              'and removing those with no versions')
     review.add_argument(
+        '--stats', type=int, nargs='?', const=8, default=0, metavar='WEEKS',
+        help='Show the number of reviews written, emails sent and replies '
+             'received, in all and for each of the last WEEKS weeks '
+             '(default: 8)')
+    review.add_argument(
         '-j', '--jobs', type=int, default=4,
         help='Number of series to review in parallel with --scan '
              '(default: 4)')

@@ -8,6 +8,14 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+Added
+~~~~~
+- ``patman review --stats`` counts the series and patches reviewed, the
+  Reviewed-by tags given, the emails sent, the drafts waiting and the replies,
+  in all and for each of the last eight weeks, or as many as given. Patman
+  records when each review and response is sent, for the weeks, which is
+  database schema v20.
+
 0.6.0 - 2026-10-24
 ------------------
 
