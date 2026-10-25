@@ -5,7 +5,8 @@
 """Stats about the reviews in the review database
 
 This counts the reviews written, the emails sent and the replies received,
-in all and for each of the last few weeks, for 'patman review --stats'.
+in all and for each of the last few weeks, for 'patman review --stats' and
+the Stats page of 'patman serve'.
 """
 
 from datetime import date, datetime, timedelta, timezone

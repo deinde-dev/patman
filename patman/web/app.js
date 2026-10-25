@@ -2217,6 +2217,161 @@ async function viewTodo() {
     later.length ? h('div', { class: 'list' }, later.map(card)) : null);
 }
 
+// --- Stats ---
+
+// Rows of the totals: key, label, description and a function giving the
+// detail to show after the number, if any
+const STATS_TOTALS = [
+  ['series', 'Series reviewed', 'Series with a review of any version',
+   (t) => plural(t.versions, 'version')],
+  ['patches', 'Patches reviewed', 'Reviews of patches'],
+  ['covers', 'Cover letters', 'Reviews of cover letters'],
+  ['approved', 'Reviewed-by given', 'Reviews which give a Reviewed-by tag'],
+  ['emails', 'Emails sent', 'Reviews and responses sent',
+   (t) => `${plural(t.sent, 'review')}, ${plural(t.responses, 'response')}`],
+  ['drafts', 'Drafts to send', 'Reviews with a Gmail draft waiting'],
+  ['not_drafted', 'Not drafted', 'Reviews with no Gmail draft'],
+  ['deleted', 'Drafts deleted', 'Review drafts deleted without sending'],
+  ['replies', 'Replies received',
+   'Replies to your reviews, and comments on patchwork which you responded to',
+   (t) => `to ${plural(t.replied, 'review')}`],
+  ['waiting', 'Replies waiting', 'Replies which need a response',
+   (t) => t.response_drafts && `and ${plural(t.response_drafts, 'response')} drafted`],
+  ['skipped', 'No response needed', 'Replies which need no response'],
+];
+
+// Charts of the weeks: title, description and the parts of each bar, as
+// [key, label, colour], stacked from the bottom
+const STATS_CHARTS = [
+  ['Patches reviewed', 'Patches with a review written', [['patches', 'patches', '--st-new']]],
+  ['Series reviewed', 'Series versions with a review written',
+   [['series', 'series', '--st-review']]],
+  ['Emails sent', 'Reviews and responses to replies sent',
+   [['sent', 'reviews', '--st-accepted'], ['responses', 'responses', '--st-changes']]],
+  ['Replies received', 'Replies to your reviews, by the day they were sent',
+   [['replies', 'replies', '--st-other']]],
+];
+
+// How far back the weeks go: number of weeks, label
+const STATS_SPANS = [[8, '8 weeks'], [26, '6 months'], [52, 'Year']];
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+// Create an SVG element, as h() does for HTML
+function svg(tag, attrs, ...kids) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v);
+  }
+  return addKids(el, kids);
+}
+
+// Round the top of a chart's scale up to 1, 2 or 5 times a power of ten
+function niceMax(max) {
+  if (max <= 1) return 1;
+  const power = 10 ** Math.floor(Math.log10(max));
+  return [1, 2, 5, 10].map((m) => m * power).find((top) => top >= max);
+}
+
+// A bar chart with a bar for each week, oldest on the left. Tapping a bar
+// shows its numbers in place of the total, and tapping it again goes back
+function weekChart(weeks, title, tip, parts) {
+  const width = 320;
+  const height = 72;
+  const gap = weeks.length > 26 ? 1 : 3;
+  const barWidth = (width - gap * (weeks.length - 1)) / weeks.length;
+  const count = (w) => parts.reduce((n, [key]) => n + w[key], 0);
+  const max = niceMax(Math.max(...weeks.map(count)));
+  // Marks on the scale, from the top: the halfway one only if it is whole
+  const marks = [max, max % 2 ? null : max / 2, 0].filter((n) => n !== null);
+  const total = weeks.reduce((n, w) => n + count(w), 0);
+  const describe = (vals) => parts.length === 1 ? String(vals[0][1])
+    : vals.map(([label, n]) => `${n} ${label}`).join(', ');
+  const readout = h('span', { class: 'readout' });
+  let chosen = null;
+  const choose = (num) => {
+    chosen = num === chosen ? null : num;
+    bars.forEach((bar, i) => bar.classList.toggle('dim', chosen !== null && i !== chosen));
+    readout.textContent = chosen === null
+      ? `${describe(parts.map(([key, label]) => [label,
+          weeks.reduce((n, w) => n + w[key], 0)]))} in all`
+      : `${weekLabel(weeks[chosen].start)}: ` +
+        describe(parts.map(([key, label]) => [label, weeks[chosen][key]]));
+  };
+  const bars = weeks.map((w, i) => {
+    const x = i * (barWidth + gap);
+    let y = height;
+    return svg('g', { class: 'bar', onclick: () => choose(i) },
+      svg('title', {}, `Week of ${weekLabel(w.start)}: ` +
+                       describe(parts.map(([key, label]) => [label, w[key]]))),
+      // The whole height can be tapped, even above a short bar
+      svg('rect', { x, y: 0, width: barWidth, height, fill: 'transparent' }),
+      parts.map(([key, , colour]) => {
+        const size = (w[key] / max) * height;
+        y -= size;
+        return size > 0 && svg('rect', { x, y, width: barWidth, height: size,
+                                         style: `fill: var(${colour})` });
+      }));
+  });
+  choose(null);
+  return h('div', { class: 'chart' },
+    h('div', { class: 'row' },
+      h('span', { class: 'grow name', title: tip }, title),
+      readout),
+    h('div', { class: 'plot' },
+      svg('svg', { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: 'none',
+                   role: 'img', 'aria-label': `${title}: ${total} in all` },
+        marks.slice(0, -1).map((n) => svg('line', {
+          x1: 0, x2: width, y1: height - (n / max) * height,
+          y2: height - (n / max) * height, class: 'grid' })),
+        svg('rect', { x: 0, y: height - 1, width, height: 1, class: 'base' }),
+        bars),
+      // The labels are placed by hand, so the widest one sets the width,
+      // which is the same for most charts, so that their bars line up
+      h('div', { class: 'scale', 'aria-hidden': 'true',
+                 style: `width: ${Math.max(3, String(max).length)}ch` }, marks.map((n) =>
+        h('span', { style: `top: ${100 - (n / max) * 100}%` }, String(n)))),
+      h('div', { class: 'axis' },
+        h('span', {}, weekLabel(weeks[0].start)),
+        h('span', {}, 'this week'))),
+    parts.length > 1 && h('div', { class: 'legend' }, parts.map(([, label, colour]) =>
+      h('span', {}, h('i', { style: `background: var(${colour})` }), label))));
+}
+
+// Show a Monday as a short date, e.g. '19 Oct'
+function weekLabel(start) {
+  return new Date(`${start}T12:00:00`).toLocaleDateString(undefined,
+    { day: 'numeric', month: 'short' });
+}
+
+async function viewStats() {
+  let weeks = +lsGet('patman-stats-weeks') || STATS_SPANS[0][0];
+  if (!STATS_SPANS.some(([n]) => n === weeks)) weeks = STATS_SPANS[0][0];
+  const st = await api(`stats?weeks=${weeks}`);
+  const t = st.totals;
+  const spans = h('div', { class: 'tabs' }, STATS_SPANS.map(([n, label]) => h('button', {
+    class: n === weeks ? 'on' : '', title: `Show the last ${label.toLowerCase()}`,
+    onclick: () => {
+      lsSet('patman-stats-weeks', String(n));
+      viewStats().catch((err) => showError(err, null));
+    } }, label)));
+  const totals = h('div', { class: 'card stats' },
+    STATS_TOTALS.flatMap(([key, label, tip, note]) => [
+      h('span', { class: 'label', title: tip }, label),
+      h('span', { class: 'num' }, String(t[key])),
+      h('span', { class: 'note' }, (note && note(t)) || '')]));
+  const charts = h('div', { class: 'card' }, STATS_CHARTS.map(([title, tip, parts]) =>
+    weekChart(st.weeks, title, tip, parts)));
+  setView('Stats', null, true,
+    h('div', { class: 'section' }, 'Totals'), totals,
+    h('div', { class: 'section' }, 'Each week'), spans, charts,
+    t.untimed ? h('div', { class: 'meta' },
+      `${plural(t.untimed, 'email')} sent before patman recorded the time ` +
+      'are only in the totals') : null);
+}
+
 // --- Sync ---
 
 const syncBtn = document.getElementById('sync');
@@ -2266,6 +2421,33 @@ async function cancelSync() {
 }
 
 syncBtn.addEventListener('click', () => { location.hash = '#/sync'; });
+
+// --- Menu ---
+
+// The menu at the top right holds pages which are not needed often enough
+// for a tab of their own
+const menuBtn = document.getElementById('menu');
+const menuList = document.getElementById('menu-list');
+
+function showMenu(show) {
+  menuList.hidden = !show;
+  menuBtn.setAttribute('aria-expanded', String(show));
+}
+
+menuBtn.addEventListener('click', (event) => {
+  event.stopPropagation();
+  showMenu(menuList.hidden);
+});
+document.addEventListener('click', (event) => {
+  if (!menuList.hidden && !menuList.contains(event.target)) showMenu(false);
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !menuList.hidden) {
+    showMenu(false);
+    menuBtn.focus();
+  }
+});
+menuList.addEventListener('click', () => showMenu(false));
 
 // Show a number of bytes in a short form, e.g. '1.2 MB'
 function fmtBytes(n) {
@@ -2491,7 +2673,8 @@ async function viewJob(id) {
 async function route() {
   const parts = (location.hash.replace(/^#\/?/, '') || 'series').split('/');
   const [page, id, ver] = parts;
-  const tab = page === 'sync' ? null : page;
+  // Pages from the header, rather than the tabs
+  const tab = ['sync', 'stats'].includes(page) ? null : page;
   try {
     if (page === 'series' && id) await viewSeries(+id, ver ? +ver : null);
     else if (page === 'reviews' && id) await viewReview(+id, ver ? +ver : null);
@@ -2510,6 +2693,7 @@ async function route() {
     else if (page === 'jobs') await viewJobs();
     else if (page === 'reviews') await viewReviewList();
     else if (page === 'todo') await viewTodo();
+    else if (page === 'stats') await viewStats();
     else if (page === 'sync') viewSync();
     else await viewSeriesList();
   } catch (err) {

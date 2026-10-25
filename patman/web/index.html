@@ -16,6 +16,12 @@
   <h1 id="title">patman</h1>
   <span id="project" title="The project which this server is for"></span>
   <button id="sync" title="Show the sync with patchwork, to follow, start or cancel one"><span class="dot"></span><span id="sync-text">sync</span></button>
+  <button id="menu" aria-label="More" title="More pages, such as the stats" aria-haspopup="menu" aria-expanded="false">
+    <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button>
+  <div id="menu-list" class="menu" role="menu" hidden>
+    <a href="#/stats" role="menuitem" title="How many reviews you have written and sent, and the replies">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Stats</a>
+  </div>
 </header>
 <main id="main"><div class="spinner">Loading…</div></main>
 <nav>

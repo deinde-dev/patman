@@ -613,6 +613,9 @@ received, by their Date, and the responses sent. Patman records when a
 review or response is sent from database v20, when it sends it or finds that
 you sent it, so emails sent earlier are only in the totals.
 
+The Stats page of ``patman serve``, in the menu at the top right, shows the
+same, with a chart of the weeks.
+
 Scanning for new versions
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -578,6 +578,30 @@ Series marked with ``patman workflow todo``, earliest first, each an object
 with ``series_id``, ``name``, ``desc``, ``timestamp`` (when it is due) and
 ``due`` (true if that time has passed).
 
+Stats
+-----
+
+``GET /api/stats``
+~~~~~~~~~~~~~~~~~~
+
+Counts of the reviews in the review database, as shown by ``patman review
+--stats``. The optional ``weeks`` query parameter gives how many weeks to
+count, including this one: 8 by default, and at most 52. The object has:
+
+- ``totals``: counts for all time: ``series`` and ``versions`` with a review,
+  reviews of ``patches`` and ``covers``, those which give a Reviewed-by tag
+  (``approved``), the reviews ``sent`` and ``responses`` sent, with ``emails``
+  being both, reviews with a Gmail draft waiting (``drafts``), with no draft
+  (``not_drafted``) and whose draft was ``deleted``, reviews which have a reply
+  (``replied``), the ``replies`` received, those ``waiting`` for a response,
+  those needing none (``skipped``), the responses with a draft waiting
+  (``response_drafts``), and the emails sent before patman recorded when
+  (``untimed``), which are not in the weeks
+- ``weeks``: one object for each week, oldest first, with the Monday which
+  starts it (``start``, e.g. ``2026-10-19``), and the ``series`` versions with
+  a review written, the ``patches`` reviewed, the reviews ``sent``, the
+  ``replies`` received and the ``responses`` sent that week
+
 Sync
 ----
 
