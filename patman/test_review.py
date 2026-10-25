@@ -2372,6 +2372,61 @@ class TestReview(CseriesTester):
         self.assertEqual(1, len(prev))
         self.assertEqual('v1 body', prev[0].body)
 
+    def test_review_stats(self):
+        """Test --stats counts the reviews, emails and replies"""
+        cser = self.get_cser()
+        db = cser.db
+        sid = db.series_add('pw-1-review', 'foo bar')
+        db.series_set_source(sid, 'review')
+        svid = db.ser_ver_add(sid, 1, link='1')
+        today = datetime.now().date()
+        old = (today - timedelta(weeks=20)).isoformat()
+        rev1 = db.review_add(svid, 1, 'body 1', True, f'{today}T08:00:00')
+        db.review_add(svid, 2, 'body 2', False, f'{today}T08:00:00')
+        db.review_add(svid, 0, 'cover', False, f'{old}T08:00:00')
+        db.review_set_sent(rev1, 'body 1')
+        db.review_set_replied(rev1)
+        reply = db.reply_add(rev1, 'g1', 'm1', '', 'Fred <f@b>', '', '',
+                             'Re: x', 'date', 'body', f'{today}T10:00:00')
+        db.reply_add(rev1, 'g2', 'm2', '', 'Fred <f@b>', '', '', 'Re: x',
+                     'date', 'body', f'{today}T11:00:00')
+        db.reply_set_response(reply, 'thanks', database.REPLY_SENT)
+        cser.commit()
+
+        with terminal.capture() as (out, _):
+            self.run_review('--stats', '2')
+        lines = out.getvalue().splitlines()
+        self.assertEqual('Series reviewed          1  (1 versions)', lines[0])
+        self.assertEqual('Patches reviewed         2', lines[1])
+        self.assertEqual('Cover letters            1', lines[2])
+        self.assertEqual('Reviewed-by given        1', lines[3])
+        self.assertEqual(
+            'Emails sent              2  (1 reviews, 1 responses)', lines[4])
+        self.assertEqual('Not drafted              2', lines[6])
+        self.assertEqual('Replies received         2  (to 1 reviews)',
+                         lines[8])
+        self.assertEqual('Replies waiting          1', lines[9])
+
+        # The old cover-letter review is only in the totals
+        monday = today - timedelta(days=today.weekday())
+        self.assertEqual(
+            'Week of          Series    Patches       Sent    Replies'
+            '  Responses', lines[12])
+        self.assertEqual(
+            f'{monday - timedelta(weeks=1)}  ' + '          0' * 5, lines[13])
+        self.assertEqual(
+            f'{monday}            1          2          1          2'
+            '          1', lines[14])
+        self.assertEqual(15, len(lines))
+
+        # A reply counts on the day it was sent, not when it was recorded
+        self.assertEqual('2026-10-19', review.stats._reply_day(
+            'Mon, 19 Oct 2026 12:00:00 +0000', '2026-10-21T10:00:00'))
+        self.assertEqual('2026-10-19', review.stats._reply_day(
+            '2026-10-19T12:00:00', '2026-10-21T10:00:00'))
+        self.assertEqual('2026-10-21', review.stats._reply_day(
+            'date', '2026-10-21T10:00:00'))
+
     def test_review_relink(self):
         """Test --relink merges version records split by the old bug"""
         cser = self.get_cser()

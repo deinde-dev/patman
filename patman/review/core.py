@@ -41,6 +41,7 @@ from patman.review import lookup
 from patman.review import prompts
 from patman.review import replies
 from patman.review import scan
+from patman.review import stats
 from patman.review import stored
 from patman.review import voice
 
@@ -946,7 +947,7 @@ def _list_models():
 def do_review(args, pwork, cser, own_db=None):
     """Run the review command
 
-    Dispatches to learn-voice, sync, scan, relink, or the main review
+    Dispatches to learn-voice, sync, scan, relink, stats, or the main review
     flow which fetches, applies, reviews and optionally drafts.
 
     Args:
@@ -977,6 +978,10 @@ def do_review(args, pwork, cser, own_db=None):
 
     if args.relink:
         return _do_relink(args, cser)
+
+    if getattr(args, 'stats', 0):
+        stats.show_stats(cser.db, args.stats)
+        return 0
 
     if args.scan:
         return scan.do_scan(args, pwork, cser)

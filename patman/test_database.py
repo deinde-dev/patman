@@ -321,6 +321,57 @@ class TestDatabase(CseriesTester):
                          db.series_get_max_reviewed_versions()])
         self.assertIn((svid, rev, 3), db.series_get_all_max_versions())
 
+    def test_stats(self):
+        """The reviews, emails and replies are counted, with their days"""
+        db = self.get_database().db
+        sid = self.add_db_series(db, 'rev', [1, 2], review=True)
+        svid1, svid2 = db.ser_ver_get_svids(sid)
+        sent = db.review_get_for_version(svid1)[0].idnum
+        replied = db.review_add(svid2, 0, 'cover', False,
+                                '2026-10-20T08:00:00')
+
+        # Sending records the time, and sending again keeps the first
+        with mock.patch.object(times, 'now_str',
+                               return_value='2026-10-20 09:00:00'):
+            db.review_set_sent(sent, 'sent body')
+            db.review_set_sent(replied, 'cover body')
+        with mock.patch.object(times, 'now_str',
+                               return_value='2026-10-22 09:00:00'):
+            db.review_set_sent(replied, 'cover body')
+        db.review_set_replied(replied)
+
+        # Only a response which is sent has a time
+        rep1 = db.reply_add(replied, 'g1', 'm1', '', 'Fred <f@b>', '', '',
+                            'Re: x', 'date', 'body', '2026-10-21T10:00:00')
+        rep2 = db.reply_add(replied, 'g2', 'm2', '', 'Fred <f@b>', '', '',
+                            'Re: x', 'date', 'body', '2026-10-21T11:00:00')
+        db.reply_add(replied, 'g3', 'm3', '', 'Fred <f@b>', '', '',
+                     'Re: x', 'date', 'body', '2026-10-01T11:00:00')
+        with mock.patch.object(times, 'now_str',
+                               return_value='2026-10-23 09:00:00'):
+            db.reply_set_response(rep1, 'thanks', database.REPLY_SUGGESTED)
+            db.reply_set_status(rep2, database.REPLY_SKIP)
+            db.reply_set_response(rep1, 'thanks', database.REPLY_SENT)
+
+        self.assertEqual(
+            {'series': 1, 'versions': 2, 'patches': 2, 'covers': 1,
+             'approved': 2,
+             'status': {'new': 1, 'sent': 1, 'replied': 1}},
+            db.stats_get_reviews())
+        self.assertEqual({'new': 1, 'sent': 1, 'skip': 1},
+                         db.stats_get_replies())
+        self.assertEqual(0, db.stats_get_sent_untimed())
+        db.execute('UPDATE review SET sent_time = NULL WHERE id = ?', (sent,))
+        self.assertEqual(1, db.stats_get_sent_untimed())
+
+        self.assertEqual(
+            {'reviews': [('2026-10-20', svid2, 0)],
+             'sent': ['2026-10-20'],
+             'replies': [('date', '2026-10-21T10:00:00'),
+                         ('date', '2026-10-21T11:00:00')],
+             'responses': ['2026-10-23']},
+            db.stats_get_dates('2026-10-19'))
+
     def test_migrate(self):
         """Test migration to later schema versions"""
         db = database.Database(f'{self.tmpdir}/.patman.db')
@@ -345,7 +396,7 @@ class TestDatabase(CseriesTester):
                 db.execute("INSERT INTO traffic (hour, url, requests, bytes) "
                            "VALUES ('2026-10-18 09', 'https://pw', 5, 100)")
                 db.commit()
-        self.assertEqual(19, database.LATEST)
+        self.assertEqual(20, database.LATEST)
         self.assertEqual({('https://pw', ''): (5, 100)},
                          db.traffic_get_kinds('2026-10-18 00'))
 

@@ -20,9 +20,10 @@ import sqlite3
 from u_boot_pylib import tools
 from u_boot_pylib import tout
 from patman.series import Series
+from patman import times
 
 # Schema version (version 0 means there is no database yet)
-LATEST = 19
+LATEST = 20
 
 # Information about a review record
 # Review status values
@@ -99,6 +100,18 @@ SerVer = namedtuple(
 Pcommit = namedtuple(
     'PCOMMIT',
     'idnum,seq,subject,svid,change_id,state,patch_id,num_comments')
+
+
+def _sent_time(status):
+    """Get the time to record as the sending of a response, if it is sent
+
+    Args:
+        status (str): New status of the reply, e.g. REPLY_SENT
+
+    Return:
+        str or None: Current time if the response is sent, else None
+    """
+    return times.now_str() if status == REPLY_SENT else None
 
 
 class Database:  # pylint:disable=R0904
@@ -373,6 +386,11 @@ class Database:  # pylint:disable=R0904
             'CREATE TABLE inbox (id INTEGER PRIMARY KEY AUTOINCREMENT, '
             'upstream TEXT, link TEXT, name TEXT, timestamp TEXT, '
             'UNIQUE (upstream, link))')
+
+    def _migrate_to_v20(self):
+        """Record when each review and response is sent, for the stats"""
+        self.cur.execute('ALTER TABLE review ADD COLUMN sent_time')
+        self.cur.execute('ALTER TABLE reply ADD COLUMN sent_time')
 
     # pylint: disable=R0912
     def migrate_to(self, dest_version):
@@ -1754,9 +1772,10 @@ class Database:  # pylint:disable=R0904
         """
         self.execute(
             'UPDATE review SET body = ?, draft_id = NULL, status = ?, '
-            'gmail_msg_id = ?, gmail_thread_id = ? WHERE id = ?',
+            'gmail_msg_id = ?, gmail_thread_id = ?, '
+            'sent_time = COALESCE(sent_time, ?) WHERE id = ?',
             (body, REVIEW_SENT, gmail_msg_id, gmail_thread_id,
-             review_id))
+             times.now_str(), review_id))
 
     def review_set_body(self, review_id, body, approved):
         """Change the text of a review which has not been sent
@@ -2062,24 +2081,116 @@ class Database:  # pylint:disable=R0904
     def reply_set_response(self, reply_id, response, status):
         """Set our response to a reply
 
+        The first time that the status becomes REPLY_SENT, this records when.
+
         Args:
             reply_id (int): Reply record ID
             response (str or None): Text of the response
             status (str): New status, e.g. REPLY_SUGGESTED
         """
-        self.execute('UPDATE reply SET response = ?, status = ? WHERE id = ?',
-                     (response, status, reply_id))
+        self.execute('UPDATE reply SET response = ?, status = ?, '
+                     'sent_time = COALESCE(sent_time, ?) WHERE id = ?',
+                     (response, status, _sent_time(status), reply_id))
 
     def reply_set_status(self, reply_id, status, draft_id=None):
         """Set the status of a reply, and the draft of our response
+
+        The first time that the status becomes REPLY_SENT, this records when.
 
         Args:
             reply_id (int): Reply record ID
             status (str): New status
             draft_id (str or None): Gmail draft ID of the response, if any
         """
-        self.execute('UPDATE reply SET status = ?, draft_id = ? WHERE id = ?',
-                     (status, draft_id, reply_id))
+        self.execute('UPDATE reply SET status = ?, draft_id = ?, '
+                     'sent_time = COALESCE(sent_time, ?) WHERE id = ?',
+                     (status, draft_id, _sent_time(status), reply_id))
+
+    def stats_get_reviews(self):
+        """Count the reviews, by what they cover and how far they have got
+
+        Return:
+            dict:
+                series (int): Series with a review
+                versions (int): Versions of series with a review
+                patches (int): Reviews of patches
+                covers (int): Reviews of cover letters
+                approved (int): Reviews which give a Reviewed-by tag
+                status (dict): Number of reviews with each REVIEW_... status
+        """
+        series, versions, patches, covers, approved = self.execute(
+            'SELECT COUNT(DISTINCT sv.series_id), COUNT(DISTINCT r.svid), '
+            'COUNT(CASE WHEN r.seq > 0 THEN 1 END), '
+            'COUNT(CASE WHEN r.seq = 0 THEN 1 END), '
+            'COUNT(CASE WHEN r.approved THEN 1 END) '
+            'FROM review r JOIN ser_ver sv ON sv.id = r.svid').fetchone()
+        res = self.execute('SELECT status, COUNT(*) FROM review '
+                           'GROUP BY status')
+        return {'series': series, 'versions': versions, 'patches': patches,
+                'covers': covers, 'approved': approved,
+                'status': dict(res.fetchall())}
+
+    def stats_get_replies(self):
+        """Count the replies to reviews, and comments, by their status
+
+        Return:
+            dict: Number of replies with each REPLY_... status
+        """
+        res = self.execute('SELECT status, COUNT(*) FROM reply '
+                           'GROUP BY status')
+        return dict(res.fetchall())
+
+    def stats_get_sent_untimed(self):
+        """Count the reviews and responses sent before times were recorded
+
+        Return:
+            int: Number of reviews and responses sent with no sent_time
+        """
+        done = ', '.join(['?'] * len(REVIEW_DONE))
+        reviews = self.execute(
+            f'SELECT COUNT(*) FROM review WHERE status IN ({done}) '
+            'AND sent_time IS NULL', REVIEW_DONE).fetchone()[0]
+        responses = self.execute(
+            'SELECT COUNT(*) FROM reply WHERE status = ? '
+            'AND sent_time IS NULL', (REPLY_SENT,)).fetchone()[0]
+        return reviews + responses
+
+    def stats_get_dates(self, since):
+        """Get the days on which things happened, from a day onwards
+
+        Args:
+            since (str): First day to include, e.g. '2026-10-19'
+
+        Return:
+            dict:
+                reviews (list of tuple): For each review written:
+                    str: Day, e.g. '2026-10-19'
+                    int: ser_ver ID of the version reviewed
+                    int: Patch number, 0 for the cover letter
+                sent (list of str): Day on which each review was sent
+                replies (list of tuple): For each reply or comment recorded
+                    from that day:
+                    str: Date header, e.g. 'Mon, 19 Oct 2026 12:20:45 -0600'
+                    str: When it was recorded, e.g. '2026-10-19T12:30:00'
+                responses (list of str): Day on which each response was
+                    sent
+        """
+        def days(query):
+            return [row[0] for row in self.execute(query, (since,))]
+
+        reviews = self.execute(
+            'SELECT substr(timestamp, 1, 10), svid, seq FROM review '
+            'WHERE timestamp >= ?', (since,)).fetchall()
+        return {
+            'reviews': reviews,
+            'sent': days('SELECT substr(sent_time, 1, 10) FROM review '
+                         'WHERE sent_time >= ?'),
+            'replies': self.execute(
+                'SELECT date, timestamp FROM reply WHERE timestamp >= ?',
+                (since,)).fetchall(),
+            'responses': days('SELECT substr(sent_time, 1, 10) FROM reply '
+                              'WHERE sent_time >= ?'),
+            }
 
     def series_find_by_link(self, link):
         """Find a series by its patchwork link

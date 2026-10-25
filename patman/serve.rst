@@ -20,6 +20,12 @@ page has these tabs:
   with their output
 - **Todo**: series marked with ``patman workflow todo``, due ones first
 
+The menu at the top right has pages which are needed less often:
+
+- **Stats**: how many series and patches you have reviewed, the emails sent
+  and the replies, in all and as a chart of each recent week, as from
+  ``patman review --stats``. Tap a bar to see the numbers for that week
+
 The page uses the JSON API described in
 :doc:`The patman serve protocol </serve-protocol>`, which other tools can use
 too.

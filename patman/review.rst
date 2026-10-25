@@ -578,6 +578,44 @@ The response can also be edited, drafted and sent from the Reviews tab of
 ``patman serve``: tap 'Send' under it, or 'Edit response' then 'Save and
 send'. Both need a second tap to confirm.
 
+Stats
+~~~~~
+
+``--stats`` counts the reviews in the database: the series and patches
+reviewed, the Reviewed-by tags given, the emails sent, the drafts still
+waiting and the replies, along with how many of each happened in each of
+the last eight weeks::
+
+    patman review --stats
+
+    Series reviewed        370  (543 versions)
+    Patches reviewed      1770
+    Cover letters          162
+    Reviewed-by given      767
+    Emails sent            692  (643 reviews, 49 responses)
+    Drafts to send         973
+    Not drafted             27
+    Drafts deleted         289
+    Replies received       207  (to 123 reviews)
+    Replies waiting        150
+    No response needed       8
+
+    Week of          Series    Patches       Sent    Replies  Responses
+    2026-08-31           13         27          0          3          0
+    ...
+    2026-10-19           34        137          0          4          0
+
+Give a number to show more weeks, e.g. ``--stats 26`` for six months. The
+emails sent are the reviews and responses to replies, since each review of a
+patch goes as an email of its own. A week counts the series versions which
+had a review written, the patches reviewed, the reviews sent, the replies
+received, by their Date, and the responses sent. Patman records when a
+review or response is sent from database v20, when it sends it or finds that
+you sent it, so emails sent earlier are only in the totals.
+
+The Stats page of ``patman serve``, in the menu at the top right, shows the
+same, with a chart of the weeks.
+
 Scanning for new versions
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 

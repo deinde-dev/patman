@@ -402,6 +402,35 @@ class TestWebServer(unittest.TestCase, TestCommon):
                          [(t['name'], t['due']) for t in data])
         self.assertEqual(ser_id, data[0]['series_id'])
 
+    def test_stats(self):
+        """The server counts the reviews, emails and replies"""
+        _, svids = self.add_series(
+            'rev', 'Somebody else', {1: [('a', 'new', 5, 0)]}, ups='us',
+            source='review')
+        db = self.cser.db
+        rid = db.review_add(svids[1], 1, 'Looks good', True,
+                            '2026-10-01 10:00:00')
+        db.review_set_sent(rid, 'Looks good')
+        db.commit()
+        srv = self.make_server()
+
+        status, data = self.call(srv, 'GET', '/api/stats')
+        self.assertEqual(200, status)
+        totals = data['totals']
+        self.assertEqual((1, 1, 1, 0), (totals['series'], totals['patches'],
+                                        totals['emails'], totals['untimed']))
+        self.assertEqual(8, len(data['weeks']))
+        self.assertEqual(1, data['weeks'][-1]['sent'])
+
+        # The number of weeks can be chosen, up to a year
+        _, data = self.call(srv, 'GET', '/api/stats?weeks=3')
+        self.assertEqual(3, len(data['weeks']))
+        _, data = self.call(srv, 'GET', '/api/stats?weeks=1000')
+        self.assertEqual(52, len(data['weeks']))
+        status, data = self.call(srv, 'GET', '/api/stats?weeks=x')
+        self.assertEqual(400, status)
+        self.assertIn('weeks', data['error'])
+
     def test_version(self):
         """The server gives the version of patman which it runs"""
         with mock.patch.object(server.info, 'get_version',

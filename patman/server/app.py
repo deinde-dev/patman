@@ -35,6 +35,7 @@ from patman.patchwork import Patchwork
 from patman.review import apply
 from patman.review import checkout
 from patman.review import lookup
+from patman.review import stats
 from patman.server import info
 from patman.server import jobs
 from patman.server import params
@@ -49,6 +50,9 @@ JOBS_FNAME = '.patman-serve-jobs.json'
 
 # Number of series in each page of the inbox
 INBOX_PAGE = 50
+
+# Most weeks which the stats count, a year
+MAX_STATS_WEEKS = 52
 
 # Seconds for which the inbox read from patchwork is kept, so that showing it
 # again does not read it again
@@ -638,6 +642,26 @@ class Server(jobs.JobRunner):
             web.Response: List of todos, earliest first
         """
         return web.json_response(info.get_todo_list(self.cser))
+
+    async def _stats(self, request):
+        """Handle 'GET /api/stats': count the reviews, emails and replies
+
+        The 'weeks' query parameter gives how many weeks to count, including
+        this one, at most MAX_STATS_WEEKS.
+
+        Args:
+            request (web.Request): Request
+
+        Return:
+            web.Response: Object with the 'totals' and the 'weeks', as from
+                stats.get_stats()
+
+        Raises:
+            BadRequest: The number of weeks is invalid
+        """
+        weeks = params.get_int(request.query, 'weeks') or stats.WEEKS
+        return web.json_response(
+            stats.get_stats(self.rcser.db, min(weeks, MAX_STATS_WEEKS)))
 
     async def _version(self, _request):
         """Handle 'GET /api/version': give patman's version and the project
@@ -1916,6 +1940,7 @@ class Server(jobs.JobRunner):
         app.router.add_get('/api/reviews', self._review_list)
         app.router.add_get(r'/api/reviews/{idnum:\d+}', self._review_detail)
         app.router.add_get('/api/todo', self._todo_list)
+        app.router.add_get('/api/stats', self._stats)
         app.router.add_get('/api/version', self._version)
         item = r'{kind:patch|cover}/{item_id:' + ITEM_ID + '}'
         app.router.add_get('/api/comments/' + item, self._comments)
