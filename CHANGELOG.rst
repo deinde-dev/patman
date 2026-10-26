@@ -49,6 +49,9 @@ Fixed
   patch, matched by subject, rather than of the patch with the same number,
   so that a patch added or moved between versions does not give the later
   patches the earlier reviews of others.
+- ``patman review --send`` and ``--send-reply`` record a draft which was sent
+  already from Gmail as sent, with the text which went out, rather than
+  failing with "Message not a draft".
 
 0.6.0 - 2026-10-24
 ------------------

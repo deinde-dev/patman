@@ -1163,6 +1163,20 @@ class TestReview(CseriesTester):
         send.assert_called_once_with(draft_svc, 'd4')
         self.assertEqual('suggested', db.reply_get(reply.idnum).status)
 
+        # A draft which was sent from Gmail is recorded as sent, with what
+        # went out
+        db.reply_set_response(reply.idnum, 'Again', database.REPLY_SUGGESTED)
+        db.reply_set_status(reply.idnum, database.REPLY_DRAFT, 'd5')
+        sent = gmail.AlreadySent('From Gmail', 'm5', 't5')
+        with mock.patch.object(gmail, 'send_draft', side_effect=sent), \
+                terminal.capture() as (out, _):
+            review.replies._send_response(draft_svc, ctx, reply.idnum)
+        self.assertIn('the response was sent already, from Gmail; recorded it '
+                      'as sent', out.getvalue())
+        reply = db.reply_get(reply.idnum)
+        self.assertEqual(('sent', 'From Gmail'),
+                         (reply.status, reply.response))
+
         # Deleting the review deletes its replies
         db.review_delete_for_version(svid)
         self.assertEqual([], db.reply_get_by_status(['skip']))
@@ -1602,6 +1616,8 @@ class TestReview(CseriesTester):
         def send(_service, draft_id):
             if draft_id == 'd1':
                 return None
+            if draft_id == 'd0':
+                raise gmail.AlreadySent('Sent from Gmail', 'm-gmail', 't0')
             return f'Edited {draft_id}', f'm-{draft_id}', 't1'
 
         def run(*argv):
@@ -1623,11 +1639,18 @@ class TestReview(CseriesTester):
         self.assertIn('would send the review of the cover letter', out)
         self.assertIn('would send the review of patch 2', out)
 
-        # The cover letter goes first; a draft which has gone is reported
+        # The cover letter goes first; a draft which has gone is reported, and
+        # one which was sent from Gmail is recorded as sent
         ret, sent, out = run()
         self.assertEqual((1, ['d0', 'd1', 'd2']), (ret, sent))
         self.assertIn('The draft of the review of patch 1 has gone', out)
-        self.assertIn('Sent 2 of 3 review(s)', out)
+        self.assertIn('The review of the cover letter was sent already, from '
+                      'Gmail; recorded it as sent', out)
+        self.assertIn('Sent 1 of 3 review(s), 1 sent already', out)
+        rev = db.review_get(ids[0])
+        self.assertEqual(('sent', 'Sent from Gmail', 'm-gmail', 't0'),
+                         (rev.status, rev.body, rev.gmail_msg_id,
+                          rev.gmail_thread_id))
         rev = db.review_get(ids[2])
         self.assertEqual(('sent', 'Edited d2', 'm-d2', 't1'),
                          (rev.status, rev.body, rev.gmail_msg_id,
@@ -1791,6 +1814,30 @@ class TestReview(CseriesTester):
         self.assertEqual(('Hi Fred', 'm1', 't1'),
                          gmail.send_draft(service, 'd1'))
         drafts.send.assert_called_once_with(userId='me', body={'id': 'd1'})
+
+        # A draft which was sent from Gmail is no longer a draft, so its
+        # message is given, as it was sent
+        from googleapiclient.errors import HttpError  # pylint: disable=C0415
+        drafts.get.return_value.execute.return_value['message']['id'] = 'm2'
+        drafts.send.return_value.execute.side_effect = HttpError(
+            mock.Mock(status=400, reason='Bad Request'),
+            b'{"error": {"code": 400, "message": "Message not a draft"}}')
+        messages = service.users.return_value.messages.return_value
+        sent = base64.urlsafe_b64encode(b'Hi Fred, as sent').decode()
+        messages.get.return_value.execute.return_value = {
+            'id': 'm2', 'threadId': 't2', 'labelIds': ['SENT'],
+            'payload': {'mimeType': 'text/plain', 'body': {'data': sent}}}
+        with self.assertRaises(gmail.AlreadySent) as exc:
+            gmail.send_draft(service, 'd1')
+        self.assertEqual(('Hi Fred, as sent', 'm2', 't2'),
+                         (exc.exception.body, exc.exception.msg_id,
+                          exc.exception.thread_id))
+        messages.get.assert_called_with(userId='me', id='m2', format='full')
+
+        # Any other failure is not taken to mean that it was sent
+        messages.get.return_value.execute.return_value['labelIds'] = ['DRAFT']
+        with self.assertRaises(HttpError):
+            gmail.send_draft(service, 'd1')
 
     def test_review_find_base(self):
         """The base commit or branch is found in a cover letter"""
