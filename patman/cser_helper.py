@@ -23,10 +23,12 @@ from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
 from u_boot_pylib import tout
 
+from patman import lorelist
 from patman import patchstream
 from patman.database import Database, Pcommit, SerVer
 from patman import patchwork
 from patman.series import Series
+from patman import settings
 from patman import status
 from patman import times
 from patman import traffic
@@ -493,6 +495,55 @@ class CseriesHelper:
         if ser:
             return ser.upstream
         return None
+
+    def get_series_to(self, name):
+        """Get the addresses which a series is sent to
+
+        These come from its Series-to tags, or the To address of its upstream
+        if it has none, with any aliases looked up
+
+        Args:
+            name (str): Name of series, or None to use current branch
+
+        Return:
+            list of str: Addresses, e.g.
+                ['Devicetree Compiler <devicetree-compiler@vger.kernel.org>']
+        """
+        ser = self._get_patches(name, None)[1]
+        to_list = ser.get('to') or []
+        if not to_list:
+            ups = self.get_series_upstream(name)
+            send_settings = ups and self.db.upstream_get_send_settings(ups)
+            if send_settings and send_settings[1]:
+                to_list = [send_settings[1]]
+        return gitutil.build_email_list(to_list, settings.alias,
+                                        warn_on_error=False)
+
+    def find_lore_list(self, name):
+        """Find the list on lore which a series is sent to
+
+        Args:
+            name (str): Name of series, or None to use current branch
+
+        Return:
+            str or None: URL of the list, e.g.
+                'https://lore.kernel.org/devicetree-compiler', or None if the
+                series is not known or lore has none of its addresses
+        """
+        try:
+            addrs = self.get_series_to(name)
+        except ValueError:
+            return None
+
+        async def find():
+            async with aiohttp.ClientSession() as client:
+                for addr in addrs:
+                    url = await lorelist.find_list(client, addr)
+                    if url:
+                        return url
+            return None
+
+        return self.loop.run_until_complete(find())
 
     def get_series_by_name(self, name, include_archived=False):
         """Get a Series object from the database by name

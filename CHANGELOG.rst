@@ -19,8 +19,9 @@ Added
   schema v20.
 - ``patman series autolink``, ``autolink-all`` and ``series send`` find a
   series on the upstream's list on lore when the upstream has a lore URL and
-  no patchwork URL, as for dtc. The link is the Message-ID of the cover letter,
-  or of the first patch.
+  no patchwork URL, as for dtc. With neither, and no patchwork project, they
+  use the list on lore which the series is sent to. The link is the Message-ID
+  of the cover letter, or of the first patch.
 
 Fixed
 ~~~~~

@@ -38,6 +38,19 @@ from patman import pwcache
 # Prefix of the ID of a patch or cover letter read from lore
 ID_PREFIX = 'lore:'
 
+# Where the lists are, on lore
+LORE_BASE = 'https://lore.kernel.org'
+
+# Path of the config of a list, which gives its name and addresses
+LIST_CONFIG = '_/text/config/raw'
+
+# The name of a list in its config, e.g. '[publicinbox "lkml"]'
+RE_INBOX = re.compile(r'^\[publicinbox "([^"]+)"\]', re.M)
+
+# An address of a list in its config, e.g.
+# 'address = linux-kernel@vger.kernel.org'
+RE_ADDRESS = re.compile(r'^\s*address\s*=\s*(\S+)', re.M)
+
 # Search which gives the patches and cover letters sent to a list, leaving out
 # the replies to them
 FEED_QUERY = 's:PATCH AND NOT s:Re'
@@ -192,6 +205,56 @@ def parse_feed(data):
 RE_LORE_TERM = re.compile(
     r'(?:^|[\s(])(?:s|d|dt|rt|b|bs|nq|f|t|c|a|tc|l|m|dfn|dfa|dfb|dfhh|'
     r'dfctx|dfpre|dfpost|dfblob|patchid):\S')
+
+
+def parse_list_config(data):
+    """Get the name and addresses of a list, from its config on lore
+
+    Args:
+        data (bytes): Config, from LIST_CONFIG within the list
+
+    Returns:
+        tuple:
+            str or None: Name of the list on lore, e.g. 'lkml'
+            list of str: Addresses of the list, in lower case, e.g.
+                ['linux-kernel@vger.kernel.org']
+    """
+    text = data.decode('utf-8', 'replace')
+    match = RE_INBOX.search(text)
+    return (match.group(1) if match else None,
+            [addr.lower() for addr in RE_ADDRESS.findall(text)])
+
+
+async def find_list(client, address, base=LORE_BASE):
+    """Find the list on lore which has an address
+
+    A list is usually named for the part of its address before the '@', e.g.
+    'devicetree-compiler' for devicetree-compiler@vger.kernel.org, though lore
+    may know it by another name, e.g. 'lkml' for linux-kernel@vger.kernel.org.
+    The list's config gives its name and addresses, so another list with that
+    name is not taken for it.
+
+    Args:
+        client (aiohttp.ClientSession): Session to use
+        address (str): Address, e.g.
+            'Devicetree Compiler <devicetree-compiler@vger.kernel.org>'
+        base (str): Where the lists are
+
+    Returns:
+        str or None: URL of the list, e.g.
+            'https://lore.kernel.org/devicetree-compiler', or None if lore does
+            not have it
+    """
+    addr = email.utils.parseaddr(address)[1].lower()
+    local = addr.partition('@')[0]
+    if '@' not in addr or not local:
+        return None
+    data = await lore.Lore(f'{base}/{local}').read(client, LIST_CONFIG,
+                                                   kind='search')
+    if not data:
+        return None
+    name, addrs = parse_list_config(data)
+    return f'{base}/{name}' if name and addr in addrs else None
 
 
 def search_query(text):

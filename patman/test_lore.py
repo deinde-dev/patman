@@ -694,6 +694,46 @@ class TestLore(unittest.TestCase):
             self.assertEqual([], run(llist.query_series(client, 'dm: Tidy up')))
         self.assertEqual(1, len(client.urls))
 
+    def test_find_list(self):
+        """The list which has an address can be found on lore"""
+        def config(name, addr):
+            return (f'; Example public-inbox config snippet\n'
+                    f'[publicinbox "{name}"]\n'
+                    f'\tinboxdir = /path/to/top-level-inbox\n'
+                    f'\taddress = {addr}\n'
+                    f'\tlistid = {name}.example\n').encode()
+
+        self.assertEqual(('lkml', ['linux-kernel@vger.kernel.org']),
+                         lorelist.parse_list_config(
+                             config('lkml', 'Linux-Kernel@vger.kernel.org')))
+        self.assertEqual((None, []), lorelist.parse_list_config(b'junk'))
+
+        def find(addr, *responses):
+            client = Client(*responses)
+            url = run(lorelist.find_list(client, addr, base='https://lore'))
+            return url, client.urls
+
+        # The list is named for the address, or lore may know it by another
+        # name
+        self.assertEqual(
+            ('https://lore/dtc', ['https://lore/dtc/_/text/config/raw']),
+            find('DTC <dtc@vger.kernel.org>',
+                 Response(200, config('dtc', 'dtc@vger.kernel.org'))))
+        self.assertEqual(
+            'https://lore/lkml',
+            find('linux-kernel@vger.kernel.org', Response(
+                200, config('lkml', 'linux-kernel@vger.kernel.org')))[0])
+
+        # A list with that name but another address is not the one
+        self.assertIsNone(find('dtc@example.com', Response(
+            200, config('dtc', 'dtc@vger.kernel.org')))[0])
+
+        # Lore does not have the list
+        self.assertIsNone(find('none@example.com', Response(404))[0])
+
+        # Something which is not an address is not looked up
+        self.assertEqual((None, []), find('u-boot'))
+
     def test_strip_signature(self):
         """The signature at the end of a patch is not part of its diff"""
         diff = '@@ -1,2 +1 @@\n-a\n+b\n'

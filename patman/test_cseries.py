@@ -22,6 +22,7 @@ from patman import cser_helper
 from patman import interpreter
 from patman import lorelist
 from patman import review
+from patman import settings
 from patman import cseries
 from patman.database import Pcommit
 from patman import patchstream
@@ -1150,6 +1151,53 @@ class TestCseries(CseriesTester):
         with self.assertRaises(ValueError) as exc:
             run('status', 'status')
         self.assertIn('No patchwork URL found', str(exc.exception))
+
+    def test_series_lore_from_to(self):
+        """Test using the list which a series is sent to, for an upstream with
+        no patchwork or lore URL"""
+        cser = self.get_cser()
+        cser.db.upstream_add('bare', 'https://bare.example.com')
+        cser.db.commit()
+        with terminal.capture():
+            cser.add('second', allow_unmarked=True, ups='bare')
+
+        # The Series-to tag gives the address, with its alias looked up
+        uboot = 'U-Boot <u-boot@lists.denx.de>'
+        with mock.patch.object(settings, 'alias', {'u-boot': [uboot]}):
+            self.assertEqual([uboot], cser.get_series_to('second'))
+
+            async def find_list(_client, addr):
+                return ('https://lore.kernel.org/u-boot' if addr == uboot
+                        else None)
+
+            with mock.patch.object(lorelist, 'find_list', find_list):
+                self.assertEqual('https://lore.kernel.org/u-boot',
+                                 cser.find_lore_list('second'))
+                self.assertIsNone(cser.find_lore_list('unknown'))
+        self.db_close()
+
+        def run(found):
+            args = Namespace(subcmd='autolink', series='second', version=None,
+                             patchwork_url=None, update=False,
+                             autolink_wait=0)
+            with mock.patch.object(cseries.Cseries, 'find_lore_list',
+                                   return_value=found), \
+                    mock.patch.object(cseries.Cseries, 'link_auto') as meth, \
+                    terminal.capture() as (out, _):
+                control.do_series(args, test_db=self.tmpdir)
+            return meth.call_args.args[0], out.getvalue()
+
+        pwork, out = run('https://lore.kernel.org/u-boot')
+        self.assertIsInstance(pwork, lorelist.LoreList)
+        self.assertEqual('https://lore.kernel.org/u-boot', pwork.url)
+        self.assertIn('Using the list which the series is sent to, on lore: '
+                      'https://lore.kernel.org/u-boot', out)
+
+        # With no list on lore, the error says how to give one
+        with self.assertRaises(ValueError) as exc:
+            run(None)
+        self.assertIn("'patman upstream set bare -l <url>'",
+                      str(exc.exception))
 
     def test_series_autolink_extra(self):
         """Test command-line operation

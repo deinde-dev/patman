@@ -321,12 +321,18 @@ A list without patchwork
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 Some projects, such as dtc, have a mailing list but no patchwork project.
-Give such an upstream its list on lore, and no patchwork URL::
+``patman series send`` and ``patman series autolink`` then find the series on
+lore, by the title of its cover letter (or its first patch) and its version.
+
+The list is the upstream's list on lore, if it has one and no patchwork URL::
 
     patman upstream set us -l https://lore.kernel.org/devicetree-compiler
 
-``patman series send`` and ``patman series autolink`` then find the series on
-lore, by the title of its cover letter (or its first patch) and its version.
+Without one, and with no patchwork project to use, patman looks on lore for
+the list which the series is sent to, from its ``Series-to:`` tags or the
+upstream's To address. For example, a series with ``Series-to: dtc``, where
+the alias is ``devicetree-compiler@vger.kernel.org``, uses
+``https://lore.kernel.org/devicetree-compiler``, so nothing needs setting up.
 The link of each version is the Message-ID of its cover letter, or of its
 first patch if there is none, e.g.
 ``20261025085508.1622340-1-sjg@chromium.org``, which is the series at
