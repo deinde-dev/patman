@@ -1930,7 +1930,7 @@ class Cseries(cser_helper.CseriesHelper):
             dry_run (bool): True to do a dry run
         """
         ser, version = self._parse_series_and_version(name, version)
-        name = ser.name
+        name = self._join_name_version(ser.name, version)
 
         versions = self._ensure_version(ser, version)
         vstr = list(map(str, versions))
