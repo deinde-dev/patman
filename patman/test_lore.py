@@ -726,6 +726,10 @@ class TestLore(unittest.TestCase):
             [('v2c@x', 'dm: Tidy up', 2), ('c@x', 'dm: Tidy up', 1)],
             [(opt['id'], opt['name'], opt['version']) for opt in options])
 
+        # A series found by its first patch as well is given only once
+        _, again = find('dm: Tidy up', 3, first='dm: Tidy up', searches=2)
+        self.assertEqual(options, again)
+
         # Lore is searched even when the cache has the search, since the
         # series may just have been sent
         cache = pwcache.Cache(os.path.join(self.tmpdir, 'pw.db'))

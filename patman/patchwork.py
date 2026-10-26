@@ -336,7 +336,12 @@ class SeriesFinder:
             if patch.subject == cmt.subject:
                 if int(pws['version']) == version:
                     return svid, ser_id, pws['id'], None
-                name_found.append(pws)
+
+                # Lore knows a series by its cover letter, so the search for
+                # the first patch can find a series which the search for the
+                # cover letter found already
+                if all(found['id'] != pws['id'] for found in name_found):
+                    name_found.append(pws)
 
         return svid, ser_id, None, name_found or res
 

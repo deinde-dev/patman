@@ -45,6 +45,9 @@ Changed
 
 Fixed
 ~~~~~
+- When autolink cannot find a version on lore, its list of possible matches
+  shows each series once, rather than again under the title of its first
+  patch, with the Message-ID of its cover letter.
 - ``patman upstream add`` and ``upstream set`` no longer give the upstream the
   ``patchwork_url`` from ``~/.patman``, which is the default for
   ``patman -P``, so ``upstream set us -l <url>`` changes only the lore URL.
