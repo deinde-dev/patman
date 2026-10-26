@@ -181,9 +181,12 @@ def _copy_reviews(src, dst, svid, new_svid, stats):
             (svid,)).fetchall():
         dst.execute(f'INSERT INTO review (svid, {cols}) VALUES ({marks})',
                     (new_svid, *fields))
+        new_rid = dst.lastrowid()
+        # The context refers to texts by their IDs in src, so add them to dst
+        dst.review_set_context(new_rid, src.review_get_context(rid))
         stats.reviews += 1
         stats.replies += _copy_rows(src, dst, 'reply', REPLY_COLS,
-                                    'review_id', rid, dst.lastrowid())
+                                    'review_id', rid, new_rid)
 
     # Comments on patchwork belong to the version rather than to a review
     stats.replies += _copy_rows(src, dst, 'reply', REPLY_COLS, 'svid', svid,

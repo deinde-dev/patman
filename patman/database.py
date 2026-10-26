@@ -13,6 +13,7 @@ and write some code in migrate_to() to call it.
 
 from collections import namedtuple, OrderedDict
 import fcntl
+import hashlib
 import json
 import os
 import sqlite3
@@ -23,7 +24,7 @@ from patman.series import Series
 from patman import times
 
 # Schema version (version 0 means there is no database yet)
-LATEST = 20
+LATEST = 21
 
 # Information about a review record
 # Review status values
@@ -391,6 +392,18 @@ class Database:  # pylint:disable=R0904
         """Record when each review and response is sent, for the stats"""
         self.cur.execute('ALTER TABLE review ADD COLUMN sent_time')
         self.cur.execute('ALTER TABLE reply ADD COLUMN sent_time')
+
+    def _migrate_to_v21(self):
+        """Record the context which the agent was given for each review
+
+        Much of it is the same for many reviews, e.g. the cover letter for
+        each patch and the writing voice for all of them, so each text is
+        kept once and the reviews refer to it
+        """
+        self.cur.execute('ALTER TABLE review ADD COLUMN context')
+        self.cur.execute(
+            'CREATE TABLE context_text (id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            'hash TEXT UNIQUE, text TEXT)')
 
     # pylint: disable=R0912
     def migrate_to(self, dest_version):
@@ -1722,6 +1735,61 @@ class Database:  # pylint:disable=R0904
         rec = self.execute('SELECT session_id FROM review WHERE id = ?',
                            (review_id,)).fetchone()
         return rec[0] if rec else None
+
+    def review_set_context(self, review_id, parts):
+        """Record the context which the agent was given for a review
+
+        Each text is kept once in the context_text table, and the review
+        refers to it by its ID, since many reviews have the same ones
+
+        Args:
+            review_id (int): Review record ID
+            parts (list of tuple or None): Each part of the context, as
+                (title, text), e.g. ('Earlier review', 'Hi Fred, ...'), or
+                None if it is not known
+        """
+        refs = None
+        if parts is not None:
+            refs = json.dumps([[title, self._context_text_id(text)]
+                               for title, text in parts])
+        self.execute('UPDATE review SET context = ? WHERE id = ?',
+                     (refs, review_id))
+
+    def _context_text_id(self, text):
+        """Get the ID of a text of the context, adding it if it is new
+
+        Args:
+            text (str): Text, e.g. a cover letter
+
+        Return:
+            int: ID of the text in the context_text table
+        """
+        digest = hashlib.sha256(text.encode('utf-8')).hexdigest()
+        self.execute('INSERT OR IGNORE INTO context_text (hash, text) '
+                     'VALUES (?, ?)', (digest, text))
+        return self.execute('SELECT id FROM context_text WHERE hash = ?',
+                            (digest,)).fetchone()[0]
+
+    def review_get_context(self, review_id):
+        """Get the context which the agent was given for a review
+
+        Args:
+            review_id (int): Review record ID
+
+        Return:
+            list of tuple or None: Each part of the context, as (title, text),
+                or None if it was not recorded
+        """
+        rec = self.execute('SELECT context FROM review WHERE id = ?',
+                           (review_id,)).fetchone()
+        if not rec or rec[0] is None:
+            return None
+        refs = json.loads(rec[0])
+        ids = sorted({text_id for _, text_id in refs})
+        texts = dict(self.execute(
+            'SELECT id, text FROM context_text WHERE id IN '
+            f"({', '.join('?' * len(ids))})", ids).fetchall()) if ids else {}
+        return [(title, texts.get(text_id, '')) for title, text_id in refs]
 
     def review_set_envelope(self, review_id, envelope):
         """Set the headers for sending a review as a reply to its patch
