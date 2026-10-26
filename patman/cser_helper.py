@@ -479,6 +479,45 @@ class CseriesHelper:
 
         self.db.pcommit_add_list(svid, to_add)
 
+    def sync_patches(self, ser, version, dry_run=False):
+        """Update the patches of a version from its branch, if they differ
+
+        The patches are found from the branch's upstream, as 'patman send'
+        does, and replace those in the database if their subjects differ,
+        e.g. if a patch has been added, folded into another or reworded since
+        the version was added or scanned.
+
+        Args:
+            ser (Series): Series, with its idnum and name
+            version (int): Version number
+            dry_run (bool): True to say what would change without changing it
+
+        Return:
+            bool: True if the patches differ
+        """
+        branch = self._get_branch_name(ser.name, version)
+        try:
+            _, branch_ser, _, _ = self.prep_series(branch)
+        except ValueError:
+            return False
+        svid = self.get_series_svid(ser.idnum, version)
+        old = [pcm.subject for _, pcm in sorted(
+            self.get_pcommit_dict(svid).items())]
+        new = [cmt.subject for cmt in branch_ser.commits]
+        if old == new:
+            return False
+        count = len(new)
+        msg = (f"the patches of '{ser.name}' v{version} from its branch: "
+               f"{count} patch{'es' if count != 1 else ''}, was {len(old)}")
+        if dry_run:
+            tout.notice(f'Would update {msg}')
+            return True
+        self.db.pcommit_delete(svid)
+        self._add_series_commits(branch_ser, svid)
+        self.commit()
+        tout.notice(f'Updated {msg}')
+        return True
+
     def get_series_upstream(self, name):
         """Get the upstream for a series
 

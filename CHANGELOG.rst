@@ -25,6 +25,13 @@ Added
   and ``open`` then read the series, its replies and its review tags from
   lore.
 
+Changed
+~~~~~~~
+- ``patman series send`` updates the patches of the version in the database
+  from its branch when they differ, e.g. after a patch is folded into another
+  following ``series inc``, so that ``status`` and autolink use the patches
+  which were sent.
+
 Fixed
 ~~~~~
 - ``patman upstream add`` and ``upstream set`` no longer give the upstream the

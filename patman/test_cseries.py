@@ -2233,6 +2233,39 @@ class TestCseries(CseriesTester):
         self.assertEqual('bootm: Make it boot', chk[1].subject)
         self.assertEqual('Just checking', chk[2].subject)
 
+    def test_series_sync_patches(self):
+        """Test updating the patches of a version from its branch"""
+        cser, _ = self.setup_second()
+        ser = cser.get_series_by_name('second')
+        svid = cser.get_ser_ver(ser.idnum, 2).idnum
+        branch = [pcm.subject for pcm in cser.get_pcommit_dict(svid).values()]
+
+        # The database has a patch which was folded into another
+        cser.db.pcommit_add_list(svid, [
+            Pcommit(None, 3, 'ci: Test it', None, None, None, None, None)])
+        cser.commit()
+
+        def subjects():
+            return [pcm.subject
+                    for _, pcm in sorted(cser.get_pcommit_dict(svid).items())]
+
+        with terminal.capture() as (out, _):
+            self.assertTrue(cser.sync_patches(ser, 2, dry_run=True))
+        self.assertEqual("Would update the patches of 'second' v2 from its "
+                         'branch: 3 patches, was 4', out.getvalue().strip())
+        self.assertEqual(branch + ['ci: Test it'], subjects())
+
+        with terminal.capture() as (out, _):
+            self.assertTrue(cser.sync_patches(ser, 2))
+        self.assertEqual("Updated the patches of 'second' v2 from its "
+                         'branch: 3 patches, was 4', out.getvalue().strip())
+        self.assertEqual(branch, subjects())
+
+        # Nothing changes once they match
+        with terminal.capture() as (out, _):
+            self.assertFalse(cser.sync_patches(ser, 2))
+        self.assertEqual('', out.getvalue())
+
     @needs_checkpatch
     def test_series_send(self):
         """Test sending a series"""

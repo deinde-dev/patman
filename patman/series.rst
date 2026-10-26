@@ -83,9 +83,11 @@ through them with a real U-Boot series and the output of each.
        patman series review
        patman series info -r
 
-4. Send it. patman then waits for the series to appear on patchwork and
-   records its link. If it does not appear in time, run
-   ``patman series autolink`` later::
+4. Send it. If the patches on the branch differ from those in the
+   database, e.g. because you folded one patch into another, patman first
+   updates the database to match what it sends. It then waits for the series
+   to appear on patchwork and records its link. If it does not appear in time,
+   run ``patman series autolink`` later::
 
        patman series send
 
