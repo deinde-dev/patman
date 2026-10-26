@@ -10,6 +10,11 @@ Unreleased
 
 Added
 ~~~~~
+- 'Context' at the top of a series' reviews on the ``patman serve`` page shows
+  what the agent was given for each review, such as the earlier review of the
+  same patch and your notes, from ``GET /api/reviews/<id>/context``. Patman
+  records it with each review, which is database schema v21, and reads it from
+  the agent's session for an older review.
 - ``patman review --stats`` counts the series and patches reviewed, the
   Reviewed-by tags given, the emails sent, the drafts waiting and the replies,
   in all and for each of the last eight weeks, or as many as given. The

@@ -210,6 +210,17 @@ a.card:active { background: var(--code-bg); }
   font: 13px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 6px;
 }
+.ctxbox { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 8px; }
+.ctxbox:empty, .ctxbox[hidden] { display: none; }
+.ctx-head { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+.ctx-src { font-weight: 400; }
+.ctx-none { font-size: 12px; color: var(--muted); margin: 4px 0; }
+.ctx-part summary { cursor: pointer; font-size: 13px; color: var(--link); padding: 3px 0; }
+.ctx-lines { color: var(--muted); font-size: 12px; }
+.ctx-part pre { font: 12px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+                white-space: pre-wrap; overflow-wrap: anywhere; margin: 2px 0 8px;
+                max-height: 360px; overflow-y: auto; background: var(--code-bg);
+                border-radius: 6px; padding: 8px 10px; }
 .mail .q { color: var(--quote); border-left: 2px solid var(--quote-bar);
            padding-left: 6px; display: block; }
 .mail details { margin: 2px 0; }

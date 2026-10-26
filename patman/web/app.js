@@ -1109,8 +1109,46 @@ async function viewReview(id, wantVer) {
       entry.show();
     }
   };
+  // The context which the agent was given for each review, shown on the
+  // cards while the Context button is on, and read when first wanted
+  let showCtx = lsGet('patman-review-context') === '1';
+  let ctxData = null;
+  const ctxBoxes = new Map();
+  const drawContext = (box, rid) => {
+    box.hidden = !showCtx;
+    if (showCtx) {
+      fill(box, ctxData ? contextBlock(ctxData.get(rid), sv.version)
+                        : h('div', { class: 'ctx-none' }, 'Reading the context...'));
+    }
+  };
+  const loadContext = async () => {
+    try {
+      const data = await api(`reviews/${id}/context?version=${sv.version}`);
+      ctxData = new Map(data.reviews.map((item) => [item.id, item]));
+    } catch (err) {
+      ctxData = new Map();
+      ctxBoxes.forEach((box) => fill(box, h('div', { class: 'ctx-none' }, err.message)));
+      return;
+    }
+    ctxBoxes.forEach(drawContext);
+  };
+  const ctxBtn = h('button', {
+    class: 'btn light small', 'aria-pressed': String(showCtx),
+    title: 'Show or hide the context which the agent was given for each review, ' +
+           'such as the earlier review of the same patch',
+    onclick: () => {
+      showCtx = !showCtx;
+      lsSet('patman-review-context', showCtx ? '1' : '0');
+      ctxBtn.setAttribute('aria-pressed', String(showCtx));
+      ctxBtn.textContent = showCtx ? 'Hide context' : 'Context';
+      ctxBoxes.forEach(drawContext);
+      if (showCtx && !ctxData) loadContext();
+    } }, showCtx ? 'Hide context' : 'Context');
   const reviewCard = (r) => {
     const card = h('div', { class: 'card review' });
+    const ctxBox = h('div', { class: 'ctxbox' });
+    ctxBoxes.set(r.id, ctxBox);
+    drawContext(ctxBox, r.id);
     const strip = h('div', { class: 'jobstrip' });
     const pat = r.seq ? (sv.patches || []).find((p) => p.seq === r.seq) : null;
     const itemId = r.seq ? pat && pat.patch_id : sv.cover_id;
@@ -1153,7 +1191,7 @@ async function viewReview(id, wantVer) {
     // A review can be changed if it has not been sent and no job is acting on it
     const free = () => unsent(r) && !(entries.get(r.id) || {}).busy;
     const drawCard = () => fill(card, header,
-      renderMail(r.body, free() ? ask : null, free() ? editChunk : null),
+      renderMail(r.body, free() ? ask : null, free() ? editChunk : null), ctxBox,
       (mailBtn || loreLink || free()) && h('div', { class: 'actions' },
         mailBtn, loreLink, commentsBtn,
         free() && [
@@ -1185,6 +1223,7 @@ async function viewReview(id, wantVer) {
     }
   };
   const reviews = sv.reviews.map(reviewCard);
+  if (showCtx) loadContext();
   const cover = sv.cover_id && !sv.reviews.some((r) => r.seq === 0) &&
     unreviewedCover(ser, sv);
   // Show the jobs which were already acting on reviews, e.g. after a reload
@@ -1237,6 +1276,7 @@ async function viewReview(id, wantVer) {
                                   'any which are out of date'),
       againBtn,
       tryBtn,
+      sv.reviews.length > 0 && ctxBtn,
       h('button', { class: 'btn light small', onclick: () => setHidden(id, !ser.hidden),
                     title: ser.hidden ? 'Show this series in the list of active reviews'
                                       : 'Hide this series from the list of active reviews, ' +
@@ -1264,6 +1304,32 @@ async function viewReview(id, wantVer) {
     cover && h('div', { class: 'list' }, cover),
     reviews.length ? h('div', { class: 'list' }, reviews)
                    : h('div', { class: 'empty' }, 'No reviews for this version'));
+}
+
+// Parts of the context which are shown open, as those most worth reading
+const CONTEXT_OPEN = new Set(['Earlier review', 'Your notes', 'Coverity']);
+
+// Show the context which the agent was given for a review: 'item' is from
+// 'GET /api/reviews/<id>/context', or undefined if it is not there
+function contextBlock(item, version) {
+  if (!item || !item.source) {
+    return h('div', { class: 'ctx-none' },
+             'The context of this review is not known: patman did not record it, ' +
+             "and the agent's session is gone");
+  }
+  const earlier = item.parts.some((part) => part.title === 'Earlier review');
+  return h('div', {},
+    h('div', { class: 'ctx-head' }, 'Context given to the agent',
+      item.source === 'transcript' &&
+        h('span', { class: 'ctx-src' }, " (from the agent's session)")),
+    item.parts.map((part) => h('details', { class: 'ctx-part',
+                                            open: CONTEXT_OPEN.has(part.title) },
+      h('summary', {}, part.title,
+        h('span', { class: 'ctx-lines' }, ` ${plural(part.text.split('\n').length,
+                                                     'line')}`)),
+      h('pre', {}, part.text))),
+    version > 1 && !earlier &&
+      h('div', { class: 'ctx-none' }, 'No earlier review was given'));
 }
 
 // Copy some text to the clipboard. The page is often served over plain
