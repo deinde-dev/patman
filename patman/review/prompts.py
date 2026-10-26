@@ -152,12 +152,33 @@ UBOOT_CONVENTIONS = '''\
 - A series may need updates to the documentation, tests or Kconfig'''
 
 
-def conventions_section():
-    """Get the prompt section with the conventions of the project
+def conventions_text():
+    """Get the conventions of the project, to check the patches against
 
     The 'conventions' review setting names a file holding them. Without it,
     U-Boot's conventions are used if the project is U-Boot, else there are
     none.
+
+    Returns:
+        str or None: Conventions, or None if there are none
+
+    Raises:
+        ValueError: if the conventions file cannot be read
+    """
+    fname = settings.review.get('conventions')
+    if fname:
+        try:
+            return tools.read_file(fname, binary=False).strip()
+        except OSError as exc:
+            raise ValueError(
+                f"Cannot read the review conventions '{fname}': {exc}") from exc
+    if settings.review_project() == 'U-Boot':
+        return UBOOT_CONVENTIONS
+    return None
+
+
+def conventions_section():
+    """Get the prompt section with the conventions of the project
 
     Returns:
         str: Section text, or '' if there are no conventions
@@ -165,20 +186,12 @@ def conventions_section():
     Raises:
         ValueError: if the conventions file cannot be read
     """
-    project = settings.review_project()
-    fname = settings.review.get('conventions')
-    if fname:
-        try:
-            text = tools.read_file(fname, binary=False).strip()
-        except OSError as exc:
-            raise ValueError(
-                f"Cannot read the review conventions '{fname}': {exc}") from exc
-    elif project == 'U-Boot':
-        text = UBOOT_CONVENTIONS
-    else:
+    text = conventions_text()
+    if not text:
         return ''
     return f'''
-{project.upper()} CONVENTIONS (check the patches against these):
+{settings.review_project().upper()} CONVENTIONS (check the patches against \
+these):
 {text}
 '''
 
@@ -395,6 +408,18 @@ def _series_overview(all_commits, seq):
     return '\n'.join(series_lines)
 
 
+def _cover_overview(all_commits):
+    """List the patches of a series, for a review of its cover letter
+
+    Args:
+        all_commits (list of tuple): (seq, hash, subject) for all patches
+
+    Returns:
+        str: One line for each patch
+    """
+    return '\n'.join(f"  {s}. {h[:12]} {subj}" for s, h, subj in all_commits)
+
+
 def build_review_prompt(ctx, commit_hash, seq, all_commits,
                          previous_review):
     """Build the Claude agent prompt for reviewing a single patch
@@ -506,10 +531,7 @@ def build_cover_review_prompt(ctx, all_commits, previous_review=None):
         str: The prompt text
     """
     style = voice_section()
-    series_lines = []
-    for s, h, subj in all_commits:
-        series_lines.append(f"  {s}. {h[:12]} {subj}")
-    series_overview = '\n'.join(series_lines)
+    series_overview = _cover_overview(all_commits)
 
     cover_section = ''
     if ctx.cover_content:
