@@ -2249,6 +2249,22 @@ class TestCseries(CseriesTester):
             return [pcm.subject
                     for _, pcm in sorted(cser.get_pcommit_dict(svid).items())]
 
+        # Reading the patches takes a commit below the series, and says so
+        with terminal.capture() as (out, err):
+            series = cser._get_patches('second', 2)[1]
+        self.assertEqual(4, len(series.commits))
+        self.assertIn(
+            "Warning: The patches of 'second' v2 differ from those in the "
+            "database:\n  patch 1 is", out.getvalue() + err.getvalue())
+        self.assertIn("but 'video: Some video improvements' in the database\n"
+                      "Use 'patman series scan'",
+                      out.getvalue() + err.getvalue())
+
+        # The warning is given once
+        with terminal.capture() as (out, err):
+            cser._get_patches('second', 2)
+        self.assertNotIn('differ', out.getvalue() + err.getvalue())
+
         with terminal.capture() as (out, _):
             self.assertTrue(cser.sync_patches(ser, 2, dry_run=True))
         self.assertEqual("Would update the patches of 'second' v2 from its "
@@ -2265,6 +2281,9 @@ class TestCseries(CseriesTester):
         with terminal.capture() as (out, _):
             self.assertFalse(cser.sync_patches(ser, 2))
         self.assertEqual('', out.getvalue())
+        with terminal.capture() as (out, err):
+            cser._get_patches('second', 2)
+        self.assertNotIn('differ', out.getvalue() + err.getvalue())
 
     @needs_checkpatch
     def test_series_send(self):

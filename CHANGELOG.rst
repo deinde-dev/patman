@@ -31,6 +31,9 @@ Changed
   from its branch when they differ, e.g. after a patch is folded into another
   following ``series inc``, so that ``status`` and autolink use the patches
   which were sent.
+- ``patman series status``, ``gather``, ``patches`` and autolink warn when the
+  patches on the branch differ from those in the database, and suggest
+  ``patman series scan``, since they read the wrong commits otherwise.
 
 Fixed
 ~~~~~
