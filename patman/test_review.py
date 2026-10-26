@@ -3042,6 +3042,32 @@ VERDICT: approved"""
         self.assertIn('COVERITY', prompt)
         self.assertIn('drivers/foo.c:42', prompt)
 
+    def test_review_prompt_context(self):
+        """The context given to the agent is recorded"""
+        ctx = self._make_review_ctx()
+        ctx.spelling = 'British'
+        ctx.comments_path = os.path.join(self.tmpdir, 'comments.txt')
+        tools.write_file(ctx.comments_path, 'Fred: Nice\n', binary=False)
+        ctx.cover_content = 'dm: Tidy up\n\nSome details'
+        ctx.context = 'This is an RFC'
+        ctx.coverity_text = '- RESOURCE_LEAK: drivers/foo.c:42'
+        commits = [(1, 'abc1234', 'dm: First'), (2, 'def5678', 'dm: Second')]
+        with mock.patch.object(review.voice, 'get_voice',
+                               return_value='Be brief'), \
+                mock.patch.dict(settings.review, {}, clear=True):
+            parts = review.prompts.context_parts(ctx, commits, 2, 'Hi Fred')
+            cover_parts = review.prompts.context_parts(ctx, commits, 0,
+                                                       'Hi all')
+        self.assertEqual(
+            ['Writing voice', 'Series', 'Existing comments', 'Conventions',
+             'Cover letter', 'Earlier review', 'Your notes', 'Coverity'],
+            [title for title, _ in parts])
+        self.assertEqual('Fred: Nice', dict(parts)['Existing comments'])
+        self.assertIn('>>> 2/2 def5678 dm: Second', dict(parts)['Series'])
+        self.assertEqual('  1. abc1234 dm: First\n  2. def5678 dm: Second',
+                         dict(cover_parts)['Series'])
+        self.assertNotIn('Coverity', dict(cover_parts))
+
     def test_review_prompt_project(self):
         """Test the prompts name the project and give its conventions"""
         ctx = self._make_review_ctx()

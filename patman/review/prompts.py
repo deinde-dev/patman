@@ -571,6 +571,51 @@ add at the series level.
         project=settings.review_project())
 
 
+def context_parts(ctx, all_commits, seq, previous_review):
+    """Get the parts of a review's prompt which give the agent its context
+
+    These are what varies between reviews, as against the instructions, and
+    are recorded with the review so that the page can show them. The file
+    of existing comments is read, since it is removed after the review.
+
+    Args:
+        ctx (ReviewContext): Review context (uses cover_content,
+            comments_path, context and coverity_text)
+        all_commits (list of tuple): (seq, hash, subject) for all patches
+        seq (int): Patch being reviewed, or 0 for the cover letter
+        previous_review (str or None): Review of the same patch or cover
+            letter in an earlier version
+
+    Returns:
+        list of tuple: Each part, as (title, text), in the order which the
+            prompt gives them
+    """
+    parts = []
+    profile = voice.get_voice()
+    if profile:
+        parts.append(('Writing voice', profile))
+    parts.append(('Series', _series_overview(all_commits, seq) if seq
+                   else _cover_overview(all_commits)))
+    if ctx.comments_path:
+        try:
+            comments = tools.read_file(ctx.comments_path, binary=False)
+        except OSError:
+            comments = f'(see file: {ctx.comments_path})'
+        parts.append(('Existing comments', comments.strip()))
+    conventions = conventions_text()
+    if conventions:
+        parts.append(('Conventions', conventions))
+    if ctx.cover_content:
+        parts.append(('Cover letter', ctx.cover_content))
+    if previous_review:
+        parts.append(('Earlier review', previous_review))
+    if ctx.context:
+        parts.append(('Your notes', ctx.context))
+    if seq and getattr(ctx, 'coverity_text', None):
+        parts.append(('Coverity', ctx.coverity_text))
+    return parts
+
+
 REFINE_REVIEWS_PROMPT = '''You are editing draft code-review \
 emails for the {project}
 mailing list. Your job is to make them more concise and natural while
