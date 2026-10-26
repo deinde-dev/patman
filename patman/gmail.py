@@ -340,6 +340,21 @@ def delete_draft(service, draft_id):
             raise
 
 
+class AlreadySent(Exception):
+    """A draft was sent already, e.g. from Gmail itself
+
+    Properties:
+        body (str): Text of the message which was sent
+        msg_id (str): Gmail message ID
+        thread_id (str): Gmail thread ID
+    """
+    def __init__(self, body, msg_id, thread_id):
+        super().__init__(f'Message {msg_id} was sent already')
+        self.body = body
+        self.msg_id = msg_id
+        self.thread_id = thread_id
+
+
 def send_draft(service, draft_id):
     """Send a Gmail draft
 
@@ -353,6 +368,10 @@ def send_draft(service, draft_id):
     Returns:
         tuple or None: (body, Gmail message ID, thread ID) of the message
             sent, or None if the draft no longer exists
+
+    Raises:
+        AlreadySent: The draft was sent already, e.g. from Gmail, so it is
+            no longer a draft
     """
     from googleapiclient.errors import HttpError
     try:
@@ -363,9 +382,42 @@ def send_draft(service, draft_id):
             return None
         raise
     body = _extract_body(draft.get('message', {}).get('payload', {})) or ''
-    msg = service.users().drafts().send(
-        userId='me', body={'id': draft_id}).execute()
+    try:
+        msg = service.users().drafts().send(
+            userId='me', body={'id': draft_id}).execute()
+    except HttpError as exc:
+        sent = _sent_message(service, draft, exc)
+        if not sent:
+            raise
+        raise AlreadySent(_extract_body(sent.get('payload', {})) or body,
+                          sent.get('id'), sent.get('threadId')) from exc
     return body, msg.get('id'), msg.get('threadId')
+
+
+def _sent_message(service, draft, exc):
+    """Find the message of a draft which Gmail cannot send, if it was sent
+
+    Gmail says that a message is 'not a draft' when the draft was sent
+    already, e.g. from Gmail itself.
+
+    Args:
+        service (googleapiclient.discovery.Resource): Gmail API service
+        draft (dict): Draft, as read before sending it
+        exc (HttpError): Error which Gmail gave when sending it
+
+    Returns:
+        dict or None: Message, if it was sent, else None
+    """
+    from googleapiclient.errors import HttpError
+    msg_id = draft.get('message', {}).get('id')
+    if exc.resp.status != 400 or 'not a draft' not in str(exc) or not msg_id:
+        return None
+    try:
+        msg = service.users().messages().get(userId='me', id=msg_id,
+                                             format='full').execute()
+    except HttpError:
+        return None
+    return msg if 'SENT' in msg.get('labelIds', []) else None
 
 
 def _decode_hdr(val):

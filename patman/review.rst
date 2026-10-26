@@ -479,6 +479,10 @@ first, and records each review as sent, with the text which was sent, in
 case you changed it in Gmail. Use ``-i`` to send only some of them, and
 ``-n`` to see what would be sent.
 
+If you have already sent a draft from Gmail, ``--send`` records that review as
+sent, with the text which went out, rather than failing. The same goes for
+``--send-reply``.
+
 If a review has been changed since its draft was made, e.g. edited on the
 ``patman serve`` page without updating the draft, or revised without
 ``-d``, its draft no longer matches it. Its status is then 'edited', and

@@ -229,7 +229,13 @@ def _send_response(service, ctx, reply_id, account=None):
     if reply.status != database.REPLY_DRAFT or not reply.draft_id:
         _draft_response(service, ctx, reply_id, account)
         reply = db.reply_get(reply_id)
-    result = gmail.send_draft(service, reply.draft_id)
+    already = False
+    try:
+        result = gmail.send_draft(service, reply.draft_id)
+    except gmail.AlreadySent as sent:
+        # e.g. sent from Gmail, so record what went out
+        result = (sent.body,)
+        already = True
     if not result:
         db.reply_set_status(reply_id, database.REPLY_SUGGESTED)
         ctx.cser.commit()
@@ -239,7 +245,9 @@ def _send_response(service, ctx, reply_id, account=None):
     db.reply_set_response(reply_id, body or reply.response,
                           database.REPLY_SENT)
     ctx.cser.commit()
-    tout.notice(f'Reply {reply_id}: sent the response')
+    tout.notice(f'Reply {reply_id}: ' +
+                ('the response was sent already, from Gmail; recorded it as '
+                 'sent' if already else 'sent the response'))
 
 
 def _sync_reply_drafts(service, cser):

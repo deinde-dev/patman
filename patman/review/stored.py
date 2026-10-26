@@ -163,10 +163,20 @@ def _do_send(args, cser, link):
 
     service = gmail.get_service(getattr(args, 'gmail_account', None))
     failed = 0
+    already = 0
     for rev in reviews:
         label = _review_label(rev.seq)
         try:
             result = gmail.send_draft(service, rev.draft_id)
+        except gmail.AlreadySent as sent:
+            # e.g. sent from Gmail, so record what went out
+            cser.db.review_set_sent(rev.idnum, sent.body or rev.body,
+                                    sent.msg_id, sent.thread_id)
+            cser.commit()
+            tout.notice(f'The review of {label} was sent already, from Gmail; '
+                        'recorded it as sent')
+            already += 1
+            continue
         except Exception as exc:  # pylint: disable=W0718
             tout.error(f'Cannot send the review of {label}: {exc}')
             failed += 1
@@ -181,7 +191,9 @@ def _do_send(args, cser, link):
                                 thread_id)
         cser.commit()
         tout.notice(f'Sent the review of {label}')
-    tout.notice(f'Sent {len(reviews) - failed} of {len(reviews)} review(s)')
+    msg = f', {already} sent already' if already else ''
+    tout.notice(f'Sent {len(reviews) - failed - already} of {len(reviews)} '
+                f'review(s){msg}')
     return 1 if failed else 0
 
 
