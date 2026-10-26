@@ -322,7 +322,8 @@ A list without patchwork
 
 Some projects, such as dtc, have a mailing list but no patchwork project.
 ``patman series send`` and ``patman series autolink`` then find the series on
-lore, by the title of its cover letter (or its first patch) and its version.
+lore, by the title of its cover letter (or its first patch) and its version,
+and ``status``, ``gather`` and ``open`` read it from there.
 
 The list is the upstream's list on lore, if it has one and no patchwork URL::
 
@@ -339,5 +340,7 @@ first patch if there is none, e.g.
 ``https://lore.kernel.org/devicetree-compiler/<link>/``. ``autolink-all``
 finds them for all your series.
 
-The status, tags and comments of a series are not read from lore yet, so
-``status`` and ``gather`` need patchwork.
+``status -cC`` shows the replies to each patch and the cover letter, and
+``gather`` adds the review tags in them to the commits, as with patchwork.
+Lore has no patch states, so each patch is 'new', and patman cannot tell
+when a series is accepted. ``gather-all`` still needs patchwork.

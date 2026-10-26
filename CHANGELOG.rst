@@ -21,7 +21,9 @@ Added
   series on the upstream's list on lore when the upstream has a lore URL and
   no patchwork URL, as for dtc. With neither, and no patchwork project, they
   use the list on lore which the series is sent to. The link is the Message-ID
-  of the cover letter, or of the first patch.
+  of the cover letter, or of the first patch. ``series status``, ``gather``
+  and ``open`` then read the series, its replies and its review tags from
+  lore.
 
 Fixed
 ~~~~~

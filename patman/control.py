@@ -256,7 +256,7 @@ def do_series(args, test_db=None, pwork=None, cser=None):
         'gather-all'
         ]
     # These can find a series on the upstream's list on lore instead
-    lore_ok = ['autolink', 'autolink-all', 'send']
+    lore_ok = ['autolink', 'autolink-all', 'open', 'send', 'status', 'gather']
     try:
         cser.open_database()
         if args.subcmd in needs_patchwork:

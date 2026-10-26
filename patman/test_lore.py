@@ -18,6 +18,7 @@ from u_boot_pylib import terminal
 from patman import lore
 from patman import lorelist
 from patman import pwcache
+from patman import status
 from patman.patchwork import Patchwork
 from patman.review import lookup
 
@@ -487,6 +488,48 @@ class TestLore(unittest.TestCase):
         with mock.patch.object(lookup.tout, 'notice'):
             data, name, version, count = lookup.fetch_series(llist, 'cover@x')
         self.assertEqual(('dm: Tidy up', 1, 2), (name, version, count))
+
+    def test_lorelist_status(self):
+        """The status of a series which you sent is read from lore"""
+        llist, reads = self.lore_list()
+        cover, patches = run(llist.series_get_state(None, 'cover@x', True,
+                                                    True))
+        self.assertEqual(('lore:cover@x', 1, '[0/2] dm: Tidy up', ['<r3@x>']),
+                         (cover.id, cover.num_comments, cover.name,
+                          [cmt['msgid'] for cmt in cover.comments]))
+        self.assertEqual(
+            [('lore:p1@x', 'new', '[1/2] dm: First', ['<r1@x>', '<r2@x>']),
+             ('lore:p2@x', 'new', '[2/2] dm: Second', ['<r4@x>'])],
+            [(pat.id, pat.state, pat.series_data['name'],
+              [cmt['msgid'] for cmt in pat.comments]) for pat in patches])
+
+        # The review tag in a reply to the first patch is found
+        new_rtags, _ = status.process_reviews(patches[0].data['content'],
+                                              patches[0].comments, {})
+        self.assertEqual({'Reviewed-by': {SIMON}}, new_rtags)
+
+        # Messages say where the patches are from
+        with terminal.capture() as (out, err):
+            status.check_patch_count(1, 2, llist.SOURCE)
+        self.assertIn('Warning: Lore reports 2 patches, series has 1',
+                      out.getvalue() + err.getvalue())
+
+        # Without the comments, only the series is read
+        cover, patches = run(llist.series_get_state(None, 'cover@x', False,
+                                                    False))
+        self.assertIsNone(cover)
+        self.assertEqual(['[1/2] dm: First', '[2/2] dm: Second'],
+                         [pat.raw_subject for pat in patches])
+        self.assertIsNone(patches[0].comments)
+
+        # The thread is read again each time, to see what has arrived
+        self.assertEqual(['cover@x', 'cover@x'], reads)
+
+        self.assertEqual('https://lore.kernel.org/my-list/cover@x/',
+                         run(llist.get_series_url('cover@x')))
+        with llist.collect_stats() as stats:
+            llist.lore.request_count += 3
+        self.assertEqual(3, stats.request_count)
 
     def test_lorelist_single(self):
         """A patch on its own is a series, and only a series is accepted"""

@@ -1147,9 +1147,9 @@ class TestCseries(CseriesTester):
             self.assertIsInstance(pwork, lorelist.LoreList)
             self.assertEqual('https://lore.kernel.org/my-list', pwork.url)
 
-        # Showing the status needs patchwork
+        # Gathering all series needs patchwork
         with self.assertRaises(ValueError) as exc:
-            run('status', 'status')
+            run('gather-all', 'gather_all')
         self.assertIn('No patchwork URL found', str(exc.exception))
 
     def test_series_lore_from_to(self):

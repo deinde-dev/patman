@@ -24,8 +24,10 @@ autolink' and 'patman series send', to find the series which you send to it
 """
 
 import asyncio
+import contextlib
 import email.utils
 import re
+from types import SimpleNamespace
 from urllib.parse import quote_plus, unquote, urlparse
 import xml.etree.ElementTree as ET
 
@@ -401,6 +403,9 @@ class LoreList(patchwork.SeriesFinder):  # pylint: disable=R0904
         url (str): URL of the list on lore, e.g.
             'https://lore.kernel.org/devicetree-compiler'
     """
+    # Where the series are, for messages
+    SOURCE = 'lore'
+
     def __init__(self, url):
         self.url = url.rstrip('/')
         self.lore = lore.Lore(self.url)
@@ -748,6 +753,73 @@ class LoreList(patchwork.SeriesFinder):  # pylint: disable=R0904
         """
         data = await self.get_series(client, link)
         return ['new'] * len(data['patches'])
+
+    @contextlib.contextmanager
+    def collect_stats(self):
+        """Count the requests to lore across a range of calls
+
+        Yields:
+            SimpleNamespace: With request_count set to the number of requests
+                once the range is done
+        """
+        stats = SimpleNamespace(request_count=0)
+        start = self.lore.request_count
+        try:
+            yield stats
+        finally:
+            stats.request_count = self.lore.request_count - start
+
+    async def get_series_url(self, link):
+        """Get the URL of a series on the list
+
+        Args:
+            link (str): Message-ID of the series
+
+        Returns:
+            str: URL of the thread
+        """
+        return f'{self.url}/{link}/'
+
+    async def series_get_state(self, client, link, read_comments,
+                               read_cover_comments):
+        """Read the patches of a series and their replies, for its status
+
+        Lore has no states, so each patch is 'new'. The thread is read from
+        lore again, to see the patches and replies which have arrived since
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            link (str): Message-ID of the series
+            read_comments (bool): True to read the replies to the patches
+            read_cover_comments (bool): True to read the replies to the cover
+                letter
+
+        Returns:
+            tuple:
+                COVER or None: Cover letter, or None if there is none or
+                    read_cover_comments is False
+                list of patchwork.Patch: Patches
+        """
+        data = await self.get_series(client, link, max_age=0)
+        patches = []
+        for info in data['patches']:
+            if read_comments:
+                patch = await self.get_patch(client, info['id'])
+                comments = await self.get_patch_comments(client, info['id'])
+                pat = patchwork.Patch(info['id'], 'new', patch, comments,
+                                      info)
+            else:
+                pat = patchwork.Patch(info['id'], series_data=info)
+                pat.raw_subject = info['name']
+            patches.append(pat)
+
+        cover = None
+        letter = data['cover_letter']
+        if read_cover_comments and letter:
+            comments = await self.get_cover_comments(client, letter['id'])
+            cover = patchwork.COVER(letter['id'], len(comments),
+                                    letter['name'], comments)
+        return cover, patches
 
     async def get_series_mbox(self, client, link, max_age=None):
         """Get an mbox holding the patches of a series, in order

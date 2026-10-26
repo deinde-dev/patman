@@ -395,6 +395,9 @@ class SeriesFinder:
 class Patchwork(SeriesFinder):
     """Class to handle communication with patchwork
     """
+    # Where the series are, for messages
+    SOURCE = 'patchwork'
+
     def __init__(self, url, show_progress=True, single_thread=False):
         """Set up a new patchwork handler
 
