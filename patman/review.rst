@@ -149,7 +149,9 @@ in plain text or Markdown, which goes into the prompt for each patch and for
 the cover letter. A relative name is taken from the top of the repo, so a
 project can ship the file alongside its ``.patman-defaults``. The review stops
 with an error if the file cannot be read. A project other than U-Boot with no
-``conventions`` file is reviewed without any.
+``conventions`` file is reviewed without any. The section can also name the
+file holding your writing voice, with ``voice`` (see
+:ref:`review_voice`).
 
 The file might say which coding style the project follows, what its commit
 subjects look like, which tags a patch needs, and what a reviewer should look
@@ -671,6 +673,8 @@ Use ``-n`` / ``--dry-run`` to see which series would be reviewed,
 waiting or skipped -- and, with ``-d``, which would be drafted --
 without launching any reviews or creating any drafts.
 
+.. _review_voice:
+
 Learning your writing voice
 ---------------------------
 
@@ -688,3 +692,16 @@ Use ``--voice-count N`` to control how many reviews to collect
 (default: 20). The voice profile is saved to
 ``~/.config/patman.d/voice.md`` and automatically used in subsequent
 reviews.
+
+To keep it somewhere else, e.g. so that several people each have their own,
+or so that you keep yours with your other files, name the file with the
+``voice`` setting in the ``[review]`` section of your ``.patman``:
+
+.. code-block:: ini
+
+    [review]
+    voice: ~/notes/review-voice.md
+
+Learning, refining and using the voice all use that file. A relative name is
+taken from the top of the repo, as for ``conventions``. Until the voice is
+learned, the file does not exist and the reviews have no voice.

@@ -71,6 +71,16 @@ VOICE_PATH = os.path.join(os.path.expanduser('~/.config/patman.d'),
                           'voice.md')
 
 
+def voice_path():
+    """Get the file which holds the voice profile
+
+    Returns:
+        str: The file named by the 'voice' review setting, if any, else
+            VOICE_PATH
+    """
+    return settings.review.get('voice') or VOICE_PATH
+
+
 _VOICE_PROMPT = '''Analyse the following email reviews written by a single
 person. These are code-review replies on the {project} mailing list.
 
@@ -201,10 +211,11 @@ async def learn_voice(vp):
         tout.error('Failed to analyse writing style')
         return False
 
-    os.makedirs(os.path.dirname(VOICE_PATH), exist_ok=True)
-    tools.write_file(VOICE_PATH, result.strip() + '\n', binary=False)
+    fname = voice_path()
+    os.makedirs(os.path.dirname(fname), exist_ok=True)
+    tools.write_file(fname, result.strip() + '\n', binary=False)
 
-    tout.notice(f'Voice profile saved to {VOICE_PATH}')
+    tout.notice(f'Voice profile saved to {fname}')
     return True
 
 
@@ -219,8 +230,9 @@ def get_voice():
     Returns:
         str or None: Voice profile text, or None if not configured
     """
-    if os.path.exists(VOICE_PATH):
-        return tools.read_file(VOICE_PATH, binary=False).strip()
+    fname = voice_path()
+    if os.path.exists(fname):
+        return tools.read_file(fname, binary=False).strip()
     return None
 
 
@@ -276,7 +288,7 @@ async def refine_voice(draft_body, sent_body):
     tools.write_file(sent_path, sent_body, binary=False)
 
     prompt = _REFINE_PROMPT.format(draft_path=draft_path,
-        sent_path=sent_path, voice_path=VOICE_PATH)
+        sent_path=sent_path, voice_path=voice_path())
     options = common.agent_options(allowed_tools=['Read'],
         max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
 
@@ -291,9 +303,10 @@ async def refine_voice(draft_body, sent_body):
         tout.error('Failed to refine voice profile')
         return False
 
-    tools.write_file(VOICE_PATH, result.strip() + '\n', binary=False)
+    fname = voice_path()
+    tools.write_file(fname, result.strip() + '\n', binary=False)
 
-    tout.notice(f'Voice profile updated: {VOICE_PATH}')
+    tout.notice(f'Voice profile updated: {fname}')
     return True
 
 

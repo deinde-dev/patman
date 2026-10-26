@@ -29,6 +29,9 @@ Added
   of the cover letter, or of the first patch. ``series status``, ``gather``
   and ``open`` then read the series, its replies and its review tags from
   lore.
+- A ``voice`` setting in the ``[review]`` section names the file holding your
+  writing voice, so that each person can keep their own, rather than always
+  using ``~/.config/patman.d/voice.md``.
 
 Changed
 ~~~~~~~

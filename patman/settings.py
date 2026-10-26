@@ -498,7 +498,7 @@ def _read_review(config, top_level):
 
     A relative 'conventions' filename is taken from the top of the git
     repository, where a project can ship the file alongside its
-    .patman-defaults
+    .patman-defaults, as is a relative 'voice' filename
 
     Args:
         config (_ProjectConfigParser): Config to read
@@ -509,7 +509,7 @@ def _read_review(config, top_level):
         if name not in REVIEW_KEYS:
             print(f'WARNING: Unknown review setting {name}', file=sys.stderr)
             continue
-        if name == 'conventions' and value:
+        if name in ('conventions', 'voice') and value:
             value = os.path.join(top_level, os.path.expanduser(value))
         review[name] = value
 
@@ -532,7 +532,7 @@ bounces = set()
 review = {}
 
 # Names which the [review] section can hold
-REVIEW_KEYS = ('project', 'conventions')
+REVIEW_KEYS = ('project', 'conventions', 'voice')
 
 if __name__ == "__main__":
     import doctest
