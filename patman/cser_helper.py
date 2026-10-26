@@ -119,6 +119,8 @@ class CseriesHelper:
         self._fake_sleep = None
         self.fake_now = None
         self.loop = asyncio.get_event_loop()
+        # Versions warned about by _check_patches(), as (name, version)
+        self._patches_warned = set()
 
     def open_database(self):
         """Open the database ready for use"""
@@ -478,6 +480,45 @@ class CseriesHelper:
                   for seq, commit in enumerate(series.commits)]
 
         self.db.pcommit_add_list(svid, to_add)
+
+    def sync_patches(self, ser, version, dry_run=False):
+        """Update the patches of a version from its branch, if they differ
+
+        The patches are found from the branch's upstream, as 'patman send'
+        does, and replace those in the database if their subjects differ,
+        e.g. if a patch has been added, folded into another or reworded since
+        the version was added or scanned.
+
+        Args:
+            ser (Series): Series, with its idnum and name
+            version (int): Version number
+            dry_run (bool): True to say what would change without changing it
+
+        Return:
+            bool: True if the patches differ
+        """
+        branch = self._get_branch_name(ser.name, version)
+        try:
+            _, branch_ser, _, _ = self.prep_series(branch)
+        except ValueError:
+            return False
+        svid = self.get_series_svid(ser.idnum, version)
+        old = [pcm.subject for _, pcm in sorted(
+            self.get_pcommit_dict(svid).items())]
+        new = [cmt.subject for cmt in branch_ser.commits]
+        if old == new:
+            return False
+        count = len(new)
+        msg = (f"the patches of '{ser.name}' v{version} from its branch: "
+               f"{count} patch{'es' if count != 1 else ''}, was {len(old)}")
+        if dry_run:
+            tout.notice(f'Would update {msg}')
+            return True
+        self.db.pcommit_delete(svid)
+        self._add_series_commits(branch_ser, svid)
+        self.commit()
+        tout.notice(f'Updated {msg}')
+        return True
 
     def get_series_upstream(self, name):
         """Get the upstream for a series
@@ -1288,6 +1329,34 @@ class CseriesHelper:
         col_state = self.col.build(col, prefix + out, bright)
         return col_state, pad
 
+    def _check_patches(self, name, version, series, pwc):
+        """Warn if the commits read for a version are not its patches
+
+        The commits are read from the top of the branch, as many as the
+        database has patches, so if the branch has changed since the version
+        was added or scanned, they may be the wrong ones, e.g. one below the
+        series if a patch was folded into another. The warning is given once
+        for each version, however many times its patches are read
+
+        Args:
+            name (str): Series name
+            version (int): Version number
+            series (Series): Series read from the branch
+            pwc (dict): Patches in the database, keyed by seq
+        """
+        recorded = [pcm.subject for _, pcm in sorted(pwc.items())]
+        found = [cmt.subject for cmt in series.commits]
+        if recorded == found or (name, version) in self._patches_warned:
+            return
+        self._patches_warned.add((name, version))
+        diff = [(seq, cmt, pcm) for seq, (cmt, pcm)
+                in enumerate(zip(found, recorded)) if cmt != pcm]
+        detail = (f"\n  patch {diff[0][0] + 1} is '{diff[0][1]}' on the "
+                  f"branch but '{diff[0][2]}' in the database" if diff else '')
+        tout.warning(f"Warning: The patches of '{name}' v{version} differ "
+                     f'from those in the database:{detail}\n'
+                     "Use 'patman series scan' to update the database")
+
     def _get_patches(self, series, version, include_archived=False):
         """Get a Series object containing the patches in a series
 
@@ -1325,6 +1394,7 @@ class CseriesHelper:
         series = patchstream.get_metadata(ref, 0, count,
                                           git_dir=self.gitdir)
         self._copy_db_fields_to(series, ser)
+        self._check_patches(ser.name, version, series, pwc)
 
         return (branch, series, version, pwc, svinfo.name, svinfo.link,
                 svinfo.cover_id, svinfo.cover_num_comments)
@@ -1487,6 +1557,7 @@ class CseriesHelper:
             ref = svrec.archive_tag if archived else branch
             series = patchstream.get_metadata(ref, 0, count,
                                               git_dir=self.gitdir)
+            self._check_patches(series_name, version, series, pwc)
 
             _, new_rtag_list = status.do_show_status(
                 series, cover, patches, show_comments, show_cover_comments,

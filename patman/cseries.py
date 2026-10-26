@@ -1447,6 +1447,9 @@ class Cseries(cser_helper.CseriesHelper):
                     args.process_tags = False
 
         args.branch = self._get_branch_name(ser.name, version)
+        # Record what is sent, so that the status and autolink use the same
+        # patches
+        self.sync_patches(ser, version, dry_run=args.dry_run)
         likely_sent = send.send(args, git_dir=self.gitdir, cwd=self.topdir)
 
         if likely_sent:

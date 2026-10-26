@@ -30,14 +30,21 @@ Added
   and ``open`` then read the series, its replies and its review tags from
   lore.
 
+Changed
+~~~~~~~
+- ``patman series send`` updates the patches of the version in the database
+  from its branch when they differ, e.g. after a patch is folded into another
+  following ``series inc``, so that ``status`` and autolink use the patches
+  which were sent.
+- ``patman series status``, ``gather``, ``patches`` and autolink warn when the
+  patches on the branch differ from those in the database, and suggest
+  ``patman series scan``, since they read the wrong commits otherwise.
+
 Fixed
 ~~~~~
 - ``patman upstream add`` and ``upstream set`` no longer give the upstream the
   ``patchwork_url`` from ``~/.patman``, which is the default for
   ``patman -P``, so ``upstream set us -l <url>`` changes only the lore URL.
-
-Fixed
-~~~~~
 - A review of a new version gives each patch the earlier review of the same
   patch, matched by subject, rather than of the patch with the same number,
   so that a patch added or moved between versions does not give the later
