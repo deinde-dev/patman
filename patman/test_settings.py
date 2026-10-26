@@ -154,7 +154,8 @@ class TestSettings(unittest.TestCase):
         with cleared_command_line_args():
             with empty_git_repository() as tmpdir:
                 with tempfile.NamedTemporaryFile() as global_config:
-                    global_config.write(b'[review]\nproject: global-proj\n')
+                    global_config.write(b'[review]\nproject: global-proj\n'
+                                        b'voice: ~/my-voice.md\n')
                     global_config.flush()
                     with open('.patman-defaults', 'w', buffering=1) as f:
                         f.write('[review]\n'
@@ -171,7 +172,8 @@ class TestSettings(unittest.TestCase):
                     self.assertEqual(
                         {'project': 'global-proj',
                          'conventions': os.path.join(
-                             os.path.realpath(tmpdir), 'doc/review.md')},
+                             os.path.realpath(tmpdir), 'doc/review.md'),
+                         'voice': os.path.expanduser('~/my-voice.md')},
                         settings.review)
                     self.assertEqual('global-proj',
                                      settings.review_project())

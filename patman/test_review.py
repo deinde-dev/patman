@@ -1640,6 +1640,20 @@ class TestReview(CseriesTester):
             run('-i', '2')
         self.assertIn('No Gmail drafts to send', str(exc.exception))
 
+    def test_voice_setting(self):
+        """The voice setting names the file holding your voice"""
+        fname = os.path.join(self.tmpdir, 'my-voice.md')
+        with mock.patch.dict(settings.review, {}, clear=True):
+            self.assertEqual(review.voice.VOICE_PATH,
+                             review.voice.voice_path())
+        with mock.patch.dict(settings.review, {'voice': fname}, clear=True):
+            self.assertEqual(fname, review.voice.voice_path())
+
+            # There is no voice until it is learned
+            self.assertIsNone(review.voice.get_voice())
+            tools.write_file(fname, 'Be brief\n', binary=False)
+            self.assertEqual('Be brief', review.voice.get_voice())
+
     def test_review_delete(self):
         """Reviews which have not been sent can be deleted, with their drafts"""
         cser = self.get_database()
