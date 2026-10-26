@@ -3245,14 +3245,23 @@ VERDICT: approved"""
              [('> diff --git a/x b/x\n> @@ -1 +1 @@', 'Fix this.')], 'm'),
             ('', 'approved', [], 'm')]
 
+        # Each review records the context which the agent was given
+        def cover_review(ctx, _all_commits):
+            ctx.contexts[0] = [('Series', 'all')]
+            return cover
+
+        def patch_review(ctx, _cmt, seq, _all_commits):
+            ctx.contexts[seq] = [('Series', f'patch {seq}')]
+            return results[seq - 1]
+
         with mock.patch.object(review.core.claude_mod, 'check_available',
                                return_value=True), \
                 mock.patch.object(review.core.gitutil, 'get_top_level',
                                   return_value=self.tmpdir), \
                 mock.patch.object(review.core, '_run_cover_review_sync',
-                                  return_value=cover), \
+                                  side_effect=cover_review), \
                 mock.patch.object(review.core, '_run_patch_review_sync',
-                                  side_effect=results), \
+                                  side_effect=patch_review), \
                 terminal.capture():
             review.core.review_series(cser, sid, svid, 1, 'foo', series)
 
@@ -3263,6 +3272,11 @@ VERDICT: approved"""
         self.assertEqual(0, stored[1].approved)
         self.assertIn('Looks good', stored[2].body)
         self.assertEqual(1, stored[2].approved)
+        self.assertEqual(
+            {0: [('Series', 'all')], 1: [('Series', 'patch 1')],
+             2: [('Series', 'patch 2')]},
+            {seq: cser.db.review_get_context(rev.idnum)
+             for seq, rev in stored.items()})
 
     def test_series_review_already(self):
         """Test 'series review' refuses to overwrite without --force"""

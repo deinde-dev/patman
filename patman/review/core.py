@@ -114,6 +114,8 @@ async def _run_cover_review(ctx, all_commits):
     tout.notice('Reviewing series (cover letter)...')
     prompt = prompts.build_cover_review_prompt(
         ctx, all_commits, previous_review=ctx.previous_reviews.get(0))
+    ctx.contexts[0] = prompts.context_parts(ctx, all_commits, 0,
+                                            ctx.previous_reviews.get(0))
     options = common.session_options(
         ctx, 0, allowed_tools=['Bash', 'Read', 'Grep'], cwd=ctx.repo_path,
         max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
@@ -168,6 +170,8 @@ async def _run_patch_review(ctx, cmt, seq, all_commits):
     previous_review = ctx.previous_reviews.get(seq)
     prompt = prompts.build_review_prompt(ctx, cmt.hash, seq, all_commits,
                                          previous_review)
+    ctx.contexts[seq] = prompts.context_parts(ctx, all_commits, seq,
+                                              previous_review)
     options = common.session_options(
         ctx, seq, allowed_tools=['Bash', 'Read', 'Grep'], cwd=ctx.repo_path,
         max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
@@ -335,6 +339,7 @@ def _store_finding(ctx, seq, subject, verdict, comments, timestamp):
     rid = ctx.cser.db.review_add(ctx.svid, seq, body, verdict == 'approved',
                                  timestamp)
     ctx.cser.db.review_set_session(rid, ctx.session_ids.get(seq))
+    ctx.cser.db.review_set_context(rid, ctx.contexts.get(seq))
     emails.print_finding(seq, ctx.patch_count, subject, verdict, comments)
     return len(comments)
 
@@ -625,6 +630,7 @@ def _run_and_store_reviews(ctx, args):
                                                  timestamp)
         ctx.cser.db.review_set_session(review_ids[seq],
                                        ctx.session_ids.get(seq))
+        ctx.cser.db.review_set_context(review_ids[seq], ctx.contexts.get(seq))
     ctx.cser.commit()
 
     _show_reviews(review_bodies, ctx.series_data)
