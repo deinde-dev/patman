@@ -211,16 +211,17 @@ def create_branch(series, new_rtag_list, branch, dest_branch, overwrite,
     return num_added
 
 
-def check_patch_count(num_commits, num_patches):
+def check_patch_count(num_commits, num_patches, source='patchwork'):
     """Check the number of commits and patches agree
 
     Args:
         num_commits (int): Number of commits
         num_patches (int): Number of patches
+        source (str): Where the patches are from, e.g. 'patchwork' or 'lore'
     """
     if num_patches != num_commits:
-        tout.warning(f'Warning: Patchwork reports {num_patches} patches, '
-                     f'series has {num_commits}')
+        tout.warning(f'Warning: {source.capitalize()} reports {num_patches} '
+                     f'patches, series has {num_commits}')
 
 
 def add_cover_rtags(commits, cover, new_rtag_list):
@@ -350,7 +351,8 @@ def _do_show_status(series, cover, patch_for_commit, show_comments,
 
 
 def show_status(series, branch, dest_branch, force, cover, patches,
-                show_comments, show_cover_comments, test_repo=None):
+                show_comments, show_cover_comments, test_repo=None,
+                source='patchwork'):
     """Check the status of a series on Patchwork
 
     This finds review tags and comments for a series in Patchwork, displaying
@@ -367,9 +369,10 @@ def show_status(series, branch, dest_branch, force, cover, patches,
         show_comments (bool): True to show the comments on each patch
         show_cover_comments (bool): True to show the comments on the letter
         test_repo (pygit2.Repository): Repo to use (use None unless testing)
+        source (str): Where the patches are from, e.g. 'patchwork' or 'lore'
     """
     col = terminal.Color()
-    check_patch_count(len(series.commits), len(patches))
+    check_patch_count(len(series.commits), len(patches), source)
     num_to_add, new_rtag_list = do_show_status(
         series, cover, patches, show_comments, show_cover_comments, col)
 
@@ -379,14 +382,14 @@ def show_status(series, branch, dest_branch, force, cover, patches,
         msg = ''
     terminal.tprint(
         f"{num_to_add} new response{'s' if num_to_add != 1 else ''} "
-        f'available in patchwork{msg}')
+        f'available in {source}{msg}')
 
     if dest_branch:
         num_added = create_branch(series, new_rtag_list, branch,
                                   dest_branch, force, test_repo)
         terminal.tprint(
             f"{num_added} response{'s' if num_added != 1 else ''} added "
-            f"from patchwork into new branch '{dest_branch}'")
+            f"from {source} into new branch '{dest_branch}'")
 
 
 async def check_status(link, pwork, read_comments=False,
@@ -488,4 +491,5 @@ def check_and_show_status(series, link, branch, dest_branch, force,
         link, pwork, True, True))
 
     show_status(series, branch, dest_branch, force, cover, patches,
-                show_comments, show_cover_comments, test_repo=test_repo)
+                show_comments, show_cover_comments, test_repo=test_repo,
+                source=pwork.SOURCE)

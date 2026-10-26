@@ -154,8 +154,14 @@ def patchwork_status(branch, count, start, end, dest_branch, force,
 
 
 
-def _setup_patchwork(cser, pwork, ups, pw_url, allow_lore=False):
+def _setup_patchwork(cser, pwork, ups, pw_url, allow_lore=False,
+                     find_list=False, series=None):
     """Set up a Patchwork instance from upstream and project settings
+
+    With allow_lore, an upstream with no patchwork URL uses its list on lore
+    instead, if it has one. Failing that, with find_list and no patchwork
+    project to use, it uses the list on lore which the series is sent to, if
+    lore has it.
 
     Args:
         cser (Cseries): Open cseries instance
@@ -164,6 +170,10 @@ def _setup_patchwork(cser, pwork, ups, pw_url, allow_lore=False):
         pw_url (str or None): Patchwork URL override
         allow_lore (bool): True to read series from the upstream's list on
             lore, if it has no patchwork URL
+        find_list (bool): True to look for the list on lore which the series
+            is sent to, as well
+        series (str or None): Name of the series, or None for the current
+            branch, for find_list
 
     Returns:
         Patchwork or LoreList: Configured instance
@@ -174,6 +184,7 @@ def _setup_patchwork(cser, pwork, ups, pw_url, allow_lore=False):
     if pwork:
         return pwork
     tout.debug(f'_setup_patchwork: ups={ups!r} pw_url={pw_url!r}')
+    ups_url = None
     if ups:
         ups_url = cser.db.upstream_get_patchwork_url(ups)
         lore_url = cser.db.upstream_get_lore_url(ups)
@@ -188,23 +199,38 @@ def _setup_patchwork(cser, pwork, ups, pw_url, allow_lore=False):
                           f' {ups!r} URL {ups_url!r}')
             pw_url = ups_url
         tout.debug(f'  URL from upstream {ups!r}: {pw_url!r}')
+    proj = None
+    if pw_url:
+        proj = cser.project_get(ups)
+        tout.debug(f'  project_get({ups!r}): {proj!r}')
+        if not proj:
+            proj = cser.project_get()
+            tout.debug(f'  project_get(None) fallback: {proj!r}')
+            if proj:
+                tout.warning(f"No patchwork project for upstream '{ups}';"
+                             f' using default project {proj[0]}'
+                             f' (ID {proj[1]})')
+    if not proj and allow_lore and find_list and not ups_url:
+        lore_url = cser.find_lore_list(series)
+        if lore_url:
+            tout.notice(f'Using the list which the series is sent to, on lore:'
+                        f' {lore_url}')
+            pwork = lorelist.LoreList(lore_url)
+            pwork.upstream = ups
+            return pwork
+    hint = ''
+    if allow_lore and not ups_url:
+        hint = (', or give the upstream its list on lore with '
+                f"'patman upstream set {ups or '<name>'} -l <url>'")
     if not pw_url:
         raise ValueError(
             'No patchwork URL found; use -U/--upstream or '
-            "configure with 'patman upstream add'")
-    pwork = Patchwork(pw_url)
-    proj = cser.project_get(ups)
-    tout.debug(f'  project_get({ups!r}): {proj!r}')
-    if not proj:
-        proj = cser.project_get()
-        tout.debug(f'  project_get(None) fallback: {proj!r}')
-        if proj:
-            tout.warning(f"No patchwork project for upstream '{ups}';"
-                         f' using default project {proj[0]} (ID {proj[1]})')
+            f"configure with 'patman upstream add'{hint}")
     if not proj:
         raise ValueError(
             "Patchwork project not configured; use "
-            "'patman patchwork set-project'")
+            f"'patman patchwork set-project'{hint}")
+    pwork = Patchwork(pw_url)
     _, proj_id, link_name = proj
     pwork.project_set(proj_id, link_name)
     pwork.upstream = ups
@@ -229,13 +255,17 @@ def do_series(args, test_db=None, pwork=None, cser=None):
         'autolink', 'autolink-all', 'open', 'send', 'status', 'gather',
         'gather-all'
         ]
+    # These can find a series on the upstream's list on lore instead
+    lore_ok = ['autolink', 'autolink-all', 'open', 'send', 'status', 'gather']
     try:
         cser.open_database()
         if args.subcmd in needs_patchwork:
             ups = cser.get_series_upstream(args.series)
             tout.debug(f'Series upstream: {ups!r}')
             pwork = _setup_patchwork(
-                cser, pwork, ups, args.patchwork_url)
+                cser, pwork, ups, args.patchwork_url,
+                allow_lore=args.subcmd in lore_ok,
+                find_list=args.subcmd in lore_ok, series=args.series)
         elif pwork and pwork is not True:
             raise ValueError(
                 "Internal error: command "
@@ -349,7 +379,7 @@ def upstream(args, test_db=None):
         if args.subcmd == 'add':
             cser.upstream_add(args.remote_name, args.url,
                               args.project_name,
-                              patchwork_url=args.patchwork_url,
+                              patchwork_url=args.ups_patchwork_url,
                               lore_url=args.lore_url,
                               identity=args.identity,
                               series_to=args.series_to,
@@ -368,8 +398,8 @@ def upstream(args, test_db=None):
             cser.upstream_delete(args.remote_name)
         elif args.subcmd == 'set':
             kwargs = {}
-            if args.patchwork_url is not None:
-                kwargs['patchwork_url'] = args.patchwork_url
+            if args.ups_patchwork_url is not None:
+                kwargs['patchwork_url'] = args.ups_patchwork_url
             if args.lore_url is not None:
                 kwargs['lore_url'] = args.lore_url
             if args.identity is not None:

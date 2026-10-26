@@ -19,20 +19,39 @@ The newest series on the list are read from lore's Atom feed of the patches
 and cover letters sent to it, for the inbox on the 'patman serve' page.
 
 A review uses a lore list for an upstream which has one and no patchwork URL,
-e.g. 'https://lore.kernel.org/devicetree-compiler'
+e.g. 'https://lore.kernel.org/devicetree-compiler', as do 'patman series
+autolink' and 'patman series send', to find the series which you send to it
 """
 
 import asyncio
+import contextlib
 import email.utils
 import re
+from types import SimpleNamespace
 from urllib.parse import quote_plus, unquote, urlparse
 import xml.etree.ElementTree as ET
 
+from u_boot_pylib import tout
+
 from patman import lore
+from patman import patchwork
 from patman import pwcache
 
 # Prefix of the ID of a patch or cover letter read from lore
 ID_PREFIX = 'lore:'
+
+# Where the lists are, on lore
+LORE_BASE = 'https://lore.kernel.org'
+
+# Path of the config of a list, which gives its name and addresses
+LIST_CONFIG = '_/text/config/raw'
+
+# The name of a list in its config, e.g. '[publicinbox "lkml"]'
+RE_INBOX = re.compile(r'^\[publicinbox "([^"]+)"\]', re.M)
+
+# An address of a list in its config, e.g.
+# 'address = linux-kernel@vger.kernel.org'
+RE_ADDRESS = re.compile(r'^\s*address\s*=\s*(\S+)', re.M)
 
 # Search which gives the patches and cover letters sent to a list, leaving out
 # the replies to them
@@ -43,6 +62,9 @@ FEED_PAGE = 200
 
 # How long to keep the results of a search, in seconds
 SEARCH_KEEP = 10 * 60
+
+# Prefix of the name of a series, e.g. '[v2] ' in '[v2] dm: Tidy up'
+RE_PREFIX = re.compile(r'^\[[^]]*\] ')
 
 # Namespaces of the elements in lore's Atom feed
 ATOM = '{http://www.w3.org/2005/Atom}'
@@ -187,6 +209,56 @@ RE_LORE_TERM = re.compile(
     r'dfctx|dfpre|dfpost|dfblob|patchid):\S')
 
 
+def parse_list_config(data):
+    """Get the name and addresses of a list, from its config on lore
+
+    Args:
+        data (bytes): Config, from LIST_CONFIG within the list
+
+    Returns:
+        tuple:
+            str or None: Name of the list on lore, e.g. 'lkml'
+            list of str: Addresses of the list, in lower case, e.g.
+                ['linux-kernel@vger.kernel.org']
+    """
+    text = data.decode('utf-8', 'replace')
+    match = RE_INBOX.search(text)
+    return (match.group(1) if match else None,
+            [addr.lower() for addr in RE_ADDRESS.findall(text)])
+
+
+async def find_list(client, address, base=LORE_BASE):
+    """Find the list on lore which has an address
+
+    A list is usually named for the part of its address before the '@', e.g.
+    'devicetree-compiler' for devicetree-compiler@vger.kernel.org, though lore
+    may know it by another name, e.g. 'lkml' for linux-kernel@vger.kernel.org.
+    The list's config gives its name and addresses, so another list with that
+    name is not taken for it.
+
+    Args:
+        client (aiohttp.ClientSession): Session to use
+        address (str): Address, e.g.
+            'Devicetree Compiler <devicetree-compiler@vger.kernel.org>'
+        base (str): Where the lists are
+
+    Returns:
+        str or None: URL of the list, e.g.
+            'https://lore.kernel.org/devicetree-compiler', or None if lore does
+            not have it
+    """
+    addr = email.utils.parseaddr(address)[1].lower()
+    local = addr.partition('@')[0]
+    if '@' not in addr or not local:
+        return None
+    data = await lore.Lore(f'{base}/{local}').read(client, LIST_CONFIG,
+                                                   kind='search')
+    if not data:
+        return None
+    name, addrs = parse_list_config(data)
+    return f'{base}/{name}' if name and addr in addrs else None
+
+
 def search_query(text):
     """Get the lore query which searches for the series matching some text
 
@@ -321,16 +393,19 @@ def _find_patches(messages, root, info):
     return found
 
 
-class LoreList:  # pylint: disable=R0904
+class LoreList(patchwork.SeriesFinder):  # pylint: disable=R0904
     """Reads series from a mailing list on lore, standing in for Patchwork
 
-    Only what a review needs is provided. Lore has no patch states, so every
+    Only what a review and autolinking need is provided. Lore has no patch states, so every
     patch is 'new'.
 
     Args:
         url (str): URL of the list on lore, e.g.
             'https://lore.kernel.org/devicetree-compiler'
     """
+    # Where the series are, for messages
+    SOURCE = 'lore'
+
     def __init__(self, url):
         self.url = url.rstrip('/')
         self.lore = lore.Lore(self.url)
@@ -339,6 +414,8 @@ class LoreList:  # pylint: disable=R0904
         # There is no patchwork project, but searching needs one to be set
         self.proj_id = self.link_name
         self.upstream = None
+        # Number of searches made, for find_series_list()
+        self.request_count = 0
         # Messages of each thread read, keyed by the Message-ID of each
         # message in it
         self._threads = {}
@@ -677,6 +754,73 @@ class LoreList:  # pylint: disable=R0904
         data = await self.get_series(client, link)
         return ['new'] * len(data['patches'])
 
+    @contextlib.contextmanager
+    def collect_stats(self):
+        """Count the requests to lore across a range of calls
+
+        Yields:
+            SimpleNamespace: With request_count set to the number of requests
+                once the range is done
+        """
+        stats = SimpleNamespace(request_count=0)
+        start = self.lore.request_count
+        try:
+            yield stats
+        finally:
+            stats.request_count = self.lore.request_count - start
+
+    async def get_series_url(self, link):
+        """Get the URL of a series on the list
+
+        Args:
+            link (str): Message-ID of the series
+
+        Returns:
+            str: URL of the thread
+        """
+        return f'{self.url}/{link}/'
+
+    async def series_get_state(self, client, link, read_comments,
+                               read_cover_comments):
+        """Read the patches of a series and their replies, for its status
+
+        Lore has no states, so each patch is 'new'. The thread is read from
+        lore again, to see the patches and replies which have arrived since
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            link (str): Message-ID of the series
+            read_comments (bool): True to read the replies to the patches
+            read_cover_comments (bool): True to read the replies to the cover
+                letter
+
+        Returns:
+            tuple:
+                COVER or None: Cover letter, or None if there is none or
+                    read_cover_comments is False
+                list of patchwork.Patch: Patches
+        """
+        data = await self.get_series(client, link, max_age=0)
+        patches = []
+        for info in data['patches']:
+            if read_comments:
+                patch = await self.get_patch(client, info['id'])
+                comments = await self.get_patch_comments(client, info['id'])
+                pat = patchwork.Patch(info['id'], 'new', patch, comments,
+                                      info)
+            else:
+                pat = patchwork.Patch(info['id'], series_data=info)
+                pat.raw_subject = info['name']
+            patches.append(pat)
+
+        cover = None
+        letter = data['cover_letter']
+        if read_cover_comments and letter:
+            comments = await self.get_cover_comments(client, letter['id'])
+            cover = patchwork.COVER(letter['id'], len(comments),
+                                    letter['name'], comments)
+        return cover, patches
+
     async def get_series_mbox(self, client, link, max_age=None):
         """Get an mbox holding the patches of a series, in order
 
@@ -815,18 +959,25 @@ class LoreList:  # pylint: disable=R0904
         return await self._comments(client, cover_id)
 
     async def query_series(self, client, desc):
-        """Search for a series by title, which is not supported yet
+        """Search for the series whose cover letter or first patch has a title
+
+        Lore is always searched, not the cache, since this is used to find a
+        series just sent
 
         Args:
             client (aiohttp.ClientSession): Session to use
-            desc (str): Title to search for
+            desc (str): Title to search for, e.g. 'dm: Tidy up'
 
-        Raises:
-            ValueError: Always
+        Returns:
+            list of dict: Series, newest first, as from get_recent_series(),
+                except that the name is just the title, without the prefix,
+                as patchwork gives it, e.g. 'dm: Tidy up'
         """
-        del client, desc
-        raise ValueError(f'Cannot search {self.url} for a series by title; '
-                         'give the Message-ID of its cover letter with -s')
+        tout.info(f"Searching for '{desc}'")
+        self.request_count += 1
+        found = await self.search_series(client, None, desc, max_age=0)
+        return [{**ser, 'name': RE_PREFIX.sub('', ser['name'])}
+                for ser in found]
 
     async def search_patches(self, client, query, project_id=None,
                              per_page=20):

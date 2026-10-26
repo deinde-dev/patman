@@ -228,6 +228,11 @@ The options are:
 ``-p`` / ``--patchwork-url``
     URL of the patchwork server for this upstream
 
+``-l`` / ``--lore-url``
+    URL of the upstream's mailing list on lore, for an upstream with no
+    patchwork project, e.g. ``https://lore.kernel.org/devicetree-compiler``
+    (see :ref:`series_lore`)
+
 ``-t`` / ``--series-to``
     Patman alias for the To address (from your ``~/.patman`` alias file)
 
@@ -309,3 +314,33 @@ settings, so use ``patman series send`` for these series.
 
 The upstream's patchwork server is also used for the series' links, status
 and tags.
+
+.. _series_lore:
+
+A list without patchwork
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Some projects, such as dtc, have a mailing list but no patchwork project.
+``patman series send`` and ``patman series autolink`` then find the series on
+lore, by the title of its cover letter (or its first patch) and its version,
+and ``status``, ``gather`` and ``open`` read it from there.
+
+The list is the upstream's list on lore, if it has one and no patchwork URL::
+
+    patman upstream set us -l https://lore.kernel.org/devicetree-compiler
+
+Without one, and with no patchwork project to use, patman looks on lore for
+the list which the series is sent to, from its ``Series-to:`` tags or the
+upstream's To address. For example, a series with ``Series-to: dtc``, where
+the alias is ``devicetree-compiler@vger.kernel.org``, uses
+``https://lore.kernel.org/devicetree-compiler``, so nothing needs setting up.
+The link of each version is the Message-ID of its cover letter, or of its
+first patch if there is none, e.g.
+``20261025085508.1622340-1-sjg@chromium.org``, which is the series at
+``https://lore.kernel.org/devicetree-compiler/<link>/``. ``autolink-all``
+finds them for all your series.
+
+``status -cC`` shows the replies to each patch and the cover letter, and
+``gather`` adds the review tags in them to the commits, as with patchwork.
+Lore has no patch states, so each patch is 'new', and patman cannot tell
+when a series is accepted. ``gather-all`` still needs patchwork.

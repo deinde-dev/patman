@@ -20,7 +20,9 @@ from patman import cmdline
 from patman import control
 from patman import cser_helper
 from patman import interpreter
+from patman import lorelist
 from patman import review
+from patman import settings
 from patman import cseries
 from patman.database import Pcommit
 from patman import patchstream
@@ -1119,6 +1121,83 @@ class TestCseries(CseriesTester):
             ('second', 1, f'{self.SERIES_ID_SECOND_V1}', 'Series for my board',
              f'linked:{self.SERIES_ID_SECOND_V1}'),
             next(items))
+
+    def test_series_autolink_lore(self):
+        """Test that autolink and send use lore for an upstream without
+        patchwork"""
+        cser = self.get_cser()
+        cser.db.upstream_add('dtc', 'https://dtc.example.com',
+                             lore_url='https://lore.kernel.org/my-list')
+        cser.db.commit()
+        with terminal.capture():
+            cser.add('second', allow_unmarked=True, ups='dtc')
+        self.db_close()
+
+        def run(subcmd, method):
+            args = Namespace(subcmd=subcmd, series='second', version=None,
+                             patchwork_url=None, update=False,
+                             autolink=True, autolink_wait=0,
+                             show_comments=False, show_cover_comments=False)
+            with mock.patch.object(cseries.Cseries, method) as meth:
+                control.do_series(args, test_db=self.tmpdir)
+            return meth.call_args.args[0]
+
+        for subcmd, method in (('autolink', 'link_auto'), ('send', 'send')):
+            pwork = run(subcmd, method)
+            self.assertIsInstance(pwork, lorelist.LoreList)
+            self.assertEqual('https://lore.kernel.org/my-list', pwork.url)
+
+        # Gathering all series needs patchwork
+        with self.assertRaises(ValueError) as exc:
+            run('gather-all', 'gather_all')
+        self.assertIn('No patchwork URL found', str(exc.exception))
+
+    def test_series_lore_from_to(self):
+        """Test using the list which a series is sent to, for an upstream with
+        no patchwork or lore URL"""
+        cser = self.get_cser()
+        cser.db.upstream_add('bare', 'https://bare.example.com')
+        cser.db.commit()
+        with terminal.capture():
+            cser.add('second', allow_unmarked=True, ups='bare')
+
+        # The Series-to tag gives the address, with its alias looked up
+        uboot = 'U-Boot <u-boot@lists.denx.de>'
+        with mock.patch.object(settings, 'alias', {'u-boot': [uboot]}):
+            self.assertEqual([uboot], cser.get_series_to('second'))
+
+            async def find_list(_client, addr):
+                return ('https://lore.kernel.org/u-boot' if addr == uboot
+                        else None)
+
+            with mock.patch.object(lorelist, 'find_list', find_list):
+                self.assertEqual('https://lore.kernel.org/u-boot',
+                                 cser.find_lore_list('second'))
+                self.assertIsNone(cser.find_lore_list('unknown'))
+        self.db_close()
+
+        def run(found):
+            args = Namespace(subcmd='autolink', series='second', version=None,
+                             patchwork_url=None, update=False,
+                             autolink_wait=0)
+            with mock.patch.object(cseries.Cseries, 'find_lore_list',
+                                   return_value=found), \
+                    mock.patch.object(cseries.Cseries, 'link_auto') as meth, \
+                    terminal.capture() as (out, _):
+                control.do_series(args, test_db=self.tmpdir)
+            return meth.call_args.args[0], out.getvalue()
+
+        pwork, out = run('https://lore.kernel.org/u-boot')
+        self.assertIsInstance(pwork, lorelist.LoreList)
+        self.assertEqual('https://lore.kernel.org/u-boot', pwork.url)
+        self.assertIn('Using the list which the series is sent to, on lore: '
+                      'https://lore.kernel.org/u-boot', out)
+
+        # With no list on lore, the error says how to give one
+        with self.assertRaises(ValueError) as exc:
+            run(None)
+        self.assertIn("'patman upstream set bare -l <url>'",
+                      str(exc.exception))
 
     def test_series_autolink_extra(self):
         """Test command-line operation
@@ -2235,22 +2314,22 @@ class TestCseries(CseriesTester):
         itr = iter(lines)
 
         # Matches shown only once (they don't change between retries)
-        self.assertEqual(
-            "Possible matches for 'second' v3 desc 'Series for my board':",
-            next(itr))
+        self.assertEqual("Possible matches for 'second':", next(itr))
+        self.assertEqual("  v3 'Series for my board'", next(itr))
+        self.assertEqual('', next(itr))
         self.assertEqual('  Link  Version  Description', next(itr))
-        self.assertEqual('   456        1  Series for my board', next(itr))
-        self.assertEqual('   457        2  Series for my board', next(itr))
+        self.assertEqual('  456         1  Series for my board', next(itr))
+        self.assertEqual('  457         2  Series for my board', next(itr))
 
         # Progress messages with backoff (5, 10, 15, 20s sleeps)
         self.assertEqual(
-            'Waiting for series on patchwork (0s)...', next(itr))
+            'Waiting for series on https://my-fake-url (0s)...', next(itr))
         self.assertEqual(
-            'Waiting for series on patchwork (5s)...', next(itr))
+            'Waiting for series on https://my-fake-url (5s)...', next(itr))
         self.assertEqual(
-            'Waiting for series on patchwork (15s)...', next(itr))
+            'Waiting for series on https://my-fake-url (15s)...', next(itr))
         self.assertEqual(
-            'Waiting for series on patchwork (30s)...', next(itr))
+            'Waiting for series on https://my-fake-url (30s)...', next(itr))
         self.assertEqual('Link completed after 50 seconds', next(itr))
         self.assertRegex(
             next(itr), 'Checking out upstream commit refs/heads/base: .*')

@@ -17,6 +17,19 @@ Added
   same, from ``GET /api/stats``, with a bar chart of the weeks. Patman records
   when each review and response is sent, for the weeks, which is database
   schema v20.
+- ``patman series autolink``, ``autolink-all`` and ``series send`` find a
+  series on the upstream's list on lore when the upstream has a lore URL and
+  no patchwork URL, as for dtc. With neither, and no patchwork project, they
+  use the list on lore which the series is sent to. The link is the Message-ID
+  of the cover letter, or of the first patch. ``series status``, ``gather``
+  and ``open`` then read the series, its replies and its review tags from
+  lore.
+
+Fixed
+~~~~~
+- ``patman upstream add`` and ``upstream set`` no longer give the upstream the
+  ``patchwork_url`` from ``~/.patman``, which is the default for
+  ``patman -P``, so ``upstream set us -l <url>`` changes only the lore URL.
 
 0.6.0 - 2026-10-24
 ------------------

@@ -571,8 +571,10 @@ def add_upstream_subparser(subparsers):
     uadd.add_argument(
         'url', help='URL to use for this upstream, e.g. '
                     "'https://gitlab.denx.de/u-boot/u-boot.git'")
+    # This has its own dest, so that the patchwork_url setting, which is the
+    # default for -P, does not give every new upstream that URL
     uadd.add_argument(
-        '-p', '--patchwork-url',
+        '-p', '--patchwork-url', dest='ups_patchwork_url',
         help='URL of patchwork server for this upstream, e.g. '
              "'https://patchwork.ozlabs.org'")
     uadd.add_argument(
@@ -611,7 +613,7 @@ def add_upstream_subparser(subparsers):
     uset.add_argument('remote_name',
                       help="Git remote name used for this upstream, e.g. 'us'")
     uset.add_argument(
-        '-p', '--patchwork-url',
+        '-p', '--patchwork-url', dest='ups_patchwork_url',
         help='URL of patchwork server for this upstream')
     uset.add_argument(
         '-l', '--lore-url',
