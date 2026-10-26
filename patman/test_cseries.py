@@ -27,6 +27,7 @@ from patman import cseries
 from patman.database import Pcommit
 from patman import patchstream
 from patman.patchwork import Patchwork
+from patman.series import Series
 from patman.test_common import CseriesTester, Namespace, needs_checkpatch
 
 HASH_RE = r'[0-9a-f]+'
@@ -261,7 +262,7 @@ class TestCseries(CseriesTester):
     def test_series_add_skip_version(self):
         """Test adding a series which is v4 but has no earlier version"""
         cser = self.get_cser()
-        with terminal.capture() as (out, _):
+        with terminal.capture() as (out, err):
             cser.add('third4', 'The glorious third series', mark=False,
                      allow_unmarked=True)
         lines = out.getvalue().splitlines()
@@ -270,6 +271,12 @@ class TestCseries(CseriesTester):
             lines[0])
         self.assertEqual("Added series 'third' v4 (4 commits)", lines[1])
         self.assertEqual(2, len(lines))
+
+        # The branch has no Series-version tag, so it is sent as v1
+        self.assertEqual(
+            "Branch 'third4' suggests v4 but has no Series-version tag, so "
+            'its patches go out as v1; there is no earlier version, so '
+            "perhaps the branch should be named 'third'\n", err.getvalue())
 
         sdict = cser.db.series_get_dict()
         self.assertIn('third', sdict)
@@ -304,6 +311,30 @@ class TestCseries(CseriesTester):
 
         svid = cser.get_series_svid(chk['idnum'], 4)
         self.assertEqual(2, len(cser.get_pcommit_dict(svid)))
+
+    def test_check_version_tag(self):
+        """Test the warning for a branch with no Series-version tag"""
+        cser = self.get_cser()
+
+        def check(version, versions, tags=None):
+            series = Series()
+            series.update(tags or {})
+            with terminal.capture() as (_, err):
+                cser._check_version_tag(f'fix{version}', 'fix', series,
+                                        version, versions)
+            return err.getvalue()
+
+        # An earlier version means the branch is named correctly, so it
+        # needs only the tag
+        self.assertEqual(
+            "Branch 'fix2' suggests v2 but has no Series-version tag, so its "
+            'patches go out as v1\n', check(2, [1, 2]))
+        self.assertIn('there is no earlier version', check(2, [2]))
+        self.assertIn('there is no earlier version', check(2, [3]))
+
+        # There is nothing to say with the tag, or for v1
+        self.assertEqual('', check(2, [], {'version': '2'}))
+        self.assertEqual('', check(1, []))
 
     def test_series_add_wrong_version(self):
         """Test adding a series with an incorrect branch name or version

@@ -736,6 +736,30 @@ class CseriesHelper:
             raise ValueError('Unknown series idnum')
         return self.db.series_get_version_list(idnum)
 
+    def _check_version_tag(self, branch_name, ser_name, series, version,
+                           versions):
+        """Warn when a branch suggests a version which its patches do not give
+
+        Without a Series-version tag the patches go out with no version in
+        their subjects, i.e. as v1, so a branch named as a later version is
+        recorded as one version but sent as another
+
+        Args:
+            branch_name (str): Name of the branch, e.g. 'fix2'
+            ser_name (str): Name of the series, e.g. 'fix'
+            series (Series): Series collected from the branch
+            version (int): Version which the branch name suggests
+            versions (list of int): Versions of the series in the database
+        """
+        if version == 1 or 'version' in series:
+            return
+        msg = (f"Branch '{branch_name}' suggests v{version} but has no "
+               'Series-version tag, so its patches go out as v1')
+        if not any(vers < version for vers in versions):
+            msg += (f'; there is no earlier version, so perhaps the branch '
+                    f"should be named '{ser_name}'")
+        tout.warning(msg)
+
     def _join_name_version(self, in_name, version):
         """Convert a series name plus a version into a branch name
 

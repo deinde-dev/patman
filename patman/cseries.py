@@ -228,6 +228,9 @@ class Cseries(cser_helper.CseriesHelper):
         msg = 'Added'
         added = False
         series_id = self.db.series_find_by_name(ser.name)
+        self._check_version_tag(
+            name, ser.name, ser, version,
+            self._get_version_list(series_id) if series_id else [])
         if not series_id:
             if not ups:
                 ups = self._branch_upstream(name)
@@ -1447,6 +1450,10 @@ class Cseries(cser_helper.CseriesHelper):
                     args.process_tags = False
 
         args.branch = self._get_branch_name(ser.name, version)
+        _, branch_ser, _, _ = self.prep_series(args.branch)
+        self._check_version_tag(args.branch, ser.name, branch_ser, version,
+                                self._get_version_list(ser.idnum))
+
         # Record what is sent, so that the status and autolink use the same
         # patches
         self.sync_patches(ser, version, dry_run=args.dry_run)

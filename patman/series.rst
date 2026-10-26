@@ -27,6 +27,11 @@ branches are for the same series. Patman keeps track of these different
 versions. It handles the branch naming automatically, but you need to be aware
 of what it is doing.
 
+The version in the subject of each patch comes from its Series-version tag,
+which 'patman series inc' adds. If a branch such as 'video2' has no such tag,
+'patman series add' and 'patman series send' warn that its patches go out as
+v1, and suggest naming the branch 'video' if there is no earlier version.
+
 You will have an easier time if the branch names you use with 'patman series'
 are short, no more than 15 characters. This is the amount of columnar space in
 listings. You can add a longer description as the series description. If you
