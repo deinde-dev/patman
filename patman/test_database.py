@@ -182,23 +182,31 @@ class TestDatabase(CseriesTester):
         main.close_database()
 
     def test_db_split_envelope(self):
-        """Moving a review keeps the headers for its reply"""
+        """Moving a review keeps the headers for its reply and its context"""
         main = self.get_database()
         self.add_db_series(main.db, 'rev1', [1], review=True)
         rev = main.db.review_get_for_version(main.db.ser_ver_get_for_series(
             main.db.series_find_by_name('rev1'))[0].idnum)[0]
         main.db.review_set_envelope(rev.idnum, {'subject': 'Re: x'})
+        # A text in the new database first, so that the IDs differ
+        parts = [('Cover letter', 'Tidy'), ('Your notes', 'An RFC')]
+        main.db.review_set_context(rev.idnum, parts)
         main.commit()
         main.close_database()
 
         rdir = os.path.join(self.tmpdir, 'reviews')
-        self.open_db_in(rdir).close_database()
+        rcser = self.open_db_in(rdir)
+        rcser.db.execute("INSERT INTO context_text (hash, text) "
+                         "VALUES ('x', 'Other')")
+        rcser.commit()
+        rcser.close_database()
         self.run_db('--review-db-dir', rdir, 'split')
         rcser = self.open_db_in(rdir)
         rev = rcser.db.review_get_for_version(rcser.db.ser_ver_get_for_series(
             rcser.db.series_find_by_name('rev1'))[0].idnum)[0]
         self.assertEqual({'subject': 'Re: x'},
                          rcser.db.review_get_envelope(rev.idnum))
+        self.assertEqual(parts, rcser.db.review_get_context(rev.idnum))
         rcser.close_database()
 
     def test_db_errors(self):
@@ -321,6 +329,31 @@ class TestDatabase(CseriesTester):
                          db.series_get_max_reviewed_versions()])
         self.assertIn((svid, rev, 3), db.series_get_all_max_versions())
 
+    def test_review_context(self):
+        """The context which the agent was given is kept with a review"""
+        db = self.get_database().db
+        sid = self.add_db_series(db, 'rev', [1], review=True)
+        svid, = db.ser_ver_get_svids(sid)
+        rid = db.review_get_for_version(svid)[0].idnum
+        self.assertIsNone(db.review_get_context(rid))
+
+        parts = [('Series', '  >>> 1/1 abc a'), ('Cover letter', 'Tidy'),
+                 ('Earlier review', 'Hi')]
+        db.review_set_context(rid, parts)
+        self.assertEqual(parts, db.review_get_context(rid))
+
+        # A text which another review has is kept once
+        other = db.review_add(svid, 0, 'Cover', False, '2026-10-01')
+        db.review_set_context(other, [('Cover letter', 'Tidy')])
+        self.assertEqual([('Cover letter', 'Tidy')],
+                         db.review_get_context(other))
+        self.assertEqual(3, db.execute(
+            'SELECT COUNT(*) FROM context_text').fetchone()[0])
+
+        db.review_set_context(rid, None)
+        self.assertIsNone(db.review_get_context(rid))
+        self.assertIsNone(db.review_get_context(999))
+
     def test_stats(self):
         """The reviews, emails and replies are counted, with their days"""
         db = self.get_database().db
@@ -396,7 +429,7 @@ class TestDatabase(CseriesTester):
                 db.execute("INSERT INTO traffic (hour, url, requests, bytes) "
                            "VALUES ('2026-10-18 09', 'https://pw', 5, 100)")
                 db.commit()
-        self.assertEqual(20, database.LATEST)
+        self.assertEqual(21, database.LATEST)
         self.assertEqual({('https://pw', ''): (5, 100)},
                          db.traffic_get_kinds('2026-10-18 00'))
 

@@ -147,6 +147,13 @@ inbox, 'Review again' or 'Review it' for a cover letter, there is a box for
 context to give the agent, such as 'this is an RFC, so ignore style', which is
 passed with ``-c``.
 
+'Context' at the top of a series' reviews shows, on each review, what the agent
+was given besides its instructions: the series, the cover letter, the existing
+comments, the project's conventions, your writing voice, your notes, any
+Coverity defects and the earlier review of the same patch, if any. Tap it again
+to hide them. Patman records this with each review; for a review made before
+it did, the context is read from the agent's session, while Claude keeps it.
+
 The Inbox tab lists the most recent series on patchwork for each upstream.
 Series which you have reviewed, or which are your own, are marked, as are new
 versions of series you reviewed earlier, so it is easy to see what needs a

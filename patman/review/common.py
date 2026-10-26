@@ -210,6 +210,9 @@ class ReviewContext:  # pylint: disable=R0902
         # Agent session ID used to review each patch (0 for the cover letter)
         self.session_ids = {}
         self.previous_reviews = {}
+        # Context which the agent was given for each patch (0 for the cover
+        # letter), as from prompts.context_parts()
+        self.contexts = {}
         self.diffstat = None
         self.context = None
         self.coverity_text = None

@@ -152,12 +152,33 @@ UBOOT_CONVENTIONS = '''\
 - A series may need updates to the documentation, tests or Kconfig'''
 
 
-def conventions_section():
-    """Get the prompt section with the conventions of the project
+def conventions_text():
+    """Get the conventions of the project, to check the patches against
 
     The 'conventions' review setting names a file holding them. Without it,
     U-Boot's conventions are used if the project is U-Boot, else there are
     none.
+
+    Returns:
+        str or None: Conventions, or None if there are none
+
+    Raises:
+        ValueError: if the conventions file cannot be read
+    """
+    fname = settings.review.get('conventions')
+    if fname:
+        try:
+            return tools.read_file(fname, binary=False).strip()
+        except OSError as exc:
+            raise ValueError(
+                f"Cannot read the review conventions '{fname}': {exc}") from exc
+    if settings.review_project() == 'U-Boot':
+        return UBOOT_CONVENTIONS
+    return None
+
+
+def conventions_section():
+    """Get the prompt section with the conventions of the project
 
     Returns:
         str: Section text, or '' if there are no conventions
@@ -165,20 +186,12 @@ def conventions_section():
     Raises:
         ValueError: if the conventions file cannot be read
     """
-    project = settings.review_project()
-    fname = settings.review.get('conventions')
-    if fname:
-        try:
-            text = tools.read_file(fname, binary=False).strip()
-        except OSError as exc:
-            raise ValueError(
-                f"Cannot read the review conventions '{fname}': {exc}") from exc
-    elif project == 'U-Boot':
-        text = UBOOT_CONVENTIONS
-    else:
+    text = conventions_text()
+    if not text:
         return ''
     return f'''
-{project.upper()} CONVENTIONS (check the patches against these):
+{settings.review_project().upper()} CONVENTIONS (check the patches against \
+these):
 {text}
 '''
 
@@ -395,6 +408,18 @@ def _series_overview(all_commits, seq):
     return '\n'.join(series_lines)
 
 
+def _cover_overview(all_commits):
+    """List the patches of a series, for a review of its cover letter
+
+    Args:
+        all_commits (list of tuple): (seq, hash, subject) for all patches
+
+    Returns:
+        str: One line for each patch
+    """
+    return '\n'.join(f"  {s}. {h[:12]} {subj}" for s, h, subj in all_commits)
+
+
 def build_review_prompt(ctx, commit_hash, seq, all_commits,
                          previous_review):
     """Build the Claude agent prompt for reviewing a single patch
@@ -506,10 +531,7 @@ def build_cover_review_prompt(ctx, all_commits, previous_review=None):
         str: The prompt text
     """
     style = voice_section()
-    series_lines = []
-    for s, h, subj in all_commits:
-        series_lines.append(f"  {s}. {h[:12]} {subj}")
-    series_overview = '\n'.join(series_lines)
+    series_overview = _cover_overview(all_commits)
 
     cover_section = ''
     if ctx.cover_content:
@@ -547,6 +569,51 @@ add at the series level.
         conventions_section=conventions_section(),
         quoting_rules=QUOTING_RULES, spelling=ctx.spelling,
         project=settings.review_project())
+
+
+def context_parts(ctx, all_commits, seq, previous_review):
+    """Get the parts of a review's prompt which give the agent its context
+
+    These are what varies between reviews, as against the instructions, and
+    are recorded with the review so that the page can show them. The file
+    of existing comments is read, since it is removed after the review.
+
+    Args:
+        ctx (ReviewContext): Review context (uses cover_content,
+            comments_path, context and coverity_text)
+        all_commits (list of tuple): (seq, hash, subject) for all patches
+        seq (int): Patch being reviewed, or 0 for the cover letter
+        previous_review (str or None): Review of the same patch or cover
+            letter in an earlier version
+
+    Returns:
+        list of tuple: Each part, as (title, text), in the order which the
+            prompt gives them
+    """
+    parts = []
+    profile = voice.get_voice()
+    if profile:
+        parts.append(('Writing voice', profile))
+    parts.append(('Series', _series_overview(all_commits, seq) if seq
+                   else _cover_overview(all_commits)))
+    if ctx.comments_path:
+        try:
+            comments = tools.read_file(ctx.comments_path, binary=False)
+        except OSError:
+            comments = f'(see file: {ctx.comments_path})'
+        parts.append(('Existing comments', comments.strip()))
+    conventions = conventions_text()
+    if conventions:
+        parts.append(('Conventions', conventions))
+    if ctx.cover_content:
+        parts.append(('Cover letter', ctx.cover_content))
+    if previous_review:
+        parts.append(('Earlier review', previous_review))
+    if ctx.context:
+        parts.append(('Your notes', ctx.context))
+    if seq and getattr(ctx, 'coverity_text', None):
+        parts.append(('Coverity', ctx.coverity_text))
+    return parts
 
 
 REFINE_REVIEWS_PROMPT = '''You are editing draft code-review \

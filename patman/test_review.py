@@ -10,6 +10,7 @@ import contextlib
 from datetime import datetime, timedelta
 import email.utils
 import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -23,6 +24,7 @@ from patman import control
 from patman import review
 from patman import cseries
 from patman import gmail
+from patman.review import given
 from patman.database import Pcommit
 from patman import database
 from patman import lorelist
@@ -3042,6 +3044,79 @@ VERDICT: approved"""
         self.assertIn('COVERITY', prompt)
         self.assertIn('drivers/foo.c:42', prompt)
 
+    def test_review_prompt_context(self):
+        """The context given to the agent is recorded, and is in its prompt"""
+        ctx = self._make_review_ctx()
+        ctx.spelling = 'British'
+        ctx.comments_path = os.path.join(self.tmpdir, 'comments.txt')
+        tools.write_file(ctx.comments_path, 'Fred: Nice\n', binary=False)
+        ctx.cover_content = 'dm: Tidy up\n\nSome details'
+        ctx.context = 'This is an RFC'
+        ctx.coverity_text = '- RESOURCE_LEAK: drivers/foo.c:42'
+        commits = [(1, 'abc1234', 'dm: First'), (2, 'def5678', 'dm: Second')]
+        with mock.patch.object(review.voice, 'get_voice',
+                               return_value='Be brief'), \
+                mock.patch.dict(settings.review, {}, clear=True):
+            parts = review.prompts.context_parts(ctx, commits, 2, 'Hi Fred')
+            prompt = review.prompts.build_review_prompt(
+                ctx, 'def5678', 2, commits, 'Hi Fred')
+            cover_parts = review.prompts.context_parts(ctx, commits, 0,
+                                                       'Hi all')
+            cover_prompt = review.prompts.build_cover_review_prompt(
+                ctx, commits, 'Hi all')
+        self.assertEqual(
+            ['Writing voice', 'Series', 'Existing comments', 'Conventions',
+             'Cover letter', 'Earlier review', 'Your notes', 'Coverity'],
+            [title for title, _ in parts])
+        self.assertEqual('Fred: Nice', dict(parts)['Existing comments'])
+        self.assertIn('>>> 2/2 def5678 dm: Second', dict(parts)['Series'])
+        self.assertNotIn('Coverity', dict(cover_parts))
+
+        # The same parts are found in each prompt, which just names the file
+        # of comments
+        for want, text in ((parts, prompt), (cover_parts, cover_prompt)):
+            got = dict(given.parts_from_prompt(text))
+            self.assertIn(f'(see file: {ctx.comments_path})',
+                          got.pop('Existing comments'))
+            want = dict(want)
+            del want['Existing comments']
+            self.assertEqual(want, got)
+
+    def test_review_context_transcript(self):
+        """The context of an older review is read from its agent's session"""
+        cser = self.get_cser()
+        db = cser.db
+        sid = db.series_add('pw-x-review', 'foo bar')
+        svid = db.ser_ver_add(sid, 1, link='10')
+        session = '0b8c2f7e-1d3a-4c5b-9e6f-7a8b9c0d1e2f'
+        old = db.review_add(svid, 1, 'Old', 0, '2026-01-01')
+        db.review_set_session(old, session)
+        new = db.review_add(svid, 2, 'New', 0, '2026-01-02')
+        db.review_set_context(new, [('Your notes', 'This is an RFC')])
+        gone = db.review_add(svid, 3, 'Gone', 0, '2026-01-03')
+        cser.commit()
+
+        base = os.path.join(self.tmpdir, 'projects')
+        os.makedirs(os.path.join(base, 'wt'))
+        prompt = ('Review this\n\nUSER CONTEXT (extra notes from the '
+                  'reviewer for this run):\nIt is v1\n\nTASK:\nDo it\n')
+        entries = ({'type': 'queue-operation'},
+                   {'type': 'user', 'message': {'content': [
+                       {'type': 'text', 'text': prompt}]}})
+        tools.write_file(os.path.join(base, 'wt', f'{session}.jsonl'),
+                         '\n'.join(json.dumps(entry) for entry in entries),
+                         binary=False)
+        self.assertEqual(prompt, given.transcript_prompt(session, base))
+        self.assertIsNone(given.transcript_prompt('../x', base))
+        self.assertIsNone(given.transcript_prompt(
+            '1b8c2f7e-1d3a-4c5b-9e6f-7a8b9c0d1e2f', base))
+
+        self.assertEqual(('transcript', [('Your notes', 'It is v1')]),
+                         given.get_context(db, old, base))
+        self.assertEqual(('stored', [('Your notes', 'This is an RFC')]),
+                         given.get_context(db, new, base))
+        self.assertEqual((None, []), given.get_context(db, gone, base))
+
     def test_review_prompt_project(self):
         """Test the prompts name the project and give its conventions"""
         ctx = self._make_review_ctx()
@@ -3219,14 +3294,23 @@ VERDICT: approved"""
              [('> diff --git a/x b/x\n> @@ -1 +1 @@', 'Fix this.')], 'm'),
             ('', 'approved', [], 'm')]
 
+        # Each review records the context which the agent was given
+        def cover_review(ctx, _all_commits):
+            ctx.contexts[0] = [('Series', 'all')]
+            return cover
+
+        def patch_review(ctx, _cmt, seq, _all_commits):
+            ctx.contexts[seq] = [('Series', f'patch {seq}')]
+            return results[seq - 1]
+
         with mock.patch.object(review.core.claude_mod, 'check_available',
                                return_value=True), \
                 mock.patch.object(review.core.gitutil, 'get_top_level',
                                   return_value=self.tmpdir), \
                 mock.patch.object(review.core, '_run_cover_review_sync',
-                                  return_value=cover), \
+                                  side_effect=cover_review), \
                 mock.patch.object(review.core, '_run_patch_review_sync',
-                                  side_effect=results), \
+                                  side_effect=patch_review), \
                 terminal.capture():
             review.core.review_series(cser, sid, svid, 1, 'foo', series)
 
@@ -3237,6 +3321,11 @@ VERDICT: approved"""
         self.assertEqual(0, stored[1].approved)
         self.assertIn('Looks good', stored[2].body)
         self.assertEqual(1, stored[2].approved)
+        self.assertEqual(
+            {0: [('Series', 'all')], 1: [('Series', 'patch 1')],
+             2: [('Series', 'patch 2')]},
+            {seq: cser.db.review_get_context(rev.idnum)
+             for seq, rev in stored.items()})
 
     def test_series_review_already(self):
         """Test 'series review' refuses to overwrite without --force"""

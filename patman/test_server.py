@@ -431,6 +431,54 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(400, status)
         self.assertIn('weeks', data['error'])
 
+    def test_review_context(self):
+        """The server gives the context which the agent was given"""
+        series_id, svids = self.add_series(
+            'rev', 'Somebody else', {1: [('a', 'new', 5, 0)]}, ups='us',
+            source='review')
+        db = self.cser.db
+        sid = '0b8c2f7e-1d3a-4c5b-9e6f-7a8b9c0d1e2f'
+        rid = db.review_add(svids[1], 0, 'Cover', False, '2026-10-01')
+        db.review_set_session(rid, sid)
+        rid = db.review_add(svids[1], 1, 'Looks good', True, '2026-10-01')
+        db.review_set_context(rid, [('Series', '  >>> 1/1 abc a'),
+                                    ('Earlier review', 'Hi Fred')])
+        db.review_add(svids[1], 2, 'Gone', False, '2026-10-01')
+        db.commit()
+
+        # An older review's context is in the transcript of its session
+        base = os.path.join(self.tmpdir, 'claude')
+        os.makedirs(os.path.join(base, 'projects', 'wt'))
+        prompt = ('Review this\n\nUSER CONTEXT (extra notes from the '
+                  'reviewer for this run):\nThis is an RFC\n\nTASK:\nDo it\n')
+        with open(os.path.join(base, 'projects', 'wt', f'{sid}.jsonl'), 'w',
+                  encoding='utf-8') as outf:
+            for entry in ({'type': 'queue-operation'},
+                          {'type': 'user', 'message': {'content': prompt}}):
+                print(json.dumps(entry), file=outf)
+
+        srv = self.make_server()
+        path = f'/api/reviews/{series_id}/context'
+        with mock.patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': base}):
+            status, data = self.call(srv, 'GET', f'{path}?version=1')
+        self.assertEqual(200, status)
+        self.assertEqual(1, data['version'])
+        self.assertEqual(
+            [(0, 'transcript', [('Your notes', 'This is an RFC')]),
+             (1, 'stored', [('Series', '  >>> 1/1 abc a'),
+                            ('Earlier review', 'Hi Fred')]),
+             (2, None, [])],
+            [(item['seq'], item['source'],
+              [(part['title'], part['text']) for part in item['parts']])
+             for item in data['reviews']])
+
+        # The version must be one which the series has
+        status, data = self.call(srv, 'GET', path)
+        self.assertEqual(400, status)
+        self.assertIn('version', data['error'])
+        status, data = self.call(srv, 'GET', f'{path}?version=9')
+        self.assertIn('version 9', data['error'])
+
     def test_version(self):
         """The server gives the version of patman which it runs"""
         with mock.patch.object(server.info, 'get_version',

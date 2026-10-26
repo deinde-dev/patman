@@ -6,7 +6,7 @@ The patman database
 Patman stores series tracking, review and workflow state in a SQLite
 database (``.patman.db``) in the top-level git directory. The schema is
 versioned and migrated automatically when patman starts; it is currently at
-v20. The :doc:`db` chapter of the manual covers where the database is
+v21. The :doc:`db` chapter of the manual covers where the database is
 kept, the separate review database and sharing it between patman runs.
 
 The database allows patman to track a patch series across multiple
@@ -43,6 +43,9 @@ Entity relationships
 
     upstream 1---* inbox            (inbox.upstream references
                                      upstream.name)
+
+    context_text 1---* review       (each part of review.context
+                                     refers to context_text.id)
 
 A **series** represents a named patch series across all its versions.
 Each **ser_ver** is one version of that series (e.g. v1, v2), linked to
@@ -158,6 +161,12 @@ envelope          TEXT      JSON object with the headers for sending
                             (added v13)
 sent_time         TEXT      When the review was sent, or patman found
                             that it was, for ``--stats`` (added v20)
+context           TEXT      JSON list of the parts of the context
+                            which the agent was given, each a
+                            ``[title, id]`` pair, e.g. for the earlier
+                            review of the patch, where ``id`` is that
+                            of its text in ``context_text`` (added
+                            v21)
 ================  ========  ==========================================
 
 reply
@@ -299,6 +308,23 @@ timestamp       TEXT      When it was added
 ==============  ========  ==========================================
 
 Each series is only in the inbox of an upstream once.
+
+context_text
+~~~~~~~~~~~~
+
+The texts of the context which the agent was given for each review (see the
+``context`` column of ``review``). Much of the context is the same for many
+reviews, e.g. the cover letter for every patch of a version and the writing
+voice for nearly all of them, so each text is kept once. Added in v21.
+
+==============  ========  ==========================================
+Column          Type      Description
+==============  ========  ==========================================
+id              INTEGER   Primary key (auto-increment)
+hash            TEXT      SHA-256 of the text, in hex, so that a text
+                          which is already here is found
+text            TEXT      Text, e.g. a cover letter
+==============  ========  ==========================================
 
 schema_version
 ~~~~~~~~~~~~~~

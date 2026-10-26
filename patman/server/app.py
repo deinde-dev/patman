@@ -34,6 +34,7 @@ from patman import traffic
 from patman.patchwork import Patchwork
 from patman.review import apply
 from patman.review import checkout
+from patman.review import given
 from patman.review import lookup
 from patman.review import stats
 from patman.server import info
@@ -631,6 +632,40 @@ class Server(jobs.JobRunner):
         proj = self.cser.project_get(data['upstream'])
         data['project'] = proj[2] if proj else None
         return web.json_response(data)
+
+    async def _review_context(self, request):
+        """Handle 'GET /api/reviews/<id>/context': show the agent's context
+
+        The 'version' query parameter gives the version of the series. Each
+        review has the parts of the context which the agent was given, as
+        recorded with it, or else as found in the transcript of its session.
+
+        Args:
+            request (web.Request): Request, with the series ID as 'idnum'
+
+        Return:
+            web.Response: Object with the 'version' and its 'reviews', each
+                with its 'id', 'seq', 'source' ('stored', 'transcript' or None
+                if the context is not known) and 'parts', each with a 'title'
+                and 'text'
+
+        Raises:
+            BadRequest: The version is missing or invalid
+            ValueError: The series has no such version
+        """
+        idnum = _idnum(request)
+        version = params.get_int(request.query, 'version')
+        if not version:
+            raise params.BadRequest('Please give the version')
+        db = self.rcser.db
+        svinfo = db.ser_ver_get_for_series(idnum, version)
+        out = []
+        for rev in db.review_get_for_version(svinfo.idnum):
+            source, parts = given.get_context(db, rev.idnum)
+            out.append({'id': rev.idnum, 'seq': rev.seq, 'source': source,
+                        'parts': [{'title': title, 'text': text}
+                                  for title, text in parts]})
+        return web.json_response({'version': version, 'reviews': out})
 
     async def _todo_list(self, _request):
         """Handle 'GET /api/todo': list the todo items
@@ -1939,6 +1974,8 @@ class Server(jobs.JobRunner):
                             self._series_sync)
         app.router.add_get('/api/reviews', self._review_list)
         app.router.add_get(r'/api/reviews/{idnum:\d+}', self._review_detail)
+        app.router.add_get(r'/api/reviews/{idnum:\d+}/context',
+                           self._review_context)
         app.router.add_get('/api/todo', self._todo_list)
         app.router.add_get('/api/stats', self._stats)
         app.router.add_get('/api/version', self._version)
