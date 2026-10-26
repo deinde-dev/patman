@@ -289,7 +289,110 @@ def get_proxy(url):
     return None
 
 
-class Patchwork:
+class SeriesFinder:
+    """Finds a series by its title and version
+
+    This is shared by Patchwork and LoreList, which each provide
+    query_series() to search for series by title, and a request_count of the
+    requests made
+    """
+    async def _find_series(self, client, svid, ser_id, version, ser):
+        """Find a series on the server
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            svid (int): ser_ver ID
+            ser_id (int): series ID
+            version (int): Version number to search for
+            ser (Series): Contains description (cover-letter title)
+
+        Returns:
+            tuple:
+                int: ser_ver ID (as passed in)
+                int: series ID (as passed in)
+                str: Series link, or None if not found
+                list of dict, or None if found
+                    each dict is the server result from a possible series
+        """
+        desc = ser.desc
+        name_found = []
+
+        # Do a series query on the description
+        res = await self.query_series(client, desc)
+        for pws in res:
+            if pws['name'] == desc:
+                if int(pws['version']) == version:
+                    return svid, ser_id, pws['id'], None
+                name_found.append(pws)
+
+        # When there is no cover letter, patchwork uses the first patch as the
+        # series name
+        cmt = ser.commits[0]
+
+        res = await self.query_series(client, cmt.subject)
+        for pws in res:
+            patch = Patch(0)
+            patch.parse_subject(pws['name'])
+            if patch.subject == cmt.subject:
+                if int(pws['version']) == version:
+                    return svid, ser_id, pws['id'], None
+                name_found.append(pws)
+
+        return svid, ser_id, None, name_found or res
+
+    async def find_series(self, ser, version):
+        """Find a series based on its description and version
+
+        Args:
+            ser (Series): Contains description (cover-letter title)
+            version (int): Version number
+
+        Return: tuple:
+            tuple:
+                str: Series ID, or None if not found
+                list of dict, or None if found
+                    each dict is the server result from a possible series
+            int: number of server requests done
+        """
+        async with aiohttp.ClientSession() as client:
+            # We don't know the svid and it isn't needed, so use -1
+            _, _, link, options = await self._find_series(client, -1, -1,
+                                                          version, ser)
+        return link, options
+
+    async def find_series_list(self, to_find):
+        """Find the link for each series in a list
+
+        Args:
+            to_find (dict of svids to sync):
+                key (int): ser_ver ID
+                value (tuple):
+                    int: Series ID
+                    int: Series version
+                    str: Series link
+                    str: Series description
+
+        Return: tuple:
+            list of tuple, one for each item in to_find:
+                int: ser_ver_ID
+                int: series ID
+                int: Series version
+                str: Series link, or None if not found
+                list of dict, or None if found
+                    each dict is the server result from a possible series
+            int: number of server requests done
+        """
+        self.request_count = 0
+        async with aiohttp.ClientSession() as client:
+            tasks = [asyncio.create_task(
+                self._find_series(client, svid, ser_id, version, desc))
+                for svid, (ser_id, version, link, desc) in to_find.items()]
+            results = await asyncio.gather(*tasks)
+
+        return results, self.request_count
+
+
+class Patchwork(SeriesFinder):
     """Class to handle communication with patchwork
     """
     def __init__(self, url, show_progress=True, single_thread=False):
@@ -741,101 +844,6 @@ class Patchwork:
         tout.info(f"Searching for '{desc}'")
         tout.debug(f'  GET {self.url}/api/1.2/{subpath}')
         return await self._request(client, subpath)
-
-    async def _find_series(self, client, svid, ser_id, version, ser):
-        """Find a series on the server
-
-        Args:
-            client (aiohttp.ClientSession): Session to use
-            svid (int): ser_ver ID
-            ser_id (int): series ID
-            version (int): Version number to search for
-            ser (Series): Contains description (cover-letter title)
-
-        Returns:
-            tuple:
-                int: ser_ver ID (as passed in)
-                int: series ID (as passed in)
-                str: Series link, or None if not found
-                list of dict, or None if found
-                    each dict is the server result from a possible series
-        """
-        desc = ser.desc
-        name_found = []
-
-        # Do a series query on the description
-        res = await self.query_series(client, desc)
-        for pws in res:
-            if pws['name'] == desc:
-                if int(pws['version']) == version:
-                    return svid, ser_id, pws['id'], None
-                name_found.append(pws)
-
-        # When there is no cover letter, patchwork uses the first patch as the
-        # series name
-        cmt = ser.commits[0]
-
-        res = await self.query_series(client, cmt.subject)
-        for pws in res:
-            patch = Patch(0)
-            patch.parse_subject(pws['name'])
-            if patch.subject == cmt.subject:
-                if int(pws['version']) == version:
-                    return svid, ser_id, pws['id'], None
-                name_found.append(pws)
-
-        return svid, ser_id, None, name_found or res
-
-    async def find_series(self, ser, version):
-        """Find a series based on its description and version
-
-        Args:
-            ser (Series): Contains description (cover-letter title)
-            version (int): Version number
-
-        Return: tuple:
-            tuple:
-                str: Series ID, or None if not found
-                list of dict, or None if found
-                    each dict is the server result from a possible series
-            int: number of server requests done
-        """
-        async with aiohttp.ClientSession() as client:
-            # We don't know the svid and it isn't needed, so use -1
-            _, _, link, options = await self._find_series(client, -1, -1,
-                                                          version, ser)
-        return link, options
-
-    async def find_series_list(self, to_find):
-        """Find the link for each series in a list
-
-        Args:
-            to_find (dict of svids to sync):
-                key (int): ser_ver ID
-                value (tuple):
-                    int: Series ID
-                    int: Series version
-                    str: Series link
-                    str: Series description
-
-        Return: tuple:
-            list of tuple, one for each item in to_find:
-                int: ser_ver_ID
-                int: series ID
-                int: Series version
-                str: Series link, or None if not found
-                list of dict, or None if found
-                    each dict is the server result from a possible series
-            int: number of server requests done
-        """
-        self.request_count = 0
-        async with aiohttp.ClientSession() as client:
-            tasks = [asyncio.create_task(
-                self._find_series(client, svid, ser_id, version, desc))
-                for svid, (ser_id, version, link, desc) in to_find.items()]
-            results = await asyncio.gather(*tasks)
-
-        return results, self.request_count
 
     def project_set(self, project_id, link_name):
         """Set the project ID
