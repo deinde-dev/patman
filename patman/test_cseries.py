@@ -2314,12 +2314,12 @@ class TestCseries(CseriesTester):
         itr = iter(lines)
 
         # Matches shown only once (they don't change between retries)
-        self.assertEqual(
-            "Possible matches for 'second' v3 desc 'Series for my board':",
-            next(itr))
+        self.assertEqual("Possible matches for 'second':", next(itr))
+        self.assertEqual("  v3 'Series for my board'", next(itr))
+        self.assertEqual('', next(itr))
         self.assertEqual('  Link  Version  Description', next(itr))
-        self.assertEqual('   456        1  Series for my board', next(itr))
-        self.assertEqual('   457        2  Series for my board', next(itr))
+        self.assertEqual('  456         1  Series for my board', next(itr))
+        self.assertEqual('  457         2  Series for my board', next(itr))
 
         # Progress messages with backoff (5, 10, 15, 20s sleeps)
         self.assertEqual(

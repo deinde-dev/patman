@@ -476,7 +476,7 @@ class Cseries(cser_helper.CseriesHelper):
                 tout.debug(f'Found link: {pws}')
                 if wait_s:
                     tout.notice('Link completed after '
-                                f'{self.get_time() - start} seconds')
+                                f'{int(self.get_time() - start)} seconds')
                 break
 
             if not wait_s or self.get_time() > stop:
@@ -506,17 +506,24 @@ class Cseries(cser_helper.CseriesHelper):
     def _show_autolink_matches(self, name, version, desc, options):
         """Show possible autolink matches
 
+        The links are as wide as the longest, since a Message-ID on lore is
+        much longer than a patchwork ID
+
         Args:
             name (str): Series name
             version (int): Series version
             desc (str): Series description
-            options (list of dict): Possible matches from patchwork
+            options (list of dict): Possible matches from patchwork or lore
         """
-        print(f"Possible matches for '{name}' v{version} desc '{desc}':")
+        print(f"Possible matches for '{name}':")
+        print(f"  v{version} '{desc}'")
         if options:
-            print('  Link  Version  Description')
+            width = max(len('Link'), *(len(str(opt['id'])) for opt in options))
+            print()
+            print(f"  {'Link':{width}}  Version  Description")
             for opt in options:
-                print(f"{opt['id']:6}  {opt['version']:7}  {opt['name']}")
+                print(f"  {str(opt['id']):{width}}  {opt['version']:7}  "
+                      f"{opt['name']}")
         else:
             print('  (none)')
 
@@ -1447,7 +1454,8 @@ class Cseries(cser_helper.CseriesHelper):
             workflow.sent(self, ser.idnum, ser_ver_id=svid)
 
         if likely_sent and autolink:
-            tout.notice(f'Autolinking with {pwork.url} ({autolink_wait} seconds)')
+            tout.notice(f'Autolinking with {pwork.url} (waiting up to '
+                        f'{autolink_wait} seconds)')
             self.link_auto(pwork, name, version, True, wait_s=autolink_wait)
 
     def archive(self, series):
