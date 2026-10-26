@@ -205,6 +205,28 @@ class TestSettings(unittest.TestCase):
                     self.assertFalse(args.keep_assist_tags)
                     self.assertTrue(args.insert_base_commit)
 
+    def test_upstream_patchwork_url(self):
+        # The patchwork_url setting does not give an upstream that URL when
+        # it is added or changed
+        with cleared_command_line_args():
+            with empty_git_repository():
+                with tempfile.NamedTemporaryFile('w') as global_config:
+                    global_config.write('[settings]\n'
+                                        'patchwork_url: https://pw.example\n')
+                    global_config.flush()
+                    fname = global_config.name
+                    for argv in (['upstream', 'add', 'us', 'https://one'],
+                                 ['upstream', 'set', 'us', '-l', 'https://x']):
+                        args = cmdline.parse_args(argv, config_fname=fname)
+                        self.assertIsNone(args.ups_patchwork_url, argv)
+                        self.assertEqual('https://pw.example',
+                                         args.patchwork_url)
+
+                    args = cmdline.parse_args(
+                        ['upstream', 'set', 'us', '-p', 'https://pw.us'],
+                        config_fname=fname)
+                    self.assertEqual('https://pw.us', args.ups_patchwork_url)
+
 
 if __name__ == '__main__':
     unittest.main()

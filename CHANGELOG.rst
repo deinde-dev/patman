@@ -18,6 +18,12 @@ Added
   when each review and response is sent, for the weeks, which is database
   schema v20.
 
+Fixed
+~~~~~
+- ``patman upstream add`` and ``upstream set`` no longer give the upstream the
+  ``patchwork_url`` from ``~/.patman``, which is the default for
+  ``patman -P``, so ``upstream set us -l <url>`` changes only the lore URL.
+
 0.6.0 - 2026-10-24
 ------------------
 

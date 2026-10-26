@@ -349,7 +349,7 @@ def upstream(args, test_db=None):
         if args.subcmd == 'add':
             cser.upstream_add(args.remote_name, args.url,
                               args.project_name,
-                              patchwork_url=args.patchwork_url,
+                              patchwork_url=args.ups_patchwork_url,
                               lore_url=args.lore_url,
                               identity=args.identity,
                               series_to=args.series_to,
@@ -368,8 +368,8 @@ def upstream(args, test_db=None):
             cser.upstream_delete(args.remote_name)
         elif args.subcmd == 'set':
             kwargs = {}
-            if args.patchwork_url is not None:
-                kwargs['patchwork_url'] = args.patchwork_url
+            if args.ups_patchwork_url is not None:
+                kwargs['patchwork_url'] = args.ups_patchwork_url
             if args.lore_url is not None:
                 kwargs['lore_url'] = args.lore_url
             if args.identity is not None:
