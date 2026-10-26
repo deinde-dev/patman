@@ -2372,6 +2372,46 @@ class TestReview(CseriesTester):
         self.assertEqual(1, len(prev))
         self.assertEqual('v1 body', prev[0].body)
 
+    def test_load_previous_reviews(self):
+        """Each patch gets the earlier review of the same patch"""
+        cser = self.get_cser()
+        db = cser.db
+        sid = db.series_add('pw-x-review', 'foo bar')
+        db.series_set_source(sid, 'review')
+        sv1 = db.ser_ver_add(sid, 1, link='10')
+        db.pcommit_add_list(sv1, [
+            Pcommit(None, seq, subject, None, None, None, None, None)
+            for seq, subject in enumerate([
+                '[1/3] dm: First', '[2/3] dm: Second', '[3/3] dm: Third'])])
+        for seq in (0, 2, 3):
+            db.review_add(sv1, seq, f'v1 review {seq}', 0, '2026-01-01')
+
+        # v1 has no record of its patches
+        sv2 = db.ser_ver_add(sid, 2, link='11')
+        for seq in (1, 2):
+            db.review_add(sv2, seq, f'v2 review {seq}', 0, '2026-01-02')
+        cser.commit()
+
+        def load(version, subjects):
+            ctx = review.common.ReviewContext(None, cser, {})
+            ctx.series_id = sid
+            ctx.version = version
+            review.core.load_previous_reviews(ctx, dict(enumerate(subjects,
+                                                                  1)))
+            return ctx.previous_reviews
+
+        # A new patch moves the others along, but each keeps its own review,
+        # and the new one has none
+        self.assertEqual(
+            {0: 'v1 review 0', 3: 'v1 review 2', 4: 'v1 review 3'},
+            load(2, ['[v2,1/4] dm: First', '[v2,2/4] dm: New',
+                     '[v2,3/4] dm: Second', '[v2,4/4] dm: Third']))
+
+        # Patches are matched by number when the earlier version does not
+        # record them
+        self.assertEqual({1: 'v2 review 1', 2: 'v2 review 2'},
+                         load(3, ['dm: Second', 'dm: First']))
+
     def test_review_stats(self):
         """Test --stats counts the reviews, emails and replies"""
         cser = self.get_cser()

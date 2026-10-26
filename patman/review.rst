@@ -344,6 +344,11 @@ the agent, so it can check whether earlier issues were addressed and avoid
 raising fresh points the earlier versions did not. Versions are linked
 by their cleaned cover-letter title.
 
+Each patch is given the earlier review of the patch with the same subject,
+since patches are often added, dropped or moved between versions. A patch
+which is new, or whose subject has changed, has no earlier review, and the
+cover letter has the earlier cover-letter review.
+
 An older database may have stored each version as a separate, unlinked
 record, leaving follow-up reviews without this context. It may also hold a
 series with no versions, left by a review which found nothing to review,

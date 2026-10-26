@@ -31,6 +31,13 @@ Fixed
   ``patchwork_url`` from ``~/.patman``, which is the default for
   ``patman -P``, so ``upstream set us -l <url>`` changes only the lore URL.
 
+Fixed
+~~~~~
+- A review of a new version gives each patch the earlier review of the same
+  patch, matched by subject, rather than of the patch with the same number,
+  so that a patch added or moved between versions does not give the later
+  patches the earlier reviews of others.
+
 0.6.0 - 2026-10-24
 ------------------
 

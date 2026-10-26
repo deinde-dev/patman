@@ -31,6 +31,7 @@ from patman import cser_helper
 from patman import database
 from patman import lorelist
 from patman import patchstream
+from patman import patchwork
 from patman import workflow
 from patman.review import apply
 from patman.review import checkout
@@ -49,6 +50,54 @@ from patman.review import voice
 # Reported when the Claude Agent SDK, which runs the agents, is not installed
 AGENT_MISSING = ("The review agent is not available; install the 'review' "
                  'extra (pip install patch-manager[review])')
+
+
+def _bare_subject(subject):
+    """Get the subject of a patch without its prefix
+
+    Args:
+        subject (str): Subject, e.g. '[v9,5/8] misc: Add a driver'
+
+    Returns:
+        str: Subject without the prefix, e.g. 'misc: Add a driver'
+    """
+    patch = patchwork.Patch(0)
+    patch.parse_subject(subject)
+    return patch.subject
+
+
+def load_previous_reviews(ctx, subjects):
+    """Give each patch the review of the same patch in an earlier version
+
+    The reviews come from the latest earlier version which has any. Patches
+    may be added, dropped or moved between versions, so each is matched by
+    its subject, not its number, and a patch which is not in that version
+    has no earlier review. The cover letter has the earlier cover-letter
+    review. If the earlier version has no record of its patches, they are
+    matched by number.
+
+    Args:
+        ctx (ReviewContext): Review context, with cser, series_id and
+            version; previous_reviews is filled in
+        subjects (dict): Subject of each patch in this version
+            key (int): Patch number, from 1
+            value (str): Subject, with or without its prefix
+    """
+    prev = ctx.cser.db.review_get_previous(ctx.series_id, ctx.version)
+    if not prev:
+        return
+    bodies = {rev.seq: rev.body for rev in prev}
+    pcommits = ctx.cser.db.pcommit_get_list(prev[0].svid)
+    if not pcommits:
+        ctx.previous_reviews.update(bodies)
+        return
+    if 0 in bodies:
+        ctx.previous_reviews[0] = bodies[0]
+    old_seq = {_bare_subject(pcm.subject): pcm.seq + 1 for pcm in pcommits}
+    for seq, subject in subjects.items():
+        body = bodies.get(old_seq.get(_bare_subject(subject)))
+        if body:
+            ctx.previous_reviews[seq] = body
 
 
 async def _run_cover_review(ctx, all_commits):
@@ -332,8 +381,8 @@ def review_series(cser, series_id, svid, version, branch, series,
     ctx.context = common.read_context(context) if context else None
     if series.cover:
         ctx.cover_content = '\n'.join(series.cover)
-    for rev in cser.db.review_get_previous(series_id, version):
-        ctx.previous_reviews[rev.seq] = rev.body
+    load_previous_reviews(
+        ctx, {i + 1: cmt.subject for i, cmt in enumerate(commits)})
 
     all_commits = [(i + 1, cmt.hash, cmt.subject)
                    for i, cmt in enumerate(commits)]
@@ -549,9 +598,9 @@ def _run_and_store_reviews(ctx, args):
         ctx (ReviewContext): Review context with all fields populated
         args (Namespace): Command-line arguments (for create_drafts flag)
     """
-    prev_db = ctx.cser.db.review_get_previous(ctx.series_id, ctx.version)
-    for rev in prev_db:
-        ctx.previous_reviews[rev.seq] = rev.body
+    load_previous_reviews(ctx, {
+        i + 1: patch.get('name', '')
+        for i, patch in enumerate(ctx.series_data.get('patches', []))})
 
     if ctx.cover_content is None:
         ctx.cover_content = lookup.fetch_cover_content(
