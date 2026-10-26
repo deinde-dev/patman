@@ -455,7 +455,7 @@ class Series(dict):
         links = {}
         for item in links_str.split():
             if ':' in item:
-                version, link = item.split(':')
+                version, link = item.split(':', 1)
                 links[int(version)] = link
             else:
                 links[cur_version] = item

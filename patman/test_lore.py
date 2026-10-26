@@ -9,8 +9,11 @@ import gzip
 import os
 import shutil
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
+
+from u_boot_pylib import terminal
 
 from patman import lore
 from patman import lorelist
@@ -529,9 +532,6 @@ class TestLore(unittest.TestCase):
             with self.assertRaises(ValueError) as exc:
                 run(llist.get_series(None, msgid))
             self.assertEqual(msg, str(exc.exception))
-        with self.assertRaises(ValueError) as exc:
-            run(llist.query_series(None, 'dm: Tidy up'))
-        self.assertIn('give the Message-ID', str(exc.exception))
 
     def test_lorelist_feed_complete(self):
         """A series which is only partly in the feed is read from its thread"""
@@ -651,6 +651,48 @@ class TestLore(unittest.TestCase):
                     self.assertRaises(ValueError) as exc:
                 run(llist.search_series(Client(Response(500)), None, 'x'))
         self.assertEqual(f'Cannot search {LIST}', str(exc.exception))
+
+    def test_lorelist_find_series(self):
+        """A series which you send can be found on lore by its title"""
+        llist = lorelist.LoreList(LIST)
+
+        def find(desc, version, first='dm: First', searches=1):
+            ser = SimpleNamespace(desc=desc,
+                                  commits=[SimpleNamespace(subject=first)])
+            client = Client(*[Response(200, FEED)] * searches)
+            with mock.patch.object(pwcache, 'get', return_value=None), \
+                    terminal.capture():
+                _, _, link, options = run(
+                    llist._find_series(  # pylint: disable=W0212
+                        client, 1, 2, version, ser))
+            self.assertEqual(searches, len(client.urls))
+            return link, options
+
+        # Each version is found, with or without a cover letter
+        self.assertEqual(('v2c@x', None), find('dm: Tidy up', 2))
+        self.assertEqual(('c@x', None), find('dm: Tidy up', 1))
+        self.assertEqual(('one@x', None), find('net: Fix it', 1,
+                                               first='net: Fix it'))
+        self.assertEqual(3, llist.request_count)
+
+        # A version which is not on lore gives the others, after looking for
+        # the first patch too
+        link, options = find('dm: Tidy up', 3, searches=2)
+        self.assertIsNone(link)
+        self.assertEqual(
+            [('v2c@x', 'dm: Tidy up', 2), ('c@x', 'dm: Tidy up', 1)],
+            [(opt['id'], opt['name'], opt['version']) for opt in options])
+
+        # Lore is searched even when the cache has the search, since the
+        # series may just have been sent
+        cache = pwcache.Cache(os.path.join(self.tmpdir, 'pw.db'))
+        with mock.patch.object(pwcache, 'get', return_value=cache), \
+                terminal.capture():
+            run(llist.search_series(Client(Response(200, FEED)), None,
+                                    'dm: Tidy up'))
+            client = Client(Response(200, b''))
+            self.assertEqual([], run(llist.query_series(client, 'dm: Tidy up')))
+        self.assertEqual(1, len(client.urls))
 
     def test_strip_signature(self):
         """The signature at the end of a patch is not part of its diff"""

@@ -17,6 +17,10 @@ Added
   same, from ``GET /api/stats``, with a bar chart of the weeks. Patman records
   when each review and response is sent, for the weeks, which is database
   schema v20.
+- ``patman series autolink``, ``autolink-all`` and ``series send`` find a
+  series on the upstream's list on lore when the upstream has a lore URL and
+  no patchwork URL, as for dtc. The link is the Message-ID of the cover letter,
+  or of the first patch.
 
 Fixed
 ~~~~~

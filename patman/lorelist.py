@@ -19,7 +19,8 @@ The newest series on the list are read from lore's Atom feed of the patches
 and cover letters sent to it, for the inbox on the 'patman serve' page.
 
 A review uses a lore list for an upstream which has one and no patchwork URL,
-e.g. 'https://lore.kernel.org/devicetree-compiler'
+e.g. 'https://lore.kernel.org/devicetree-compiler', as do 'patman series
+autolink' and 'patman series send', to find the series which you send to it
 """
 
 import asyncio
@@ -28,7 +29,10 @@ import re
 from urllib.parse import quote_plus, unquote, urlparse
 import xml.etree.ElementTree as ET
 
+from u_boot_pylib import tout
+
 from patman import lore
+from patman import patchwork
 from patman import pwcache
 
 # Prefix of the ID of a patch or cover letter read from lore
@@ -43,6 +47,9 @@ FEED_PAGE = 200
 
 # How long to keep the results of a search, in seconds
 SEARCH_KEEP = 10 * 60
+
+# Prefix of the name of a series, e.g. '[v2] ' in '[v2] dm: Tidy up'
+RE_PREFIX = re.compile(r'^\[[^]]*\] ')
 
 # Namespaces of the elements in lore's Atom feed
 ATOM = '{http://www.w3.org/2005/Atom}'
@@ -321,10 +328,10 @@ def _find_patches(messages, root, info):
     return found
 
 
-class LoreList:  # pylint: disable=R0904
+class LoreList(patchwork.SeriesFinder):  # pylint: disable=R0904
     """Reads series from a mailing list on lore, standing in for Patchwork
 
-    Only what a review needs is provided. Lore has no patch states, so every
+    Only what a review and autolinking need is provided. Lore has no patch states, so every
     patch is 'new'.
 
     Args:
@@ -339,6 +346,8 @@ class LoreList:  # pylint: disable=R0904
         # There is no patchwork project, but searching needs one to be set
         self.proj_id = self.link_name
         self.upstream = None
+        # Number of searches made, for find_series_list()
+        self.request_count = 0
         # Messages of each thread read, keyed by the Message-ID of each
         # message in it
         self._threads = {}
@@ -815,18 +824,25 @@ class LoreList:  # pylint: disable=R0904
         return await self._comments(client, cover_id)
 
     async def query_series(self, client, desc):
-        """Search for a series by title, which is not supported yet
+        """Search for the series whose cover letter or first patch has a title
+
+        Lore is always searched, not the cache, since this is used to find a
+        series just sent
 
         Args:
             client (aiohttp.ClientSession): Session to use
-            desc (str): Title to search for
+            desc (str): Title to search for, e.g. 'dm: Tidy up'
 
-        Raises:
-            ValueError: Always
+        Returns:
+            list of dict: Series, newest first, as from get_recent_series(),
+                except that the name is just the title, without the prefix,
+                as patchwork gives it, e.g. 'dm: Tidy up'
         """
-        del client, desc
-        raise ValueError(f'Cannot search {self.url} for a series by title; '
-                         'give the Message-ID of its cover letter with -s')
+        tout.info(f"Searching for '{desc}'")
+        self.request_count += 1
+        found = await self.search_series(client, None, desc, max_age=0)
+        return [{**ser, 'name': RE_PREFIX.sub('', ser['name'])}
+                for ser in found]
 
     async def search_patches(self, client, query, project_id=None,
                              per_page=20):

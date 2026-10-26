@@ -20,6 +20,7 @@ from patman import cmdline
 from patman import control
 from patman import cser_helper
 from patman import interpreter
+from patman import lorelist
 from patman import review
 from patman import cseries
 from patman.database import Pcommit
@@ -1119,6 +1120,36 @@ class TestCseries(CseriesTester):
             ('second', 1, f'{self.SERIES_ID_SECOND_V1}', 'Series for my board',
              f'linked:{self.SERIES_ID_SECOND_V1}'),
             next(items))
+
+    def test_series_autolink_lore(self):
+        """Test that autolink and send use lore for an upstream without
+        patchwork"""
+        cser = self.get_cser()
+        cser.db.upstream_add('dtc', 'https://dtc.example.com',
+                             lore_url='https://lore.kernel.org/my-list')
+        cser.db.commit()
+        with terminal.capture():
+            cser.add('second', allow_unmarked=True, ups='dtc')
+        self.db_close()
+
+        def run(subcmd, method):
+            args = Namespace(subcmd=subcmd, series='second', version=None,
+                             patchwork_url=None, update=False,
+                             autolink=True, autolink_wait=0,
+                             show_comments=False, show_cover_comments=False)
+            with mock.patch.object(cseries.Cseries, method) as meth:
+                control.do_series(args, test_db=self.tmpdir)
+            return meth.call_args.args[0]
+
+        for subcmd, method in (('autolink', 'link_auto'), ('send', 'send')):
+            pwork = run(subcmd, method)
+            self.assertIsInstance(pwork, lorelist.LoreList)
+            self.assertEqual('https://lore.kernel.org/my-list', pwork.url)
+
+        # Showing the status needs patchwork
+        with self.assertRaises(ValueError) as exc:
+            run('status', 'status')
+        self.assertIn('No patchwork URL found', str(exc.exception))
 
     def test_series_autolink_extra(self):
         """Test command-line operation
@@ -2244,13 +2275,13 @@ class TestCseries(CseriesTester):
 
         # Progress messages with backoff (5, 10, 15, 20s sleeps)
         self.assertEqual(
-            'Waiting for series on patchwork (0s)...', next(itr))
+            'Waiting for series on https://my-fake-url (0s)...', next(itr))
         self.assertEqual(
-            'Waiting for series on patchwork (5s)...', next(itr))
+            'Waiting for series on https://my-fake-url (5s)...', next(itr))
         self.assertEqual(
-            'Waiting for series on patchwork (15s)...', next(itr))
+            'Waiting for series on https://my-fake-url (15s)...', next(itr))
         self.assertEqual(
-            'Waiting for series on patchwork (30s)...', next(itr))
+            'Waiting for series on https://my-fake-url (30s)...', next(itr))
         self.assertEqual('Link completed after 50 seconds', next(itr))
         self.assertRegex(
             next(itr), 'Checking out upstream commit refs/heads/base: .*')

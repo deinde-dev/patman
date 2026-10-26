@@ -228,6 +228,11 @@ The options are:
 ``-p`` / ``--patchwork-url``
     URL of the patchwork server for this upstream
 
+``-l`` / ``--lore-url``
+    URL of the upstream's mailing list on lore, for an upstream with no
+    patchwork project, e.g. ``https://lore.kernel.org/devicetree-compiler``
+    (see :ref:`series_lore`)
+
 ``-t`` / ``--series-to``
     Patman alias for the To address (from your ``~/.patman`` alias file)
 
@@ -309,3 +314,24 @@ settings, so use ``patman series send`` for these series.
 
 The upstream's patchwork server is also used for the series' links, status
 and tags.
+
+.. _series_lore:
+
+A list without patchwork
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Some projects, such as dtc, have a mailing list but no patchwork project.
+Give such an upstream its list on lore, and no patchwork URL::
+
+    patman upstream set us -l https://lore.kernel.org/devicetree-compiler
+
+``patman series send`` and ``patman series autolink`` then find the series on
+lore, by the title of its cover letter (or its first patch) and its version.
+The link of each version is the Message-ID of its cover letter, or of its
+first patch if there is none, e.g.
+``20261025085508.1622340-1-sjg@chromium.org``, which is the series at
+``https://lore.kernel.org/devicetree-compiler/<link>/``. ``autolink-all``
+finds them for all your series.
+
+The status, tags and comments of a series are not read from lore yet, so
+``status`` and ``gather`` need patchwork.

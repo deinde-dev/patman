@@ -445,10 +445,10 @@ class Cseries(cser_helper.CseriesHelper):
         return pws, options, ser.name, version, desc
 
     def link_auto(self, pwork, series, version, update_commit, wait_s=0):
-        """Automatically find a series link by looking in patchwork
+        """Automatically find a series link by looking in patchwork or lore
 
         Args:
-            pwork (Patchwork): Patchwork object to use
+            pwork (Patchwork or LoreList): Where to look for the series
             series (str): Series name to search for, or None for current series
                 that is checked out
             version (int): Version to search for, or None for current version
@@ -497,7 +497,7 @@ class Cseries(cser_helper.CseriesHelper):
 
             elapsed = int(self.get_time() - start)
             tout.progress(
-                f'Waiting for series on patchwork ({elapsed}s)')
+                f'Waiting for series on {pwork.url} ({elapsed}s)')
             self.sleep(sleep_time)
             sleep_time = min(sleep_time + 5, 30)
 
@@ -1447,7 +1447,7 @@ class Cseries(cser_helper.CseriesHelper):
             workflow.sent(self, ser.idnum, ser_ver_id=svid)
 
         if likely_sent and autolink:
-            tout.notice(f'Autolinking with Patchwork ({autolink_wait} seconds)')
+            tout.notice(f'Autolinking with {pwork.url} ({autolink_wait} seconds)')
             self.link_auto(pwork, name, version, True, wait_s=autolink_wait)
 
     def archive(self, series):

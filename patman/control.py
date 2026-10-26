@@ -229,13 +229,16 @@ def do_series(args, test_db=None, pwork=None, cser=None):
         'autolink', 'autolink-all', 'open', 'send', 'status', 'gather',
         'gather-all'
         ]
+    # These can find a series on the upstream's list on lore instead
+    lore_ok = ['autolink', 'autolink-all', 'send']
     try:
         cser.open_database()
         if args.subcmd in needs_patchwork:
             ups = cser.get_series_upstream(args.series)
             tout.debug(f'Series upstream: {ups!r}')
             pwork = _setup_patchwork(
-                cser, pwork, ups, args.patchwork_url)
+                cser, pwork, ups, args.patchwork_url,
+                allow_lore=args.subcmd in lore_ok)
         elif pwork and pwork is not True:
             raise ValueError(
                 "Internal error: command "
