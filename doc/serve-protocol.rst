@@ -442,6 +442,21 @@ Series added for review before cover letters were recorded have no
 up the series on patchwork and records its cover letter, so this only happens
 once.
 
+``GET /api/reviews/<id>/context``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+What the agent was given for each review of a version of the series, besides
+its instructions. The ``version`` query parameter gives the version, and is
+needed. The response has the ``version`` and ``reviews``, a list in order, each
+with:
+
+- ``id`` (int), ``seq`` (int): the review and its patch, 0 for the cover letter
+- ``source`` (str or null): ``stored`` if the review recorded its context,
+  ``transcript`` if it is read from the agent's session, or null if it is not
+  known
+- ``parts`` (list): each with a ``title``, e.g. ``Earlier review``, and its
+  ``text``, in the order which the prompt gives them
+
 Acting on reviews
 -----------------
 
