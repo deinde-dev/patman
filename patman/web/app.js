@@ -836,8 +836,10 @@ function renderDiff(diff) {
     box, more];
 }
 
-// Show the whole of a file from a diff, from the git repo, at a line
-async function viewFile(newOid, oldOid, newLine, oldLine, name) {
+// The whole of a file from a diff, from the git repo, at a line: a card
+// saying which file it is, with 'extra' in its heading, and the source with
+// line numbers. 'rows' gives each line of the source and 'at' the target
+async function fileParts(newOid, oldOid, newLine, oldLine, name, extra) {
   const b = await getBlob({ new: newOid === '-' ? null : newOid,
                             old: oldOid === '-' ? null : oldOid });
   // The source browser has the file as it was before the patch, if at all
@@ -849,19 +851,57 @@ async function viewFile(newOid, oldOid, newLine, oldLine, name) {
   const width = `${String(b.lines.length).length}ch`;
   const rows = b.lines.map((text, i) => h('span', { class: i + 1 === target ? 'target' : null },
     h('i', { class: 'ln', style: `width:${width}` }, i + 1), text));
-  setView(name.split('/').pop(), null, true,
-    h('div', { class: 'card' },
-      h('div', { class: 'name' }, name),
-      h('div', { class: 'meta' },
-        h('span', {}, b.isNew ? 'with the patch applied' : 'before the patch'),
-        h('span', {}, plural(b.lines.length, 'line')),
-        h('span', {}, `blob ${b.hash}`),
-        url && extLink(url, new URL(url).hostname,
-                       `Show line ${oldLine} of the file before the patch in ` +
-                       'the source browser, which may have a different version ' +
-                       'of it'))),
-    h('div', { class: 'diff src' }, rows));
-  if (rows[target - 1]) rows[target - 1].scrollIntoView({ block: 'center' });
+  const card = h('div', { class: 'card' },
+    h('div', { class: 'row' }, h('div', { class: 'grow name' }, name), extra),
+    h('div', { class: 'meta' },
+      h('span', {}, b.isNew ? 'with the patch applied' : 'before the patch'),
+      h('span', {}, plural(b.lines.length, 'line')),
+      h('span', {}, `blob ${b.hash}`),
+      url && extLink(url, new URL(url).hostname,
+                     `Show line ${oldLine} of the file before the patch in ` +
+                     'the source browser, which may have a different version ' +
+                     'of it')));
+  return { card, src: h('div', { class: 'diff src' }, rows), at: rows[target - 1] };
+}
+
+// Show the whole of a file from a diff, from the git repo, at a line
+async function viewFile(newOid, oldOid, newLine, oldLine, name) {
+  const { card, src, at } = await fileParts(newOid, oldOid, newLine, oldLine, name);
+  setView(name.split('/').pop(), null, true, card, src);
+  if (at) at.scrollIntoView({ block: 'center' });
+}
+
+// The panel at the right of a wide screen, which shows the code that a
+// review quotes next to the review
+const side = document.getElementById('side');
+const wide = window.matchMedia('(min-width: 1100px)');
+// The page which the panel was opened on; it closes on leaving it
+let sidePage = null;
+
+function closeSide() {
+  sidePage = null;
+  side.hidden = true;
+  fill(side);
+  document.body.classList.remove('side-open');
+}
+
+// Show a file in the panel, at a line, as for viewFile()
+async function sideFile(newOid, oldOid, newLine, oldLine, name) {
+  const href = `#/file/${newOid}/${oldOid}/${newLine}/${oldLine}/${encodeURIComponent(name)}`;
+  const { card, src, at } = await fileParts(
+    newOid, oldOid, newLine, oldLine, name, [
+      h('a', { class: 'btn light small', href, title: 'Show the file on its own page' },
+        'Full page'),
+      h('button', { class: 'btn light small', onclick: closeSide,
+                    title: 'Close this panel' }, '✕')]);
+  const head = document.querySelector('header');
+  document.body.style.setProperty('--head-h', `${head.offsetHeight}px`);
+  fill(side, card, src);
+  sidePage = location.hash;
+  side.hidden = false;
+  document.body.classList.add('side-open');
+  // Scroll just the panel, so that the review stays where it is
+  if (at) side.scrollTop = at.offsetTop - side.clientHeight / 2;
 }
 
 function renderComments(comments) {
@@ -949,7 +989,12 @@ async function showQuoted(id, ups, code) {
   const mail = await getMail('patch', id, ups);
   const found = mail.diff && quoteTarget(mail.diff, code);
   if (!found) throw new Error(`The patch does not change ${code.name}`);
-  location.hash = fileHref(found.file, found.at);
+  if (wide.matches) {
+    const { file, at } = found;
+    await sideFile(file.new || '-', file.old || '-', at.new, at.old, file.name);
+  } else {
+    location.hash = fileHref(found.file, found.at);
+  }
 }
 
 // Button which shows a patch or cover letter in the box it returns, so
@@ -2872,6 +2917,7 @@ async function viewJob(id) {
 // --- Routing ---
 
 async function route() {
+  if (sidePage !== location.hash) closeSide();
   const parts = (location.hash.replace(/^#\/?/, '') || 'series').split('/');
   const [page, id, ver] = parts;
   // Pages from the header, rather than the tabs

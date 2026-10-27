@@ -125,6 +125,8 @@ once the series has been reviewed.
 
 Under each comment in a review of a patch which quotes some code, 'View code'
 shows the whole of the file at the last line quoted, found in the patch's diff.
+On a wide screen the file is in a panel at the right, next to the review, with
+'Full page' to show it on its own; elsewhere it has a page of its own.
 
 The file also links to that line in a source browser. For U-Boot and Linux
 this is Elixir (https://elixir.bootlin.com), where each name links to where it
