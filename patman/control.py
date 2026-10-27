@@ -42,9 +42,9 @@ from patman import workflow
 from patman.patchwork import Patchwork
 
 # The parts of the manual, in the order 'patman -H' shows them
-HELP_FILES = ('patman.rst', 'configuration.rst', 'sending.rst', 'tags.rst',
-              'patchwork.rst', 'caching.rst', 'series.rst', 'review.rst',
-              'serve.rst', 'db.rst')
+HELP_FILES = ('patman.rst', 'configuration.rst', 'projects.rst',
+              'sending.rst', 'tags.rst', 'patchwork.rst', 'caching.rst',
+              'series.rst', 'review.rst', 'serve.rst', 'db.rst')
 
 
 # A link to another page of the docs, e.g. :doc:`the guide </guide/index>`
