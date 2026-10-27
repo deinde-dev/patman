@@ -47,7 +47,8 @@ Read them in order the first time. Each one follows on from the one before.
 
 :doc:`serve-reviews`
     Review a series from the page: start the review, read and change the
-    reviews, respond to comments and replies, and send them
+    reviews, see the code they quote, respond to comments and replies, and
+    send them
 
 :doc:`problems`
     Messages you may see along the way, what causes them and what to do

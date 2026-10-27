@@ -109,49 +109,107 @@ Changes in v2:
 - Add a sandbox test
 '''
 
+# The video Kconfig, before the first patch of the series adds the panel to it
+KCONFIG = '''# SPDX-License-Identifier: GPL-2.0+
+#
+# Video drivers
+#
+
+menu "Graphics support"
+
+config VIDEO
+	bool "Enable driver model support for LCD and video"
+	depends on DM
+	help
+	  This enables driver model for LCD and video devices, which show a
+	  bitmap display, used for a console on the screen or a splash
+	  screen.
+
+config VIDEO_COPY
+	bool "Keep a copy of the frame buffer"
+	depends on VIDEO
+	help
+	  Draw into a copy of the frame buffer, which is quick to read, and
+	  copy each change to the hardware frame buffer, which may be slow to
+	  read.
+
+config PANEL
+	bool "Enable panel support"
+	depends on VIDEO
+	help
+	  This adds a uclass for panels, which can turn their backlight on
+	  and off.
+
+config SIMPLE_PANEL
+	bool "Enable a simple panel driver"
+	depends on PANEL && DM_GPIO
+	help
+	  This adds a driver for a panel which needs only a GPIO to enable it
+	  and a backlight.
+
+endmenu
+'''
+
+# What the first patch adds to the Kconfig, at the end of the menu
+KCONFIG_PANEL = '''
+config VIDEO_AMPLE_AB1234
+	bool "Enable the Ample AB1234 panel"
+	depends on PANEL && DM_GPIO
+'''
+
+# The driver which the first patch adds
+DRIVER = '''// SPDX-License-Identifier: GPL-2.0+
+/*
+ * Driver for the Ample AB1234 LCD panel
+ */
+
+#include <dm.h>
+#include <panel.h>
+#include <asm/gpio.h>
+
+struct ample_priv {
+	struct gpio_desc reset;
+};
+
+static int ample_enable_backlight(struct udevice *dev)
+{
+	struct ample_priv *priv = dev_get_priv(dev);
+
+	dm_gpio_set_value(&priv->reset, 0);
+	mdelay(120);
+
+	return 0;
+}
+
+static int ample_probe(struct udevice *dev)
+{
+	struct ample_priv *priv = dev_get_priv(dev);
+
+	gpio_request_by_name(dev, "reset-gpios", 0, &priv->reset,
+			     GPIOD_IS_OUT);
+
+	return 0;
+}
+'''
+
+# The files before and after the first patch, by path. The demo's git repo
+# holds both, so that the page can show the whole of each file, and the
+# patch's diff comes from them
+PATCH1_BEFORE = {'drivers/video/Kconfig': KCONFIG}
+PATCH1_AFTER = {
+    'drivers/video/Kconfig': KCONFIG.replace('\nendmenu\n',
+                                             f'{KCONFIG_PANEL}\nendmenu\n'),
+    'drivers/video/ample-ab1234.c': DRIVER,
+}
+
+# The commit message and diff of each patch, by patchwork ID. The diff of the
+# first patch is filled in from the git repo
 PATCH_TEXT = {
     9101: ('''Add a driver for the Ample AB1234 LCD panel, which is used on the
 Demo board. It supports the panel's single 480x272 mode.
 
 Signed-off-by: Alex Ample <alex@example.com>
-''', '''diff --git a/drivers/video/ample-ab1234.c b/drivers/video/ample-ab1234.c
-new file mode 100644
---- /dev/null
-+++ b/drivers/video/ample-ab1234.c
-@@ -0,0 +1,32 @@
-+// SPDX-License-Identifier: GPL-2.0+
-+/*
-+ * Driver for the Ample AB1234 LCD panel
-+ */
-+
-+#include <dm.h>
-+#include <panel.h>
-+#include <asm/gpio.h>
-+
-+struct ample_priv {
-+	struct gpio_desc reset;
-+};
-+
-+static int ample_enable_backlight(struct udevice *dev)
-+{
-+	struct ample_priv *priv = dev_get_priv(dev);
-+
-+	dm_gpio_set_value(&priv->reset, 0);
-+	mdelay(120);
-+
-+	return 0;
-+}
-+
-+static int ample_probe(struct udevice *dev)
-+{
-+	struct ample_priv *priv = dev_get_priv(dev);
-+
-+	gpio_request_by_name(dev, "reset-gpios", 0, &priv->reset,
-+			     GPIOD_IS_OUT);
-+
-+	return 0;
-+}
-'''),
+''', None),
     9102: ('''Enable the panel on sandbox, so that the driver is built and tested.
 
 Signed-off-by: Alex Ample <alex@example.com>
@@ -169,7 +227,7 @@ Signed-off-by: Alex Ample <alex@example.com>
 new file mode 100644
 --- /dev/null
 +++ b/doc/develop/ample.rst
-@@ -0,0 +1,8 @@
+@@ -0,0 +1,5 @@
 +Ample AB1234 panel
 +==================
 +
@@ -188,6 +246,8 @@ On {date}, Alex Ample <alex@example.com> wrote:
 > Add a driver for the Ample AB1234 LCD panel, which is used on the
 > Demo board. It supports the panel's single 480x272 mode.
 
+> diff --git a/drivers/video/ample-ab1234.c b/drivers/video/ample-ab1234.c
+> @@ -0,0 +1,32 @@
 > +	gpio_request_by_name(dev, "reset-gpios", 0, &priv->reset,
 > +			     GPIOD_IS_OUT);
 
@@ -195,11 +255,21 @@ This ignores the return value, so a missing reset-gpios property is only
 noticed later, when the backlight is enabled. Please check it and return the
 error, e.g. with log_msg_ret()
 
+> diff --git a/drivers/video/ample-ab1234.c b/drivers/video/ample-ab1234.c
+> @@ -0,0 +1,32 @@
 > +	dm_gpio_set_value(&priv->reset, 0);
 > +	mdelay(120);
 
 Where does the 120ms come from? Please add a comment pointing to the
 datasheet, since it is a long delay.
+
+> diff --git a/drivers/video/Kconfig b/drivers/video/Kconfig
+> @@ -35,4 +35,8 @@ config SIMPLE_PANEL
+> +config VIDEO_AMPLE_AB1234
+> +	bool "Enable the Ample AB1234 panel"
+> +	depends on PANEL && DM_GPIO
+
+Please add some help, saying which boards have this panel
 
 Regards,
 Simon''',
@@ -214,6 +284,8 @@ Reviewed-by: Simon Glass <sjg@chromium.org>''',
 On {date}, Alex Ample <alex@example.com> wrote:
 > doc: Describe the Ample panel driver
 
+> diff --git a/doc/develop/ample.rst b/doc/develop/ample.rst
+> @@ -0,0 +1,5 @@
 > +The Ample AB1234 is a 480x272 panel. Its reset line is given by the
 > +``reset-gpios`` property.
 
@@ -436,6 +508,60 @@ def _setup_upstream(topdir):
                    check=True)
 
 
+def _setup_patch(topdir):
+    """Put the files of the first patch, before and after it, in the git repo
+
+    The commits are left out of the branches, but their files can be read
+    from the repo, as the page does to show the whole of a file. The diff of
+    the patch is made from them, so that it names their blobs
+
+    Args:
+        topdir (str): Directory which holds the demo's git repo
+    """
+    work = tempfile.mkdtemp(prefix='patman-demo-files-')
+    env = {**os.environ, 'GIT_DIR': os.path.join(topdir, '.git'),
+           'GIT_WORK_TREE': work,
+           'GIT_INDEX_FILE': os.path.join(topdir, '.git', 'demo-index')}
+
+    def git(*args):
+        return subprocess.run(
+            ['git', '-c', 'user.name=Demo', '-c', 'user.email=demo@example.com',
+             '-c', 'diff.noprefix=false', '-c', 'diff.mnemonicPrefix=false',
+             *args], env=env, cwd=work, check=True, capture_output=True,
+            text=True).stdout.strip()
+
+    def commit(files, *parents):
+        for path, text in files.items():
+            os.makedirs(os.path.dirname(os.path.join(work, path)),
+                        exist_ok=True)
+            with open(os.path.join(work, path), 'w', encoding='utf-8') as outf:
+                outf.write(text)
+        git('add', '-A')
+        tree = git('write-tree')
+        return git('commit-tree', tree, '-m', 'Demo', *[
+            arg for par in parents for arg in ('-p', par)])
+
+    try:
+        base = commit(PATCH1_BEFORE)
+        patched = commit(PATCH1_AFTER, base)
+        git('update-ref', 'refs/demo/patch1', patched)
+        diff = git('diff', '--no-color', '--no-ext-diff', '--abbrev=11',
+                   base, patched) + '\n'
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+    PATCH_TEXT[9101] = (PATCH_TEXT[9101][0], diff)
+
+    # Check that the chunks which the reviews quote are in the patches
+    patches = SERIES[0][6]
+    for seq, body in REVIEWS.items():
+        diff = PATCH_TEXT[patches[seq - 1]['id']][1]
+        for line in body.splitlines():
+            if line.startswith('> @@') and f'\n{line[2:]}\n' not in diff:
+                raise ValueError(f"The review of patch {seq} quotes "
+                                 f"'{line[2:]}', which is not in its diff")
+
+
 def setup(topdir):
     """Create the database, with an upstream and some earlier reviews
 
@@ -444,6 +570,7 @@ def setup(topdir):
     """
     subprocess.run(['git', 'init', '-q', topdir], check=True)
     _setup_upstream(topdir)
+    _setup_patch(topdir)
     db = Database(os.path.join(topdir, '.patman.db'))
     db.start()
     db.upstream_add(UPSTREAM, 'https://source.example.org/u-boot.git',
