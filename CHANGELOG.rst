@@ -55,6 +55,9 @@ Fixed
 - ``patman review --send`` and ``--send-reply`` record a draft which was sent
   already from Gmail as sent, with the text which went out, rather than
   failing with "Message not a draft".
+- ``patman series version-change`` reads the commits of the version being
+  changed, rather than those of v1, so changing v2 of a series no longer
+  rewrites v1's commits as the new version.
 
 0.6.0 - 2026-10-24
 ------------------

@@ -2638,6 +2638,22 @@ class TestCseries(CseriesTester):
                 ser = cser.get_series_by_name('first')
                 self.assertIn(5, cser._get_version_list(ser.idnum))
 
+        # Change v2 to v6, which must use the commits in branch 'first2'
+        with self.stage('v2 -> 6'):
+            repo = pygit2.Repository(self.gitdir)
+            branch = repo.lookup_branch('first2')
+            top = branch.peel(pygit2.Commit)
+            subject, rest = top.message.split('\n', 1)
+            branch.set_target(repo.create_commit(
+                None, top.author, top.committer, f'{subject} in v2\n{rest}',
+                top.tree_id, top.parent_ids))
+            with terminal.capture():
+                cser.version_change('first', 2, 6)
+            series = patchstream.get_metadata('first6', 0, 2,
+                                              git_dir=self.gitdir)
+            self.assertEqual('6', series.version)
+            self.assertTrue(series.commits[-1].subject.endswith(' in v2'))
+
     def test_version_change_cmdline(self):
         """Check changing a version on the cmdline"""
         self.get_cser()
