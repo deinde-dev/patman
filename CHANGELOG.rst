@@ -42,6 +42,10 @@ Changed
 - ``patman series status``, ``gather``, ``patches`` and autolink warn when the
   patches on the branch differ from those in the database, and suggest
   ``patman series scan``, since they read the wrong commits otherwise.
+- ``patman series add`` and ``series send`` warn when the branch name suggests
+  v2 or later but there is no Series-version tag, so that the patches go out
+  as v1, and suggest the name without the number if there is no earlier
+  version.
 
 Fixed
 ~~~~~
