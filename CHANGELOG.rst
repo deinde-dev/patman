@@ -47,6 +47,10 @@ Added
 
 Changed
 ~~~~~~~
+- ``patman serve`` compresses its responses of 1KB or more with gzip, for a
+  browser which accepts it, so that the page loads faster on a phone over a
+  mobile network. The reviews of a long series go from 210KB to 51KB and the
+  page's script from 129KB to 36KB.
 - ``patman series send`` updates the patches of the version in the database
   from its branch when they differ, e.g. after a patch is folded into another
   following ``series inc``, so that ``status`` and autolink use the patches

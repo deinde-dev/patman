@@ -11,6 +11,7 @@ The API is described in doc/serve-protocol.rst
 import asyncio
 import hmac
 import ipaddress
+import mimetypes
 import os
 import re
 import subprocess
@@ -44,6 +45,15 @@ from patman.server import params
 # Directory holding the web page and its assets
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), 'web')
+
+# Smallest response worth compressing, in bytes, since gzip saves little on a
+# smaller one and can even make it larger
+COMPRESS_MIN = 1024
+
+# Types of response which compress well, as well as any text. The page's PNG
+# icon is compressed already
+COMPRESS_TYPES = ('application/json', 'application/javascript',
+                  'image/svg+xml')
 
 # File, next to the database, holding the jobs which have not finished, so
 # that they can be resumed when the server restarts
@@ -434,6 +444,30 @@ class Server(jobs.JobRunner):
             return await handler(request)
         finally:
             traffic.save(self.cser.db)
+
+    @web.middleware
+    async def _compress(self, request, handler):
+        """Compress the larger responses, for a browser which accepts gzip
+
+        The reviews of a long series, or the list of reviews, can be hundreds
+        of KB of JSON, which is slow to send to a phone over a mobile network,
+        and gzip makes it a quarter of the size or less
+
+        Args:
+            request (web.Request): Request being handled
+            handler (callable): Next handler
+
+        Return:
+            web.Response: Response from the handler, compressed if it is
+                large enough, is of a type which compresses well and the
+                browser accepts gzip
+        """
+        resp = await handler(request)
+        if compressible(resp):
+            resp.headers['Vary'] = 'Accept-Encoding'
+            if 'gzip' in request.headers.get('Accept-Encoding', ''):
+                resp.enable_compression(web.ContentCoding.gzip)
+        return resp
 
     @web.middleware
     async def _no_cache(self, request, handler):
@@ -1951,16 +1985,69 @@ class Server(jobs.JobRunner):
         return self._review_job(f'Send the response to reply {reply.idnum}',
                                 '--send-reply', str(reply.idnum))
 
-    async def _index(self, _request):
+    async def _index(self, request):
         """Handle 'GET /': send the page
 
         Args:
-            _request (web.Request): Request (not used)
+            request (web.Request): Request being handled
 
         Return:
-            web.FileResponse: The page's HTML
+            web.Response: The page's HTML
         """
-        return web.FileResponse(os.path.join(WEB_DIR, 'index.html'))
+        return self._web_file(request, 'index.html')
+
+    async def _static(self, request):
+        """Handle 'GET /static/<file>': send one of the files the page uses
+
+        Args:
+            request (web.Request): Request, giving the file's name
+
+        Return:
+            web.Response: Contents of the file
+        """
+        return self._web_file(request, request.match_info['name'])
+
+    @staticmethod
+    def _web_file(request, name):
+        """Send the page or one of its files
+
+        The file is read and sent whole, rather than with aiohttp's own
+        support for files, since when compressing, that sends 20 bytes of gzip
+        as the body of a 'not modified' response, which must have none, so
+        the browser reads them as the start of the next response
+
+        The browser checks the file each time before it reuses it (see
+        _no_cache()), so give the file an ETag, to which a 'not modified'
+        response with no body is sent if the file has not changed since
+
+        Args:
+            request (web.Request): Request being handled
+            name (str): Name of the file in the page's directory, as given
+                in the request
+
+        Return:
+            web.Response: Contents of the file, or status 304 if the browser
+                has it already
+
+        Raises:
+            web.HTTPNotFound: There is no such file
+        """
+        # The name is decoded from the URL, so it can hold a '/' or be '..',
+        # even though the route does not match one. Only send the files
+        # which are in the directory itself
+        fname = os.path.join(WEB_DIR, name)
+        if name not in os.listdir(WEB_DIR) or not os.path.isfile(fname):
+            raise web.HTTPNotFound()
+        stat = os.stat(fname)
+        etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+        if etag in request.headers.get('If-None-Match', ''):
+            return web.Response(status=304, headers={'ETag': etag})
+        with open(fname, 'rb') as inf:
+            body = inf.read()
+        ctype = mimetypes.guess_type(name)[0] or 'application/octet-stream'
+        charset = None if ctype.startswith('image/') else 'utf-8'
+        return web.Response(body=body, content_type=ctype, charset=charset,
+                            headers={'ETag': etag})
 
     def make_app(self):
         """Create the aiohttp application
@@ -1969,8 +2056,9 @@ class Server(jobs.JobRunner):
             web.Application: Application, ready to run
         """
         app = web.Application(
-            middlewares=[self._errors, self._auth, self._no_cache,
-                         self._utc_offset, self._save_traffic])
+            middlewares=[self._compress, self._errors, self._auth,
+                         self._no_cache, self._utc_offset,
+                         self._save_traffic])
         app.router.add_get('/api/series', self._series_list)
         app.router.add_get(r'/api/series/{idnum:\d+}', self._series_detail)
         app.router.add_post(r'/api/series/{idnum:\d+}/sync',
@@ -2017,7 +2105,7 @@ class Server(jobs.JobRunner):
         app.router.add_post(r'/api/replies/{idnum:\d+}/suggest',
                             self._reply_suggest)
         app.router.add_get('/', self._index)
-        app.router.add_static('/static', WEB_DIR)
+        app.router.add_get('/static/{name}', self._static)
         app.on_startup.append(self._start_background)
         app.on_cleanup.append(self._stop_background)
         return app
@@ -2073,6 +2161,24 @@ def cmd_series(cmd):
     if '-s' in cmd[:-1]:
         return cmd[cmd.index('-s') + 1]
     return None
+
+
+def compressible(resp):
+    """Check whether a response is worth compressing
+
+    Args:
+        resp (web.StreamResponse): Response to check
+
+    Return:
+        bool: True if it is a successful response with a body which is large
+            enough and of a type which compresses well
+    """
+    if not isinstance(resp, web.Response) or resp.status != 200:
+        return False
+    if not isinstance(resp.body, bytes) or len(resp.body) < COMPRESS_MIN:
+        return False
+    ctype = resp.content_type
+    return ctype.startswith('text/') or ctype in COMPRESS_TYPES
 
 
 def is_loopback(host):

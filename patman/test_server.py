@@ -18,6 +18,7 @@ import aiohttp
 import aiohttp.abc
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
+import yarl
 
 from u_boot_pylib import terminal
 from u_boot_pylib import tools
@@ -746,6 +747,111 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual('no-cache', got['/'])
         self.assertEqual('no-cache', got['/static/app.js'])
         self.assertIsNone(got['/api/series'])
+
+    def get_raw(self, srv, paths, headers=None):
+        """Make GET requests to a server and return the responses as sent
+
+        Args:
+            srv (Server): Server to use
+            paths (list of str or yarl.URL): Paths to request
+            headers (dict or None): Headers to send with each request
+
+        Return:
+            dict: key (str or yarl.URL): path
+                value (tuple):
+                    int: HTTP status
+                    CIMultiDictProxy: headers of the response
+                    bytes: body of the response, decompressed
+        """
+        async def _go():
+            async with TestClient(TestServer(srv.make_app())) as client:
+                out = {}
+                for path in paths:
+                    resp = await client.get(path, headers=headers)
+                    out[path] = resp.status, resp.headers, await resp.read()
+                return out
+
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_go())
+        finally:
+            loop.close()
+
+    def test_compress(self):
+        """Larger responses are compressed for a browser which accepts it"""
+        for seq in range(30):
+            self.add_series(f'video{seq}', f'Video improvements {seq}',
+                            {1: [('video: Add a driver', 'new', seq, 0)]})
+        srv = server.Server(self.cser)
+        paths = ['/api/series', '/api/version', '/', '/static/app.js',
+                 '/static/icon-512.png']
+        got = self.get_raw(srv, paths, {'Accept-Encoding': 'gzip, deflate'})
+        plain = self.get_raw(srv, paths, {'Accept-Encoding': 'identity'})
+
+        # The list of series, the page and its script are compressed with
+        # gzip, which the client undoes
+        for path in ('/api/series', '/', '/static/app.js'):
+            status, headers, body = got[path]
+            self.assertEqual(200, status)
+            self.assertEqual('gzip', headers.get('Content-Encoding'), path)
+            self.assertEqual('Accept-Encoding', headers.get('Vary'))
+            self.assertEqual(plain[path][2], body)
+        self.assertEqual(30, len(json.loads(got['/api/series'][2])))
+        self.assertIn(b'function route()', got['/static/app.js'][2])
+
+        # The version is too small to be worth it and the icon is
+        # compressed already
+        for path in ('/api/version', '/static/icon-512.png'):
+            self.assertIsNone(got[path][1].get('Content-Encoding'), path)
+        self.assertEqual('image/png',
+                         got['/static/icon-512.png'][1]['Content-Type'])
+
+        # Nothing is compressed for a browser which does not accept it, but
+        # the responses say that it could be
+        for path in paths:
+            self.assertIsNone(plain[path][1].get('Content-Encoding'), path)
+        self.assertEqual('Accept-Encoding',
+                         plain['/api/series'][1].get('Vary'))
+
+    def test_static_etag(self):
+        """The page's files are not sent again if the browser has them"""
+        srv = server.Server(self.cser)
+        got = self.get_raw(srv, ['/', '/static/app.js'])
+        status, headers, _ = got['/static/app.js']
+        self.assertEqual(200, status)
+        # Python gives text/javascript or, before 3.12, application/javascript
+        self.assertRegex(headers['Content-Type'],
+                         r'^(text|application)/javascript; charset=utf-8$')
+        etag = headers['ETag']
+        self.assertNotEqual(etag, got['/'][1]['ETag'])
+
+        # The file has not changed, so the browser keeps its copy and there
+        # is no body, compressed or not
+        again = self.get_raw(srv, ['/static/app.js'],
+                             {'If-None-Match': etag,
+                              'Accept-Encoding': 'gzip'})
+        status, headers, body = again['/static/app.js']
+        self.assertEqual(304, status)
+        self.assertEqual(etag, headers['ETag'])
+        self.assertIsNone(headers.get('Content-Encoding'))
+        self.assertEqual(b'', body)
+
+        # Another ETag is out of date
+        status, _, body = self.get_raw(
+            srv, ['/static/app.js'],
+            {'If-None-Match': '"old"'})['/static/app.js']
+        self.assertEqual(200, status)
+        self.assertIn(b'function route()', body)
+
+        # A file which is not there, or not in the page's directory. Send the
+        # paths as they are, since the client would otherwise remove the '..'
+        got = self.get_raw(srv, [
+            '/static/missing.js',
+            yarl.URL('/static/%2e%2e', encoded=True),
+            yarl.URL('/static/..%2fserver%2fapp.py', encoded=True),
+            yarl.URL('/static/%2e%2e%2fserver%2fapp.py', encoded=True)])
+        for path, (status, _, _) in got.items():
+            self.assertEqual(404, status, path)
 
     def test_sync_cmds(self):
         """The sync never gathers tags into branches"""
