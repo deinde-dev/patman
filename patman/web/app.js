@@ -175,11 +175,15 @@ function versionTabs(versions, sv, base, tip) {
 // comment. It returns a form to show in place of the comment; splice(text)
 // gives the whole mail with the comment changed to text (or dropped, along
 // with its quote, if text is empty) and cancel() puts the comment back.
-function renderMail(text, onChunk, onEdit) {
+//
+// onSource(quote) is called when 'View code' is tapped under a comment on
+// some quoted code, with the quote, as from quotedCode()
+function renderMail(text, onChunk, onEdit, onSource) {
   const out = h('div', { class: 'mail' });
   const lines = (text || '').replace(/\s+$/, '').split('\n');
   let i = 0;
   let lastQuote = null;
+  let lastCode = null;
   let quoteStart = 0;
   while (i < lines.length) {
     if (lines[i].startsWith('>')) {
@@ -201,6 +205,7 @@ function renderMail(text, onChunk, onEdit) {
         out.append(quote(run));
       }
       lastQuote = run;
+      lastCode = quotedCode(run);
       quoteStart = i;
       i = j;
     } else {
@@ -212,6 +217,12 @@ function renderMail(text, onChunk, onEdit) {
       const comment = lines.slice(i, k).join('\n');
       const textEl = h('span', {}, comment + '\n');
       out.append(textEl);
+      const code = lastCode;
+      const srcBtn = onSource && code && comment.trim() && h('button', {
+        class: 'chunk-btn', onclick: () => onSource(code),
+        title: 'Show the whole file which this comment is about, at the code ' +
+               'it quotes' }, 'View code');
+      if (!onChunk && !onEdit && srcBtn) out.append(h('div', { class: 'chunk-btns' }, srcBtn));
       if ((onChunk || onEdit) && lastQuote && comment.trim()) {
         // Send the end of the quote, which is what the comment is about
         const part = [...lastQuote.slice(-8), '', comment.trim()].join('\n');
@@ -220,7 +231,8 @@ function renderMail(text, onChunk, onEdit) {
                                    title: 'Ask the agent to change this comment' },
                        '✎ Revise this'),
           onEdit && h('button', { class: 'chunk-btn', onclick: () => edit(),
-                                  title: 'Change this comment yourself' }, 'Edit'));
+                                  title: 'Change this comment yourself' }, 'Edit'),
+          srcBtn);
         out.append(btns);
         const [start, end, qstart] = [i, k, quoteStart];
         const splice = (newText) => {
@@ -246,6 +258,7 @@ function renderMail(text, onChunk, onEdit) {
       }
       if (k < j) out.append(lines.slice(k, j).join('\n') + '\n');
       lastQuote = null;
+      lastCode = null;
       i = j;
     }
   }
@@ -261,10 +274,22 @@ const titleEl = document.getElementById('title');
 const versionEl = h('div', { class: 'version' });
 const projectEl = document.getElementById('project');
 let versionAsked = false;
+let infoGot = null;
+
+// What the server says about itself: patman's version, the project and the
+// URL for browsing its source
+function serverInfo() {
+  if (!infoGot) {
+    infoGot = api('version');
+    infoGot.catch(() => { infoGot = null; });
+  }
+  return infoGot;
+}
+
 function showVersion() {
   if (versionAsked) return;
   versionAsked = true;
-  api('version').then((v) => {
+  serverInfo().then((v) => {
     versionEl.textContent = v.version ? `patman ${v.version}` : '';
     projectEl.textContent = v.project || '';
     document.title = v.project ? `patman: ${v.project}` : 'patman';
@@ -549,6 +574,77 @@ function diffLine(line) {
   return h('span', { class: cls }, line || ' ');
 }
 
+// The code which a quote in a review is about, from the 'diff --git' and '@@'
+// lines which start it: the file, the '@@' line and the quoted lines after
+// it, without their '> '. This is null if the quote has no such lines, e.g.
+// if it is of the commit message
+function quotedCode(run) {
+  const unquote = (line) => line.replace(/^> ?/, '');
+  const start = run.findLastIndex((line) => /^> ?diff --git /.test(line));
+  const m = start >= 0 && unquote(run[start]).match(/^diff --git a\/.* b\/(.*)/);
+  if (!m || !run[start + 1] || !chunkRange(unquote(run[start + 1]))) return null;
+  return { name: m[1], chunk: unquote(run[start + 1]),
+           lines: run.slice(start + 2).map(unquote) };
+}
+
+// Find the code which a review quotes, in the diff of the patch: the file
+// and the line on each side, which is the last line quoted, since that is
+// what the comment is about. If the lines are not found, this gives the
+// start of the chunk. A line which the patch adds gives the line above it
+// before the patch, which is the last line removed if the patch replaces
+// some, and a line which it removes gives the next line after it. This is
+// null if the diff does not have the file
+function quoteTarget(diff, code) {
+  const lines = diff.replace(/\n$/, '').split('\n');
+  const files = diffFiles(lines);
+  const at = [...files].find(([, f]) => f.name === code.name);
+  if (!at) return null;
+  const [start, file] = at;
+  const want = chunkRange(code.chunk);
+  const same = (a, b) => a.trimEnd() === b.trimEnd();
+
+  // Number each line of the file's chunks, starting from the '@@' line
+  // which the quote gives, else the first one
+  let pos = null;
+  let found = null;
+  const chunk = [];
+  for (let idx = start + 1; idx < lines.length && !files.has(idx); idx++) {
+    const line = lines[idx];
+    const r = line.startsWith('@@') && chunkRange(line);
+    if (r) {
+      if (found) break;
+      pos = { old: r.old.first, new: r.new.first };
+      found = r.old.first === want.old.first && r.new.first === want.new.first;
+      if (found) chunk.length = 0;
+      chunk.push({ text: null, at: { ...pos } });
+      continue;
+    }
+    if (!pos || /^[^-+ ]/.test(line)) continue;
+    chunk.push({ text: line, at: line[0] === '+'
+      ? { old: Math.max(pos.old - 1, 1), new: pos.new } : { ...pos } });
+    if (line[0] !== '+') pos.old++;
+    if (line[0] !== '-') pos.new++;
+  }
+  if (!chunk.length) return { file, at: file.at || { old: 1, new: 1 } };
+
+  // Look for the quoted lines, else just the last one
+  const quoted = code.lines.filter((line, i) => line.trim() ||
+                                   i < code.lines.length - 1);
+  const matches = (from, n) => quoted.slice(-n).every(
+    (line, i) => chunk[from + i] && chunk[from + i].text !== null &&
+                 same(chunk[from + i].text, line));
+  let hit = -1;
+  for (const n of [quoted.length, 1]) {
+    if (!n) break;
+    hit = chunk.findIndex((_, i) => matches(i, n));
+    if (hit >= 0) {
+      hit += n - 1;
+      break;
+    }
+  }
+  return { file, at: chunk[Math.max(hit, 0)].at };
+}
+
 // Number of lines of source to show each time the gap next to a chunk of
 // a diff is widened
 const CONTEXT_LINES = 5;
@@ -740,23 +836,72 @@ function renderDiff(diff) {
     box, more];
 }
 
-// Show the whole of a file from a diff, from the git repo, at a line
-async function viewFile(newOid, oldOid, newLine, oldLine, name) {
+// The whole of a file from a diff, from the git repo, at a line: a card
+// saying which file it is, with 'extra' in its heading, and the source with
+// line numbers. 'rows' gives each line of the source and 'at' the target
+async function fileParts(newOid, oldOid, newLine, oldLine, name, extra) {
   const b = await getBlob({ new: newOid === '-' ? null : newOid,
                             old: oldOid === '-' ? null : oldOid });
+  // The source browser has the file as it was before the patch, if at all
+  const info = await serverInfo().catch(() => ({}));
+  const url = info.source_url && oldOid !== '-' && info.source_url
+    .replace('{path}', name.split('/').map(encodeURIComponent).join('/'))
+    .replace('{line}', oldLine);
   const target = b.isNew ? newLine : oldLine;
   const width = `${String(b.lines.length).length}ch`;
   const rows = b.lines.map((text, i) => h('span', { class: i + 1 === target ? 'target' : null },
     h('i', { class: 'ln', style: `width:${width}` }, i + 1), text));
-  setView(name.split('/').pop(), null, true,
-    h('div', { class: 'card' },
-      h('div', { class: 'name' }, name),
-      h('div', { class: 'meta' },
-        h('span', {}, b.isNew ? 'with the patch applied' : 'before the patch'),
-        h('span', {}, plural(b.lines.length, 'line')),
-        h('span', {}, `blob ${b.hash}`))),
-    h('div', { class: 'diff src' }, rows));
-  if (rows[target - 1]) rows[target - 1].scrollIntoView({ block: 'center' });
+  const card = h('div', { class: 'card' },
+    h('div', { class: 'row' }, h('div', { class: 'grow name' }, name), extra),
+    h('div', { class: 'meta' },
+      h('span', {}, b.isNew ? 'with the patch applied' : 'before the patch'),
+      h('span', {}, plural(b.lines.length, 'line')),
+      h('span', {}, `blob ${b.hash}`),
+      url && extLink(url, new URL(url).hostname,
+                     `Show line ${oldLine} of the file before the patch in ` +
+                     'the source browser, which may have a different version ' +
+                     'of it')));
+  return { card, src: h('div', { class: 'diff src' }, rows), at: rows[target - 1] };
+}
+
+// Show the whole of a file from a diff, from the git repo, at a line
+async function viewFile(newOid, oldOid, newLine, oldLine, name) {
+  const { card, src, at } = await fileParts(newOid, oldOid, newLine, oldLine, name);
+  setView(name.split('/').pop(), null, true, card, src);
+  if (at) at.scrollIntoView({ block: 'center' });
+}
+
+// The panel at the right of a wide screen, which shows the code that a
+// review quotes next to the review
+const side = document.getElementById('side');
+const wide = window.matchMedia('(min-width: 1100px)');
+// The page which the panel was opened on; it closes on leaving it
+let sidePage = null;
+
+function closeSide() {
+  sidePage = null;
+  side.hidden = true;
+  fill(side);
+  document.body.classList.remove('side-open');
+}
+
+// Show a file in the panel, at a line, as for viewFile()
+async function sideFile(newOid, oldOid, newLine, oldLine, name) {
+  const href = `#/file/${newOid}/${oldOid}/${newLine}/${oldLine}/${encodeURIComponent(name)}`;
+  const { card, src, at } = await fileParts(
+    newOid, oldOid, newLine, oldLine, name, [
+      h('a', { class: 'btn light small', href, title: 'Show the file on its own page' },
+        'Full page'),
+      h('button', { class: 'btn light small', onclick: closeSide,
+                    title: 'Close this panel' }, '✕')]);
+  const head = document.querySelector('header');
+  document.body.style.setProperty('--head-h', `${head.offsetHeight}px`);
+  fill(side, card, src);
+  sidePage = location.hash;
+  side.hidden = false;
+  document.body.classList.add('side-open');
+  // Scroll just the panel, so that the review stays where it is
+  if (at) side.scrollTop = at.offsetTop - side.clientHeight / 2;
 }
 
 function renderComments(comments) {
@@ -823,6 +968,35 @@ async function viewMail(kind, id, ups, refresh) {
   }
 }
 
+// Patches and cover letters read for the reviews, keyed by their path in the
+// API
+const mails = new Map();
+
+// Read a patch or cover letter, once
+function getMail(kind, id, ups) {
+  const path = `${kind}/${idPath(id)}${upsQuery(ups)}`;
+  if (!mails.has(path)) {
+    const got = api(path);
+    got.catch(() => mails.delete(path));
+    mails.set(path, got);
+  }
+  return mails.get(path);
+}
+
+// Show the whole file which some code quoted in a review is in, at the code,
+// from the diff of the patch
+async function showQuoted(id, ups, code) {
+  const mail = await getMail('patch', id, ups);
+  const found = mail.diff && quoteTarget(mail.diff, code);
+  if (!found) throw new Error(`The patch does not change ${code.name}`);
+  if (wide.matches) {
+    const { file, at } = found;
+    await sideFile(file.new || '-', file.old || '-', at.new, at.old, file.name);
+  } else {
+    location.hash = fileHref(found.file, found.at);
+  }
+}
+
 // Button which shows a patch or cover letter in the box it returns, so
 // that it can be read next to its review
 function mailToggle(kind, id, ups) {
@@ -838,8 +1012,7 @@ function mailToggle(kind, id, ups) {
     if (!open) { fill(box); return; }
     fill(box, h('div', { class: 'ver' }, 'Loading…'));
     try {
-      const q = upsQuery(ups);
-      mail = mail || await api(`${kind}/${idPath(id)}${q}`);
+      mail = mail || await getMail(kind, id, ups);
       if (open) {
         fill(box, h('div', {}, renderMail(mail.content),
                               mail.diff && renderDiff(mail.diff)));
@@ -1190,8 +1363,15 @@ async function viewReview(id, wantVer) {
                                     refresh));
     // A review can be changed if it has not been sent and no job is acting on it
     const free = () => unsent(r) && !(entries.get(r.id) || {}).busy;
+    // Code quoted in the review of a patch can be shown in its file
+    const srcBox = h('div', {});
+    const viewCode = r.seq && itemId && ((code) => {
+      fill(srcBox);
+      showQuoted(itemId, ser.upstream, code).catch((err) => fill(srcBox, errorBox(err)));
+    });
     const drawCard = () => fill(card, header,
-      renderMail(r.body, free() ? ask : null, free() ? editChunk : null), ctxBox,
+      renderMail(r.body, free() ? ask : null, free() ? editChunk : null, viewCode),
+      srcBox, ctxBox,
       (mailBtn || loreLink || free()) && h('div', { class: 'actions' },
         mailBtn, loreLink, commentsBtn,
         free() && [
@@ -2737,6 +2917,7 @@ async function viewJob(id) {
 // --- Routing ---
 
 async function route() {
+  if (sidePage !== location.hash) closeSide();
   const parts = (location.hash.replace(/^#\/?/, '') || 'series').split('/');
   const [page, id, ver] = parts;
   // Pages from the header, rather than the tabs
