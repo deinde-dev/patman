@@ -196,7 +196,8 @@ The server
 ~~~~~~~~~~~~~~~~~~~~
 
 The version of patman which the server runs, and the project which it is
-for, as an object, e.g. ``{"version": "0.4.0", "project": "U-Boot"}``.
+for, as an object, e.g. ``{"version": "0.4.0", "project": "U-Boot",
+"source_url": "..."}``.
 ``version`` is null if it is not known. When the server runs from a git
 checkout which is not at a release, the output of ``git describe`` follows,
 e.g. ``"0.4.0 (v0.4.0-3-g1234abc)"``.
@@ -204,6 +205,13 @@ e.g. ``"0.4.0 (v0.4.0-3-g1234abc)"``.
 ``project`` is the project which the server is for, from the ``project``
 setting in the ``[review]`` section of the config, or ``U-Boot`` if there is
 none. The page shows it at the top and in the name of the browser tab.
+
+``source_url`` is where to browse a line of the project's source, with
+``{path}`` and ``{line}`` standing for the file and the line, from the
+``source_url`` review setting, else Elixir for U-Boot and Linux, e.g.
+``"https://elixir.bootlin.com/u-boot/latest/source/{path}#L{line}"``, or
+GitHub for dtc. It is null for another project with no setting. The page links
+to it from the whole-file view.
 
 Your series
 -----------

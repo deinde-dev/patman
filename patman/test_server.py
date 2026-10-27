@@ -486,13 +486,32 @@ class TestWebServer(unittest.TestCase, TestCommon):
             status, data = self.call(self.make_server(), 'GET', '/api/version')
         self.assertEqual(200, status)
         self.assertEqual({'version': '1.2.3 (v1.2.3-4-gabcdef0)',
-                          'project': 'U-Boot'}, data)
+                          'project': 'U-Boot',
+                          'source_url': 'https://elixir.bootlin.com/u-boot/'
+                                        'latest/source/{path}#L{line}'}, data)
 
         # The project comes from the review settings
+        url = 'https://github.com/dgibson/dtc/blob/main/{path}#L{line}'
         with mock.patch.object(server.info, 'get_version', return_value=None), \
                 mock.patch.dict(settings.review, {'project': 'dtc'}):
             _, data = self.call(self.make_server(), 'GET', '/api/version')
-        self.assertEqual({'version': None, 'project': 'dtc'}, data)
+        self.assertEqual({'version': None, 'project': 'dtc',
+                          'source_url': url}, data)
+
+        # Another project has no source URL unless one is given
+        with mock.patch.dict(settings.review, {'project': 'gcc'}):
+            _, data = self.call(self.make_server(), 'GET', '/api/version')
+        self.assertIsNone(data['source_url'])
+        mine = 'https://example.com/gcc/{path}?line={line}'
+        with mock.patch.dict(settings.review, {'project': 'gcc',
+                                               'source_url': mine}):
+            _, data = self.call(self.make_server(), 'GET', '/api/version')
+        self.assertEqual(mine, data['source_url'])
+
+        # Linux is known too, in any case
+        with mock.patch.dict(settings.review, {'project': 'Linux'}):
+            self.assertEqual('https://elixir.bootlin.com/linux/latest/source/'
+                             '{path}#L{line}', settings.source_url())
 
     def test_utc_offset(self):
         """API responses say how far the server's time zone is from UTC"""

@@ -708,13 +708,16 @@ class Server(jobs.JobRunner):
 
         Return:
             web.Response: Object with the 'version', which is None if it is
-                not known, and the 'project' which the server is for, from
-                the 'project' review setting, e.g. 'dtc'
+                not known, the 'project' which the server is for, from
+                the 'project' review setting, e.g. 'dtc', and the
+                'source_url' for browsing a line of its source, or None (see
+                settings.source_url())
         """
         if self._version_str is None:
             self._version_str = info.get_version() or ''
         return web.json_response({'version': self._version_str or None,
-                                  'project': settings.review_project()})
+                                  'project': settings.review_project(),
+                                  'source_url': settings.source_url()})
 
     async def _comments(self, request):
         """Handle 'GET /api/comments/<kind>/<id>': read comments from patchwork

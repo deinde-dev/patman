@@ -123,6 +123,18 @@ if the repo has them: the file as it is before the patch is there if the series
 is based on a commit the repo has, and the file with the patch applied is there
 once the series has been reviewed.
 
+Under each comment in a review of a patch which quotes some code, 'View code'
+shows the whole of the file at the last line quoted, found in the patch's diff.
+
+The file also links to that line in a source browser. For U-Boot and Linux
+this is Elixir (https://elixir.bootlin.com), where each name links to where it
+is defined and used, and for dtc it is the tree on GitHub. Elixir has the
+latest release, and GitHub the newest commit, so its copy of the file may
+differ from the one the series is based on, and a line may have moved. The
+link goes to the line before the patch, so there is none for a file which the
+patch adds. The ``source_url`` review setting gives another source browser, or
+one for another project (see :ref:`review_project`).
+
 Reviewing from the page
 -----------------------
 

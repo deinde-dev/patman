@@ -10,6 +10,10 @@ Unreleased
 
 Added
 ~~~~~
+- 'View code' under a comment in a review on the ``patman serve`` page shows
+  the whole file at the code which the comment quotes. The file links to the
+  line on Elixir for U-Boot and Linux, on GitHub for dtc, or on the source
+  browser given by the new ``source_url`` review setting.
 - 'Context' at the top of a series' reviews on the ``patman serve`` page shows
   what the agent was given for each review, such as the earlier review of the
   same patch and your notes, from ``GET /api/reviews/<id>/context``. Patman

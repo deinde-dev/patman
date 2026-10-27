@@ -524,6 +524,31 @@ def review_project():
     return review.get('project') or 'U-Boot'
 
 
+# Where to browse the source of each project, keyed by the project name in
+# lower case: Elixir, which cross-references the code, where it has the
+# project, else the project's own web view of its tree
+SOURCE_URLS = {
+    'u-boot': 'https://elixir.bootlin.com/u-boot/latest/source/{path}#L{line}',
+    'linux': 'https://elixir.bootlin.com/linux/latest/source/{path}#L{line}',
+    'dtc': 'https://github.com/dgibson/dtc/blob/main/{path}#L{line}',
+}
+
+
+def source_url():
+    """Get the URL for browsing a line of the project's source
+
+    This comes from the 'source_url' review setting, else from the project,
+    e.g. Elixir for U-Boot and Linux, or GitHub for dtc
+
+    Returns:
+        str or None: URL with '{path}' and '{line}' in it, e.g.
+            'https://elixir.bootlin.com/u-boot/latest/source/{path}#L{line}',
+            or None if there is none for the project
+    """
+    return (review.get('source_url') or
+            SOURCE_URLS.get(review_project().lower()))
+
+
 # These are the aliases we understand, indexed by alias. Each member is a list.
 alias = {}
 bounces = set()
@@ -532,7 +557,7 @@ bounces = set()
 review = {}
 
 # Names which the [review] section can hold
-REVIEW_KEYS = ('project', 'conventions', 'voice')
+REVIEW_KEYS = ('project', 'conventions', 'voice', 'source_url')
 
 if __name__ == "__main__":
     import doctest

@@ -153,6 +153,19 @@ with an error if the file cannot be read. A project other than U-Boot with no
 file holding your writing voice, with ``voice`` (see
 :ref:`review_voice`).
 
+``source_url`` gives where the ``patman serve`` page links to a line of the
+project's source, with ``{path}`` and ``{line}`` standing for the file and the
+line, e.g.:
+
+.. code-block:: ini
+
+    [review]
+    source_url: https://elixir.bootlin.com/u-boot/v2026.07/source/{path}#L{line}
+
+U-Boot and Linux use Elixir's latest release by default, e.g.
+``https://elixir.bootlin.com/u-boot/latest/source/{path}#L{line}``, and dtc
+uses ``https://github.com/dgibson/dtc/blob/main/{path}#L{line}``.
+
 The file might say which coding style the project follows, what its commit
 subjects look like, which tags a patch needs, and what a reviewer should look
 out for in each part of the tree. Keep it to what the agent cannot easily
