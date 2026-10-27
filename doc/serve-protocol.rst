@@ -35,6 +35,11 @@ the client may be in a different time zone, each response under ``/api/`` has
 an ``X-Patman-UTC-Offset`` header giving the server's offset from UTC in
 minutes, e.g. ``-360`` for UTC-6.
 
+A response of 1KB or more is compressed with gzip if the request has an
+``Accept-Encoding`` header which includes ``gzip``, as browsers send. The
+reviews of a series, for example, become a quarter of the size or less, which
+is faster to send to a phone over a mobile network.
+
 Access
 ------
 
@@ -728,6 +733,11 @@ The page
 ``GET /`` gives the page, a single HTML file which needs no build step and
 loads nothing from other sites, and ``/static/<file>`` gives the files it uses,
 such as its web-app manifest and icon. Neither needs the token.
+
+Each of these has an ``ETag`` and ``Cache-Control: no-cache``, so the browser
+checks with the server before it uses its copy again. The server sends status
+304 with no body if the file has not changed, so the page loads quickly but
+picks up a new version of patman's page as soon as it is installed.
 
 The page takes the token from a ``token`` query parameter in its own URL, as
 printed by ``patman serve``, keeps it in the browser's local storage and
