@@ -156,7 +156,7 @@ top, then a card for each review:
 Each card says whether the review approves the patch ('Reviewed-by') or has
 comments, and its status, which is amber while the review is still to be
 sent ('draft') and green once it has gone ('sent'). Long quotes are folded,
-e.g. '4 quoted lines', and open when tapped.
+e.g. '6 quoted lines', and open when tapped.
 
 The agent only reviews the cover letter when it has something to say about
 the series as a whole. Here it did not, so the cover letter has a card of
@@ -171,6 +171,34 @@ that the two can be read together:
 
 For a change to an existing file, 'View whole file' shows all of it, and the
 buttons between the chunks of the diff show more of the lines around them.
+
+Viewing the code
+----------------
+
+Each comment quotes the code it is about, starting with the ``diff --git``
+and ``@@`` lines which say where it is. 'View code' under the comment shows
+the whole file, at the last line quoted. On a wide screen the file is in a
+panel beside the review, so that the two can be read together:
+
+.. image:: images/serve-code-panel.png
+   :width: 100%
+   :alt: The review of patch 1, with the driver which its first comment is
+         about in a panel at the right
+
+'Full page' shows the file on its own, and the cross closes the panel. On a
+narrower screen, such as a phone, the file has a page of its own, as here
+for the Kconfig which the last comment is about:
+
+.. image:: images/serve-code.png
+   :width: 660px
+   :alt: The Kconfig with the patch applied, at the lines which the comment
+         quotes
+
+The file is read from the git repo, with the patch applied once the series
+has been reviewed. For a file which the patch changes, rather than adds, the
+link at the top shows the same line in a source browser: Elixir for U-Boot
+and Linux, where each name links to where it is defined and used. Its copy of
+the file is from the latest release, so it may be a little different.
 
 Changing a comment
 ------------------

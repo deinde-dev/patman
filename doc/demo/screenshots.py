@@ -35,6 +35,10 @@ URL = f'http://127.0.0.1:{PORT}/'
 VIEW = {'width': 660, 'height': 800}
 SCALE = 2
 
+# The size of a laptop's screen, which is wide enough for the panel which
+# shows the code beside the reviews
+WIDE = {'width': 1240, 'height': 760}
+
 # Space to leave around a card, in its picture
 PAD = 8
 
@@ -218,6 +222,23 @@ def run(shots):
     first.locator('.jobstrip', has_text=done).wait_for(timeout=30000)
     shots.crop(first, 'serve-revised')
     first.get_by_role('button', name='Dismiss').click()
+
+    # The code which a comment quotes, in a panel beside the review on a
+    # wide screen
+    page.set_viewport_size(WIDE)
+    first.locator('.chunk-btn', has_text='View code').first.click()
+    page.locator('#side .target').wait_for()
+    shots.screen('serve-code-panel')
+    page.locator('#side').get_by_role('button', name='✕').click()
+    page.set_viewport_size(VIEW)
+
+    # On a narrower screen the file has a page of its own, here the Kconfig
+    # which the last comment is about
+    first.locator('.chunk-btn', has_text='View code').nth(2).click()
+    page.locator('#main .src .target').wait_for()
+    shots.crop(page.locator('#main'), 'serve-code')
+    page.go_back()
+    page.locator('.card.review', has_text='Patch 2').wait_for()
 
     # Respond to a comment on patchwork
     second = page.locator('.card.review', has_text='Patch 2')

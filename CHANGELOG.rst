@@ -40,6 +40,10 @@ Added
 - A Projects chapter in the manual gives the setup for U-Boot, Linux and dtc:
   where each one's series are tracked, its checkpatch and maintainers, and
   its review settings, with example settings for each.
+- The guide's page on reviewing from ``patman serve`` shows 'View code', with
+  the code in the panel beside a review, and its pictures show the page as it
+  is now. The demo which makes them quotes code as real reviews do, and its
+  git repo has the files which the first patch changes.
 
 Changed
 ~~~~~~~
