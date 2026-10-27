@@ -11,8 +11,8 @@ Patman patch manager
 ====================
 
 Patman helps you create, send, track and review patch series for
-projects that take patches by email, such as U-Boot and the Linux
-kernel.
+projects that take patches by email, such as U-Boot, the Linux kernel
+and dtc (see :doc:`the Projects chapter </projects>`).
 
 When creating and sending a series it:
 

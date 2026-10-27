@@ -32,6 +32,9 @@ Added
 - A ``voice`` setting in the ``[review]`` section names the file holding your
   writing voice, so that each person can keep their own, rather than always
   using ``~/.config/patman.d/voice.md``.
+- A Projects chapter in the manual gives the setup for U-Boot, Linux and dtc:
+  where each one's series are tracked, its checkpatch and maintainers, and
+  its review settings, with example settings for each.
 
 Changed
 ~~~~~~~

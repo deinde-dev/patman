@@ -13,6 +13,7 @@
    :caption: Manual
 
    configuration
+   projects
    sending
    tags
    patchwork
