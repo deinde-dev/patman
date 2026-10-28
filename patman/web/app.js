@@ -1330,11 +1330,32 @@ async function viewReview(id, wantVer) {
     // when a job acts on it, so are drawn again each time the card is
     const chips = h('span', { style: 'display: contents' });
     const showChips = () => fill(chips,
-      h('span', { class: `chip ${r.approved ? 'st-accepted' : 'st-changes-requested'}` },
-        r.approved ? 'Reviewed-by' : 'comments'),
+      r.approved && h('span', { class: 'chip st-accepted',
+                                title: 'This review gives the patch a Reviewed-by tag' },
+        'Reviewed-by'),
+      repliesChip(),
       h('span', { class: `ver ${REVIEW_STATUS_CLASS[r.status] || ''}`,
                   title: REVIEW_STATUS_TIP[r.status] },
         REVIEW_STATUS[r.status] || r.status || ''));
+    // The replies to the review, and the comments on patchwork which we are
+    // responding to, shown below the review
+    const replyItems = [...(r.replies || []), ...commentResponses(sv, r.seq)];
+    const replyBoxes = replyItems.map((rp) => replyBox(rp, id, showChips));
+    // Say whether anyone has replied, in amber while a reply still needs a
+    // response, and go to the first reply when tapped, since it is below
+    // what may be a long review
+    function repliesChip() {
+      if (!replyItems.length) return null;
+      const waiting = replyItems.filter((rp) => REPLY_WAITING.includes(rp.status)).length;
+      const tip = waiting
+        ? `${nreplies(replyItems.length)}, ${waiting} waiting for your response`
+        : `${nreplies(replyItems.length)}, all dealt with`;
+      return h('span', {
+        class: `chip ${waiting ? 'st-changes-requested' : 'st-new'}`, role: 'button',
+        title: `${tip}: tap to see the first`,
+        onclick: () => replyBoxes[0].scrollIntoView({ behavior: 'smooth', block: 'start' }),
+      }, nreplies(replyItems.length));
+    }
     const [mailBtn, mailBox] = itemId
       ? mailToggle(r.seq ? 'patch' : 'cover', itemId, ser.upstream) : [null, null];
     // A patch which patchwork lacks, e.g. taken from lore for the review, can
@@ -1345,7 +1366,6 @@ async function viewReview(id, wantVer) {
               'new tab, since patchwork does not have it', 'btn light small');
     const [commentsBtn, commentsBox] = itemId && sv.link
       ? commentsToggle(ser, sv, r.seq, itemId) : [null, null];
-    const responses = commentResponses(sv, r.seq).map((rp) => replyBox(rp, id));
     const title = h('div', { class: 'row' },
       h('div', { class: 'grow name' }, itemId
         ? h('a', { href: mailHref(r.seq ? 'patch' : 'cover', itemId, ser.upstream),
@@ -1392,7 +1412,7 @@ async function viewReview(id, wantVer) {
                 'and send it'
               : 'Send the Gmail draft of this review')]),
       ...[mailBox, commentsBox].filter(Boolean),
-      ...(r.replies || []).map((rp) => replyBox(rp, id)), ...responses);
+      ...replyBoxes);
     entries.set(r.id, { r, strip, show, busy: false });
     show();
     return card;
@@ -1749,6 +1769,9 @@ function unreviewedCover(ser, sv) {
     commentResponses(sv, 0).map((rp) => replyBox(rp, ser.id)));
 }
 
+// Statuses of a reply which still needs a response from us
+const REPLY_WAITING = ['new', 'suggested'];
+
 // Status of a reply to a review, as [text, chip class]
 const REPLY_STATUS = {
   new: ['needs a reply', 'st-changes-requested'],
@@ -1780,8 +1803,10 @@ async function findReply(seriesId, replyId) {
   return null;
 }
 
-// Show a reply to one of our reviews of a series, with our response to it
-function replyBox(rp, seriesId) {
+// Show a reply to one of our reviews of a series, with our response to it.
+// If given, 'changed' is called each time the reply is shown again, e.g.
+// when its status changes
+function replyBox(rp, seriesId, changed) {
   const box = h('div', { class: 'comments' });
   const strip = h('div', { class: 'jobstrip' });
   // True while a job is acting on the reply
@@ -1815,7 +1840,7 @@ function replyBox(rp, seriesId) {
   };
   const show = () => {
     const [label, cls] = REPLY_STATUS[rp.status] || [rp.status, 'st-other'];
-    const waiting = rp.status === 'new' || rp.status === 'suggested';
+    const waiting = REPLY_WAITING.includes(rp.status);
     fill(box,
       h('div', { class: 'who' }, `↩ ${rp.sender.replace(/\s*<.*>/, '') || rp.sender}`,
         h('span', { class: 'when' }, ago(new Date(rp.date))), ' ',
@@ -1845,6 +1870,7 @@ function replyBox(rp, seriesId) {
           Object.assign(rp, await api(`replies/${rp.id}`, { json: { skip: true } }));
           show();
         } }, 'No reply needed')));
+    if (changed) changed();
   };
   const edit = () => {
     const text = h('textarea', { spellcheck: 'true' });

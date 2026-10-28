@@ -153,9 +153,9 @@ top, then a card for each review:
    :width: 660px
    :alt: The reviews of the series, with the cover letter and patch 1
 
-Each card says whether the review approves the patch ('Reviewed-by') or has
-comments, and its status, which is amber while the review is still to be
-sent ('draft') and green once it has gone ('sent'). Long quotes are folded,
+Each card gives the review's status, which is amber while the review is
+still to be sent ('draft') and green once it has gone ('sent'), and
+'Reviewed-by' if the review gives the patch that tag. Long quotes are folded,
 e.g. '6 quoted lines', and open when tapped.
 
 The agent only reviews the cover letter when it has something to say about
@@ -292,7 +292,9 @@ response, waiting, and 'Needs reply' lists just those:
 
 Here Jo has replied to the review of v3 of the Ethernet driver. Tap the
 series to see the reply below the review, then 'Suggest a response' to have
-the agent suggest one:
+the agent suggest one. The card of each review with a reply says how many,
+e.g. '1 reply', in amber while one still needs a response and in blue once
+they are all dealt with. Tap it to go to the first reply, below the review:
 
 .. image:: images/serve-reply.png
    :width: 644px

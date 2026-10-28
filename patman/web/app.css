@@ -218,7 +218,9 @@ a.card:active { background: var(--code-bg); }
 .ncomments.some { color: var(--link); font-weight: 600; }
 .comments { margin-top: 10px; border-top: 1px solid var(--border);
             padding-top: 10px; display: flex; flex-direction: column;
-            gap: 14px; cursor: auto; }
+            gap: 14px; cursor: auto;
+            /* Clear the header when scrolled to, e.g. from a replies chip */
+            scroll-margin-top: 64px; }
 .who { font-size: 13px; font-weight: 600; }
 .who .when { color: var(--muted); font-weight: 400; margin-left: 6px; }
 
