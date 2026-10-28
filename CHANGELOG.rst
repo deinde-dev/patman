@@ -47,6 +47,12 @@ Added
 
 Changed
 ~~~~~~~
+- A review's card on the ``patman serve`` page says how many replies it has,
+  e.g. '2 replies', counting the comments on patchwork which you are
+  responding to, in amber while one still needs a response, and goes to the
+  first when tapped. The card no longer says 'comments' for a review which
+  gives no Reviewed-by tag, since that is clear from the review, and was
+  easily taken to mean that someone had commented.
 - ``patman serve`` compresses its responses of 1KB or more with gzip, for a
   browser which accepts it, so that the page loads faster on a phone over a
   mobile network. The reviews of a long series go from 210KB to 51KB and the
