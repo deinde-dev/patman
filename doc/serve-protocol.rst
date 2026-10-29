@@ -356,6 +356,13 @@ of objects with:
 - ``earlier`` (int or null): if not, the ID of a reviewed series with the same
   title, i.e. an earlier version
 - ``mine`` (bool): true if this is one of your own series
+- ``next`` (object or null): for a series which you reviewed, who has the next
+  move on it: ``state`` is ``me`` (a reply is waiting for your response, or a
+  review is not sent), ``submitter`` (your reviews ask for changes and there
+  is no newer version in the list), ``stale`` (as ``submitter``, 28 days or
+  more after the last review was sent) or ``ready`` (your reviews give every
+  patch a Reviewed-by tag), and ``why`` says why, e.g. ``1 reply waiting for
+  your response``. It is null if none of these applies
 - ``job`` (int or null): the job reviewing the series, if one is waiting or
   running
 - ``review_branch`` (str or null): the series' review branch, if it has one

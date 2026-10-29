@@ -1802,6 +1802,13 @@ class TestWebServer(unittest.TestCase, TestCommon):
                           items[300]['mine']))
         self.assertEqual((rev_id, None), (items[200]['reviewed'],
                                           items[200]['earlier']))
+
+        # The reply is waiting for your response
+        self.assertEqual({'state': 'me',
+                          'why': '1 reply waiting for your response'},
+                         items[200]['next'])
+        self.assertEqual([None, None, None],
+                         [items[idnum]['next'] for idnum in (300, 100, 400)])
         self.assertTrue(items[100]['mine'])
         self.assertEqual((None, None, False),
                          (items[400]['reviewed'], items[400]['earlier'],
@@ -1843,6 +1850,53 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(
             f'Series 400 is already being reviewed, by job {reviewing.idnum}',
             data['error'])
+
+    def test_next_move(self):
+        """Who has the next move on a series you reviewed"""
+        now = datetime(2026, 11, 1)
+
+        def part(seq, status, approved=False, replies=0):
+            return {'seq': seq, 'status': status, 'approved': approved,
+                    'replies': replies}
+
+        def check(parts, sent='2026-10-30 10:00:00', newer=False):
+            res = server.info.next_move(parts, sent, newer, now)
+            return res and (res['state'], res['why'])
+
+        # A reply waiting, or a review not sent, is your move, even with a
+        # newer version
+        self.assertEqual(('me', '2 replies waiting for your response'),
+                         check([part(1, 'sent', replies=1),
+                                part(2, 'replied', replies=1)], newer=True))
+        self.assertEqual(('me', '1 review not sent'),
+                         check([part(0, 'new', True), part(1, 'sent')]))
+        self.assertEqual(('me', '2 reviews not sent'),
+                         check([part(1, 'draft'), part(2, 'edited')]))
+
+        # Every patch with your Reviewed-by is ready; the cover letter does
+        # not need one
+        self.assertEqual(('ready',
+                          'Your reviews give every patch a Reviewed-by tag'),
+                         check([part(0, 'sent'), part(1, 'sent', True),
+                                part(2, 'replied', True)]))
+
+        # Changes asked for wait on the submitter, until they are stale
+        why = ('You asked for changes to 1 patch and there is no new version '
+               'yet')
+        self.assertEqual(('submitter', why),
+                         check([part(1, 'sent'), part(2, 'sent', True)]))
+        self.assertEqual(('submitter', why),
+                         check([part(1, 'sent')], sent=None))
+        self.assertEqual(('stale', f'{why}, 28 days after your review'),
+                         check([part(1, 'sent')], sent='2026-10-04 00:00:00'))
+        self.assertEqual(('submitter', why.replace('1 patch', '2 patches')),
+                         check([part(1, 'sent'), part(2, 'replied')]))
+
+        # A newer version has the next move, and a patch you did not review
+        # is not ready, nor waiting for changes
+        self.assertIsNone(check([part(1, 'sent')], newer=True))
+        self.assertIsNone(check([part(1, 'sent', True), part(2, None)]))
+        self.assertIsNone(check([part(1, 'deleted')]))
 
     def test_inbox_not_reviewed(self):
         """A version applied but not reviewed is not an earlier review"""

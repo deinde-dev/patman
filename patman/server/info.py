@@ -21,6 +21,14 @@ from patman.server.params import BadRequest
 from patman.workflow import Wtype
 
 
+# How many days a series can wait for a new version, after you ask for changes,
+# before it is stale
+STALE_DAYS = 28
+
+# Statuses of a review which is not sent yet
+REVIEW_UNSENT = (database.REVIEW_NEW, database.REVIEW_DRAFT,
+                 database.REVIEW_EDITED)
+
 # Directory above the patman package, which is the top of the checkout when
 # patman runs from its git repository
 TOP_DIR = os.path.dirname(os.path.dirname(os.path.dirname(
@@ -598,8 +606,28 @@ def _earlier_info(rcser, found):
     if not found:
         return None
     idnum, svr, replies = found
-    out = {'id': idnum, 'version': svr.version, 'link': None, 'date': None,
-           'replies': replies, 'parts': []}
+    parts, date = _review_parts(rcser, svr)
+    return {'id': idnum, 'version': svr.version, 'link': svr.link,
+            'date': date, 'replies': replies, 'parts': parts}
+
+
+def _review_parts(rcser, svr):
+    """Get the parts of a version which you reviewed, with your reviews
+
+    Args:
+        rcser (Cseries): Open cseries instance with the reviews
+        svr (SerVer): Version reviewed
+
+    Return:
+        tuple:
+            list of dict: One for each part, with its 'seq' (0 for the cover
+                letter), 'name', the patchwork 'mail_id' of the patch or
+                cover letter, the 'status' of your review of it (None if
+                there is none), whether it is 'approved' and the number of
+                'replies' waiting
+            str or None: When the latest review was written, if any
+    """
+    out = []
     reviews = {rev.seq: rev for rev in
                rcser.db.review_get_for_version(svr.idnum)}
     waiting = Counter(rp.seq for rp in rcser.db.reply_get_comments(svr.idnum)
@@ -615,15 +643,128 @@ def _earlier_info(rcser, found):
     for seq in sorted(set(parts) | set(reviews)):
         name, mail_id = parts.get(seq, (f'Patch {seq}', None))
         rev = reviews.get(seq)
-        out['parts'].append({
+        out.append({
             'seq': seq, 'name': name, 'mail_id': mail_id,
             'status': (rev.status or 'new') if rev else None,
             'approved': bool(rev and rev.approved),
             'replies': waiting[seq]})
-    out['link'] = svr.link
-    out['date'] = max((rev.timestamp for rev in reviews.values()
-                       if rev.timestamp), default=None)
-    return out
+    return out, max((rev.timestamp for rev in reviews.values()
+                     if rev.timestamp), default=None)
+
+
+def _count(num, one, many):
+    """Give a count of things, e.g. '1 patch' or '2 patches'
+
+    Args:
+        num (int): Number of things
+        one (str): Name of one, e.g. 'patch'
+        many (str): Name of more than one, e.g. 'patches'
+
+    Return:
+        str: The count
+    """
+    return f'{num} {one if num == 1 else many}'
+
+
+def _waiting_on_me(parts):
+    """Say why a series which you reviewed is waiting on you, if it is
+
+    Args:
+        parts (list of dict): Parts of the version, from _review_parts()
+
+    Return:
+        dict or None: None if it is not, else the 'state', which is 'me',
+            and 'why'
+    """
+    replies = sum(part['replies'] for part in parts)
+    if replies:
+        return {'state': 'me', 'why': f"{_count(replies, 'reply', 'replies')} "
+                'waiting for your response'}
+    unsent = sum(part['status'] in REVIEW_UNSENT for part in parts)
+    if unsent:
+        return {'state': 'me',
+                'why': f"{_count(unsent, 'review', 'reviews')} not sent"}
+    return None
+
+
+def next_move(parts, sent, newer, now):
+    """Say who has the next move on a series which you reviewed
+
+    The series is waiting on you if a reply needs your response or a review
+    is not sent yet. Otherwise it is ready if your reviews give each patch a
+    Reviewed-by tag, or waiting on the submitter for a new version if any
+    asks for changes, and stale once it has waited for STALE_DAYS since you
+    sent the review. A series with a newer version has no next move: the
+    newer one has it
+
+    Args:
+        parts (list of dict): Parts of the version, from _review_parts()
+        sent (str or None): When the last review was sent, e.g.
+            '2026-10-01 10:00:00'
+        newer (bool): True if there is a newer version of the series
+        now (datetime): Time now
+
+    Return:
+        dict or None: None if nothing is waiting, else the 'state' ('me',
+            'submitter', 'stale' or 'ready') and 'why', saying why
+    """
+    mine = _waiting_on_me(parts)
+    if mine or newer:
+        return mine
+    patches = [part for part in parts if part['seq']]
+    if patches and all(part['approved'] for part in patches):
+        return {'state': 'ready',
+                'why': 'Your reviews give every patch a Reviewed-by tag'}
+    asked = sum(part['status'] in database.REVIEW_DONE and not part['approved']
+                for part in patches)
+    if not asked:
+        return None
+    why = (f"You asked for changes to {_count(asked, 'patch', 'patches')} and "
+           'there is no new version yet')
+    if sent:
+        days = (now - datetime.strptime(sent[:19],
+                                        '%Y-%m-%d %H:%M:%S')).days
+        if days >= STALE_DAYS:
+            return {'state': 'stale',
+                    'why': f'{why}, {days} days after your review'}
+    return {'state': 'submitter', 'why': why}
+
+
+def _newest_versions(series_list):
+    """Get the newest version of each series in a list
+
+    Args:
+        series_list (list of dict): Series from patchwork
+
+    Return:
+        dict: key (str): Normalised title (see _norm_title())
+            value (int): Newest version of the series with that title
+    """
+    newest = {}
+    for data in series_list:
+        title = _norm_title(data.get('name'))
+        newest[title] = max(newest.get(title, 0), data.get('version') or 1)
+    return newest
+
+
+def _reviewed_next(rcser, svid, data, newest):
+    """Say who has the next move on a version which you reviewed
+
+    Args:
+        rcser (Cseries): Open cseries instance with the reviews
+        svid (int): ser_ver ID of the version
+        data (dict): The version, from patchwork
+        newest (dict): Newest version of each series, from
+            _newest_versions()
+
+    Return:
+        dict or None: As from next_move()
+    """
+    parts, _ = _review_parts(rcser, rcser.db.ser_ver_get_by_id(svid))
+    newer = (newest[_norm_title(data.get('name'))] >
+             (data.get('version') or 1))
+    return next_move(parts, rcser.db.review_last_sent(svid), newer,
+                     rcser.get_now())
 
 
 def get_inbox(cser, rcser, series_list, status=None,
@@ -643,13 +784,16 @@ def get_inbox(cser, rcser, series_list, status=None,
             its 'id' and 'name', with the 'commit', 'branch' and 'state' from
             'status', or None. 'earlier' is None, or your review of an
             earlier version (see _earlier_info()). 'mine' is True if you
-            sent the series (see lookup.is_own_series())
+            sent the series (see lookup.is_own_series()). 'next' says who
+            has the next move on a series which you reviewed, or is None
+            (see next_move())
     """
     status = status or {}
     reviews = rcser.db.series_get_dict(include_archived=True,
                                        reviews_only=True).values()
     review_ids = {ser.idnum for ser in reviews}
     by_title = _reviews_by_title(rcser, reviews)
+    newest = _newest_versions(series_list)
     out = []
     for data in series_list:
         link = str(data['id'])
@@ -676,6 +820,7 @@ def get_inbox(cser, rcser, series_list, status=None,
             'earlier': (None if reviewed else _earlier_info(
                 rcser, by_title.get(_norm_title(data.get('name'))))),
             'mine': lookup.is_own_series(data, own_emails, cser.db),
+            'next': reviewed and _reviewed_next(rcser, found[3], data, newest),
         })
     return out
 

@@ -1928,6 +1928,19 @@ class Database:  # pylint:disable=R0904
             'FROM review WHERE svid = ? ORDER BY seq', (svid,))
         return [Review(*row) for row in res.fetchall()]
 
+    def review_last_sent(self, svid):
+        """Get when the last review of a series version was sent
+
+        Args:
+            svid (int): ser_ver ID num
+
+        Return:
+            str or None: Time, e.g. '2026-10-01 10:00:00', or None if no
+                review of it has a send time
+        """
+        return self.execute('SELECT MAX(sent_time) FROM review WHERE svid = ?',
+                            (svid,)).fetchone()[0]
+
     def review_get(self, review_id):
         """Get a review record by its ID
 
