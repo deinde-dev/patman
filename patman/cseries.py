@@ -1317,6 +1317,9 @@ class Cseries(cser_helper.CseriesHelper):
              dry_run=False, version=None):
         """Scan a branch and make updates to the database if it has changed
 
+        A patch which is still in the branch keeps its patchwork ID, state and
+        number of comments, so that the series need not be gathered again
+
         Args:
             branch_name (str): Name of branch to sync, or None for current one
             mark (str): True to mark each commit with a change ID
@@ -1351,10 +1354,12 @@ class Cseries(cser_helper.CseriesHelper):
 
         # First check for new patches that are not in the database
         to_add = dict(enumerate(ser.commits))
+        keep = {}
         for pcm in pcdict.values():
             tout.debug(f'pcm {pcm.subject}')
             i = self._find_matched_commit(to_add, pcm)
             if i is not None:
+                keep[i] = pcm
                 del to_add[i]
 
         # Now check for patches in the database that are not in the branch
@@ -1385,7 +1390,7 @@ class Cseries(cser_helper.CseriesHelper):
             removed += 1
 
         self.db.pcommit_delete(svid)
-        self._add_series_commits(ser, svid)
+        self._add_series_commits(ser, svid, keep)
 
         # Update series description if the cover letter has changed
         branch_desc = ser.cover[0] if ser.cover else None  # pylint: disable=E1136

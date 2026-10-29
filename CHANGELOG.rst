@@ -100,6 +100,10 @@ Fixed
   were added.
 - ``patman series -s <name> -V <n> scan`` scans version n, rather than
   ignoring -V and scanning the branch which the name gives, i.e. v1.
+- ``patman series scan`` keeps the patchwork (or lore) ID, state and number
+  of comments of each patch which is still in the branch, so that
+  ``series progress`` still shows the series as it was, without gathering
+  it again.
 
 0.6.0 - 2026-10-24
 ------------------

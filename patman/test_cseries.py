@@ -2310,6 +2310,7 @@ class TestCseries(CseriesTester):
         svid = cser.get_ser_ver(ser.idnum, 2).idnum
         old = list(cser.get_pcommit_dict(svid).values())
         self.assertEqual(3, len(old))
+        self.assertTrue(all(pcm.patch_id for pcm in old))
 
         # Drop the last patch from the branch
         branch = self.repo.lookup_reference('refs/heads/second2')
@@ -2325,9 +2326,14 @@ class TestCseries(CseriesTester):
                           pwork=True)
         self.assertEqual(expect + 'Scanned 2 commits (1 removed)\n',
                          out.getvalue())
-        self.assertEqual([pcm.subject for pcm in old[:2]],
-                         [pcm.subject
-                          for pcm in cser.get_pcommit_dict(svid).values()])
+
+        # The patches which remain keep what was gathered for them
+        new = list(cser.get_pcommit_dict(svid).values())
+        self.assertEqual(
+            [(pcm.subject, pcm.patch_id, pcm.state, pcm.num_comments)
+             for pcm in old[:2]],
+            [(pcm.subject, pcm.patch_id, pcm.state, pcm.num_comments)
+             for pcm in new])
 
     def test_series_sync_patches(self):
         """Test updating the patches of a version from its branch"""

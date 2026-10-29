@@ -470,18 +470,31 @@ class CseriesHelper:
 
         return series
 
-    def _add_series_commits(self, series, svid):
+    def _add_series_commits(self, series, svid, keep=None):
         """Add a commits from a series into the database
 
         Args:
             series (Series): Series containing commits to add
             svid (int): ser_ver-table ID to use for each commit
+            keep (dict or None): Patches already in the database whose
+                patchwork ID, state and number of comments are kept:
+                key (int): Sequence number of the commit in the series
+                value (Pcommit): Patch which matches it
         """
         to_add = [Pcommit(None, seq, commit.subject, None, commit.change_id,
                           None, None, None)
                   for seq, commit in enumerate(series.commits)]
 
         self.db.pcommit_add_list(svid, to_add)
+
+        # pcommit_add_list() stores only the seq, subject and change ID
+        if keep:
+            for pcm in self.db.pcommit_get_list(svid):
+                old = keep.get(pcm.seq)
+                if old:
+                    self.db.pcommit_update(pcm._replace(
+                        state=old.state, patch_id=old.patch_id,
+                        num_comments=old.num_comments))
 
     def sync_patches(self, ser, version, dry_run=False):
         """Update the patches of a version from its branch, if they differ
