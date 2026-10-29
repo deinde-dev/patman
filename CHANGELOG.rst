@@ -10,6 +10,13 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman maint check`` checks the commits which a maintainer is about to
+  push, i.e. those on the branch which are not upstream yet, against the
+  project's rules in the new ``[maint]`` section of the settings: which
+  trailers each patch from the list and each pull or merge request ends with,
+  whether the author has signed it off, which trailers may link to an issue
+  and in which repos, and whether merge commits are allowed. A new chapter,
+  Maintaining a project, describes the rules, with dtc's as the example.
 - Each series which you reviewed in the inbox of the ``patman serve`` page
   says who has the next move on it: 'your move' while a reply waits for your
   response or a review is not sent, 'waiting' once you have asked for changes
