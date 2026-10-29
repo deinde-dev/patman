@@ -138,9 +138,12 @@ class TestPwCache(unittest.TestCase):  # pylint: disable=R0904
             self.assertIsNone(cache.get('https://pw', 'patches/1/', None))
         self.assertIn('Cannot use the patchwork cache', err.getvalue())
         self.assertTrue(cache.broken)
+        cache.close()
 
-        # SQLite failing, e.g. with a full disk
+        # SQLite failing, e.g. with a full disk. Close the real connection
+        # first, so that it does not remove its files while tearDown() does
         cache = self.cache()
+        cache.close()
         cache.con = mock.MagicMock()
         cache.con.execute.side_effect = sqlite3.OperationalError('disk full')
         with terminal.capture() as (_, err):
