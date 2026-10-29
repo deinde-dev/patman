@@ -4,6 +4,7 @@
 #
 """Functional tests for checking that patman behaves correctly"""
 
+from collections import OrderedDict
 from datetime import datetime
 import os
 import unittest
@@ -26,6 +27,7 @@ from patman import settings
 from patman import cseries
 from patman.database import Pcommit
 from patman import patchstream
+from patman import patchwork
 from patman.patchwork import Patchwork
 from patman.series import Series
 from patman.test_common import CseriesTester, Namespace, needs_checkpatch
@@ -1168,20 +1170,56 @@ class TestCseries(CseriesTester):
             args = Namespace(subcmd=subcmd, series='second', version=None,
                              patchwork_url=None, update=False,
                              autolink=True, autolink_wait=0,
-                             show_comments=False, show_cover_comments=False)
+                             show_comments=False, show_cover_comments=False,
+                             gather_all_versions=False, gather_tags=False,
+                             dry_run=False)
             with mock.patch.object(cseries.Cseries, method) as meth:
                 control.do_series(args, test_db=self.tmpdir)
             return meth.call_args.args[0]
 
-        for subcmd, method in (('autolink', 'link_auto'), ('send', 'send')):
+        for subcmd, method in (('autolink', 'link_auto'), ('send', 'send'),
+                               ('gather-all', 'gather_all')):
             pwork = run(subcmd, method)
             self.assertIsInstance(pwork, lorelist.LoreList)
             self.assertEqual('https://lore.kernel.org/my-list', pwork.url)
 
-        # Gathering all series needs patchwork
-        with self.assertRaises(ValueError) as exc:
-            run('gather-all', 'gather_all')
-        self.assertIn('No patchwork URL found', str(exc.exception))
+            # The upstream's main branch says which patches are applied
+            self.assertEqual(('dtc', 'dtc/master'),
+                             (pwork.upstream, pwork.applied_ref))
+
+    def test_series_gather_all_lore(self):
+        """Test that gathering all series reads each from its upstream,
+        whether on patchwork or on lore"""
+        cser = self.get_cser()
+        cser.db.upstream_add('dtc', 'https://dtc.example.com',
+                             lore_url='https://lore.kernel.org/my-list')
+        cser.db.commit()
+        with terminal.capture():
+            cser.add('first', '', allow_unmarked=True)
+            cser.add('second', allow_unmarked=True, ups='dtc')
+        sdict = cser.db.series_get_dict()
+        to_fetch = OrderedDict(
+            (idnum, patchwork.STATE_REQ('1234', sdict[name].idnum, name, 1,
+                                        False, False))
+            for idnum, name in ((1, 'first'), (2, 'second')))
+
+        pwork = Patchwork.for_testing(lambda subpath: None)
+        groups = cser._group_by_patchwork(pwork, to_fetch)
+        self.assertEqual(2, len(groups))
+        (pwk, fetch), (llist, lfetch) = groups
+        self.assertIs(pwork, pwk)
+        self.assertEqual([1], list(fetch))
+        self.assertIsInstance(llist, lorelist.LoreList)
+        self.assertEqual(('https://lore.kernel.org/my-list', 'dtc',
+                          'dtc/master'),
+                         (llist.url, llist.upstream, llist.applied_ref))
+        self.assertEqual([2], list(lfetch))
+
+        # A LoreList for the upstream is used for its series
+        llist = lorelist.LoreList('https://lore.kernel.org/my-list')
+        llist.upstream = 'dtc'
+        groups = cser._group_by_patchwork(llist, to_fetch)
+        self.assertIs(llist, groups[-1][0])
 
     def test_series_lore_from_to(self):
         """Test using the list which a series is sent to, for an upstream with

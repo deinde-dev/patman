@@ -1744,13 +1744,34 @@ class CseriesHelper:
         """
         return patchwork.Patchwork(url)
 
+    def _make_lore_list(self, url, ups):
+        """Create a LoreList for an upstream's list on lore
+
+        Its patches are 'accepted' once the upstream's main branch has them
+
+        Args:
+            url (str): URL of the list on lore
+            ups (str): Name of the upstream, which is also its git remote
+
+        Return:
+            LoreList: New object
+        """
+        # pylint: disable=C0415
+        from patman.review import apply
+
+        llist = lorelist.LoreList(url)
+        llist.upstream = ups
+        llist.use_branch(apply.main_branch(ups, self.gitdir), self.gitdir)
+        return llist
+
     def _group_by_patchwork(self, pwork, to_fetch):
         """Split the series to fetch by the patchwork server holding them
 
-        Each series is read from the patchwork server of its upstream. A
-        series with no upstream, or whose upstream has no patchwork URL, is
-        read from the server of the default upstream, or from pwork if that
-        has no URL either. Each Patchwork object is given the project of the
+        Each series is read from the patchwork server of its upstream, or
+        from the upstream's list on lore if it has no patchwork URL but has
+        a list. Any other series, with no upstream or whose upstream has
+        neither, is read from the server of the default upstream, or from
+        pwork if that has no URL either. Each Patchwork object is given the project of the
         upstream, so that it can follow the project's events; series in
         different projects on one server are read with different objects.
 
@@ -1775,6 +1796,17 @@ class CseriesHelper:
             ser = sdict.get(sync.series_id)
             ups = ser.upstream if ser and ser.upstream else None
             url = self.db.upstream_get_patchwork_url(ups) if ups else None
+            lore_url = (self.db.upstream_get_lore_url(ups)
+                        if ups and not url else None)
+            if lore_url:
+                key = ('lore', lore_url, ups)
+                if (isinstance(pwork, lorelist.LoreList) and
+                        pwork.upstream == ups):
+                    key = main
+                if key not in pworks:
+                    pworks[key] = self._make_lore_list(lore_url, ups)
+                groups.setdefault(key, OrderedDict())[svid] = sync
+                continue
             if not url:
                 ups = default
             url = url or fallback

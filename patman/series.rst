@@ -349,5 +349,12 @@ finds them for all your series.
 
 ``status -cC`` shows the replies to each patch and the cover letter, and
 ``gather`` adds the review tags in them to the commits, as with patchwork.
-Lore has no patch states, so each patch is 'new', and patman cannot tell
-when a series is accepted. ``gather-all`` still needs patchwork.
+Lore has no patch states, so patman looks in the upstream's main branch
+instead, e.g. ``us/main`` for the upstream ``us``. A maintainer who applies a
+patch from the list records its Message-ID in a trailer, such as
+``Message-ID: <20261026095020.1760446-1-sjg@chromium.org>`` or
+``Link: https://lore.kernel.org/r/<msgid>``, so a patch whose Message-ID is in
+the branch is 'accepted' and the others are 'new'. Fetch the upstream first,
+so that the branch is up to date; ``series progress`` then shows which
+patches are applied. ``gather-all`` reads each series from its upstream's
+list, and those on patchwork from their server.

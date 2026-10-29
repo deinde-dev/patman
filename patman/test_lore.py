@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
+from u_boot_pylib import command
 from u_boot_pylib import terminal
 
 from patman import lore
@@ -530,6 +531,84 @@ class TestLore(unittest.TestCase):
         with llist.collect_stats() as stats:
             llist.lore.request_count += 3
         self.assertEqual(3, stats.request_count)
+
+    def test_trailer_msgid(self):
+        """A Message-ID: or Link: trailer gives the patch it applies"""
+        for value, msgid in (
+                ('<p1@x>', 'p1@x'),
+                (' <p1@x> ', 'p1@x'),
+                ('https://lore.kernel.org/r/p1@x', 'p1@x'),
+                ('https://lore.kernel.org/my-list/p1@x/', 'p1@x'),
+                ('https://lore.kernel.org/all/p1%40x/', 'p1@x'),
+                ('https://patch.msgid.link/p1@x', 'p1@x'),
+                ('https://github.com/dgibson/dtc/pull/193', None),
+                ('https://lore.kernel.org/my-list/', None),
+                ('<no-at-sign>', None)):
+            self.assertEqual(msgid, lorelist.trailer_msgid(value), value)
+
+    def make_repo(self, *trailers):
+        """Make a git repo with a commit for each set of trailers
+
+        Args:
+            trailers (str): Trailers of each commit, e.g. 'Link: <url>'
+
+        Returns:
+            str: Directory of the repo, whose branch is 'main'
+        """
+        repo = os.path.join(self.tmpdir, 'repo')
+        git = ['git', '-c', 'user.name=Fred', '-c', 'user.email=fred@x']
+        command.run_one('git', 'init', '-q', '-b', 'main', repo)
+        for seq, text in enumerate(trailers):
+            command.run_one(*git, 'commit', '-q', '--allow-empty', '-m',
+                            f'Commit {seq}\n\nDo it\n\n{text}', cwd=repo)
+        return repo
+
+    def test_lorelist_applied(self):
+        """A patch is accepted once the branch has its Message-ID"""
+        repo = self.make_repo(
+            'Signed-off-by: Fred <fred@x>\nMessage-ID: <p1@x>\n'
+            'Signed-off-by: Simon Glass <sjg@chromium.org>',
+            'Link: https://lore.kernel.org/r/other@x',
+            'Closes: https://github.com/dgibson/dtc/issues/49')
+        self.assertEqual({'p1@x', 'other@x'},
+                         lorelist.applied_msgids('main', repo))
+
+        # Without a branch, every patch is new
+        llist, _ = self.lore_list()
+        self.assertEqual(['new', 'new'],
+                         run(llist.get_series_patch_states(None, 'cover@x')))
+        self.assertEqual({}, llist.get_states(['lore:p1@x']))
+
+        llist.use_branch('main', repo)
+        self.assertEqual(['accepted', 'new'],
+                         run(llist.get_series_patch_states(None, 'cover@x')))
+        self.assertEqual({'lore:p1@x': 'accepted'},
+                         llist.get_states(['lore:p1@x', 'lore:p2@x']))
+        for read_comments in (True, False):
+            _, patches = run(llist.series_get_state(None, 'cover@x',
+                                                    read_comments, False))
+            self.assertEqual(['accepted', 'new'],
+                             [pat.state for pat in patches])
+
+        # The branch is read once
+        with mock.patch.object(lorelist.command, 'run_one') as run_one:
+            self.assertEqual('accepted', llist.patch_state('lore:p1@x'))
+        run_one.assert_not_called()
+
+        # A branch which is missing has no patches
+        with terminal.capture():
+            self.assertEqual(set(), lorelist.applied_msgids('us/main', repo))
+            llist.use_branch('us/main', repo)
+            self.assertEqual('new', llist.patch_state('lore:p1@x'))
+
+        # A branch which cannot be read says so
+        with mock.patch.object(lorelist.gitutil, 'ref_exists',
+                               return_value=True):
+            with terminal.capture() as (_, err):
+                self.assertEqual(set(),
+                                 lorelist.applied_msgids('main', self.tmpdir))
+        self.assertIn("Cannot read the patches applied to 'main'",
+                      err.getvalue())
 
     def test_lorelist_single(self):
         """A patch on its own is a series, and only a series is accepted"""
