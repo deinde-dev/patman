@@ -2302,6 +2302,32 @@ class TestCseries(CseriesTester):
         self.assertEqual('bootm: Make it boot', chk[1].subject)
         self.assertEqual('Just checking', chk[2].subject)
 
+    def test_series_scan_dropped(self):
+        """Test scanning a version whose last patch was dropped before
+        sending"""
+        cser, _ = self.setup_second()
+        ser = cser.get_series_by_name('second')
+        svid = cser.get_ser_ver(ser.idnum, 2).idnum
+        old = list(cser.get_pcommit_dict(svid).values())
+        self.assertEqual(3, len(old))
+
+        # Drop the last patch from the branch
+        branch = self.repo.lookup_reference('refs/heads/second2')
+        branch.set_target(self.repo.revparse_single('second2~1').id)
+
+        expect = """Syncing series 'second2' v2: mark False allow_unmarked True
+    0 video: Some video improvements
+    1 serial: Add a serial driver
+-   2 bootm: Make it boot
+"""
+        with terminal.capture() as (out, _):
+            self.run_args('series', '-s', 'second2', 'scan', '-M', pwork=True)
+        self.assertEqual(expect + 'Scanned 2 commits (1 removed)\n',
+                         out.getvalue())
+        self.assertEqual([pcm.subject for pcm in old[:2]],
+                         [pcm.subject
+                          for pcm in cser.get_pcommit_dict(svid).values()])
+
     def test_series_sync_patches(self):
         """Test updating the patches of a version from its branch"""
         cser, _ = self.setup_second()

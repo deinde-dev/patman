@@ -1376,12 +1376,11 @@ class Cseries(cser_helper.CseriesHelper):
                 added += 1
             else:
                 _show_item(' ', seq, cmt.subject)
-        seq = len(ser.commits)
-        for cmt in to_add.items():
-            _show_item('+', seq, cmt.subject)
-            seq += 1
+
+        # Patches beyond the end of the branch are gone too
         for seq, pcm in to_remove.items():
-            _show_item('+', seq, pcm.subject)
+            _show_item('-', seq, pcm.subject)
+            removed += 1
 
         self.db.pcommit_delete(svid)
         self._add_series_commits(ser, svid)

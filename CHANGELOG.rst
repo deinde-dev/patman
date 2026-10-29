@@ -95,6 +95,9 @@ Fixed
 - ``patman series version-change`` reads the commits of the version being
   changed, rather than those of v1, so changing v2 of a series no longer
   rewrites v1's commits as the new version.
+- ``patman series scan`` shows a patch dropped from the end of the branch as
+  removed, with '-', and counts it, rather than showing it with '+' as if it
+  were added.
 
 0.6.0 - 2026-10-24
 ------------------
