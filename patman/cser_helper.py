@@ -346,7 +346,7 @@ class CseriesHelper:
         """
         return self.db.series_get_info(idnum)
 
-    def prep_series(self, name, end=None):
+    def prep_series(self, name, end=None, version=None):
         """Prepare to work with a series
 
         Parse the branch name to determine the series name and version
@@ -359,6 +359,8 @@ class CseriesHelper:
             end (str or None): Commit to end at, e.g. 'my_branch~16'. Only
                 commits up to that are processed. Use None to process commits up
                 to the upstream branch
+            version (int or None): Version to use, e.g. 3 for the branch
+                'fix3', or None to take it from the name
 
         Return: tuple:
             str: Series name, e.g. 'fix'
@@ -366,8 +368,8 @@ class CseriesHelper:
             int: Version number, e.g. 2
             str: Message to show
         """
-        ser, version = self._parse_series_and_version(name, None)
-        if not name:
+        ser, version = self._parse_series_and_version(name, version)
+        if not name or version:
             name = self._get_branch_name(ser.name, version)
 
         # First check we have a branch with this name

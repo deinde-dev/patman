@@ -98,6 +98,8 @@ Fixed
 - ``patman series scan`` shows a patch dropped from the end of the branch as
   removed, with '-', and counts it, rather than showing it with '+' as if it
   were added.
+- ``patman series -s <name> -V <n> scan`` scans version n, rather than
+  ignoring -V and scanning the branch which the name gives, i.e. v1.
 
 0.6.0 - 2026-10-24
 ------------------

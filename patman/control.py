@@ -347,7 +347,7 @@ def do_series(args, test_db=None, pwork=None, cser=None):
         elif args.subcmd == 'scan':
             cser.scan(args.series, mark=args.mark,
                       allow_unmarked=args.allow_unmarked, end=args.upstream,
-                      dry_run=args.dry_run)
+                      dry_run=args.dry_run, version=args.version)
         elif args.subcmd == 'send':
             cser.send(pwork, args.series, args.autolink, args.autolink_wait,
                       args)

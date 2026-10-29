@@ -2304,7 +2304,7 @@ class TestCseries(CseriesTester):
 
     def test_series_scan_dropped(self):
         """Test scanning a version whose last patch was dropped before
-        sending"""
+        sending, naming the version with -V"""
         cser, _ = self.setup_second()
         ser = cser.get_series_by_name('second')
         svid = cser.get_ser_ver(ser.idnum, 2).idnum
@@ -2321,7 +2321,8 @@ class TestCseries(CseriesTester):
 -   2 bootm: Make it boot
 """
         with terminal.capture() as (out, _):
-            self.run_args('series', '-s', 'second2', 'scan', '-M', pwork=True)
+            self.run_args('series', '-s', 'second', '-V', '2', 'scan', '-M',
+                          pwork=True)
         self.assertEqual(expect + 'Scanned 2 commits (1 removed)\n',
                          out.getvalue())
         self.assertEqual([pcm.subject for pcm in old[:2]],

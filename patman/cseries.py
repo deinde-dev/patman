@@ -1314,15 +1314,17 @@ class Cseries(cser_helper.CseriesHelper):
             tout.info('Dry run completed')
 
     def scan(self, branch_name, mark=False, allow_unmarked=False, end=None,
-             dry_run=False):
+             dry_run=False, version=None):
         """Scan a branch and make updates to the database if it has changed
 
         Args:
             branch_name (str): Name of branch to sync, or None for current one
             mark (str): True to mark each commit with a change ID
             allow_unmarked (str): True to not require each commit to be marked
-            end (str): Add only commits up to but exclu
+            end (str): Add only commits up to but excluding this one
             dry_run (bool): True to do a dry run
+            version (int or None): Version to scan, or None to take it from
+                the branch name
         """
         def _show_item(oper, seq, subject):
             col = None
@@ -1333,7 +1335,7 @@ class Cseries(cser_helper.CseriesHelper):
             out = self.col.build(col, subject) if col else subject
             tout.info(f'{oper} {seq:3} {out}')
 
-        name, ser, version, msg = self.prep_series(branch_name, end)
+        name, ser, version, msg = self.prep_series(branch_name, end, version)
         self._ensure_in_db(ser)
         svid = self.get_ser_ver(ser.idnum, version).idnum
         pcdict = self.get_pcommit_dict(svid)
