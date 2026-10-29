@@ -356,4 +356,5 @@ patch from the list records its Message-ID in a trailer, such as
 ``Link: https://lore.kernel.org/r/<msgid>``, so a patch whose Message-ID is in
 the branch is 'accepted' and the others are 'new'. Fetch the upstream first,
 so that the branch is up to date; ``series progress`` then shows which
-patches are applied. ``gather-all`` still needs patchwork.
+patches are applied. ``gather-all`` reads each series from its upstream's
+list, and those on patchwork from their server.

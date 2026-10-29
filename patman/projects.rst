@@ -121,10 +121,10 @@ reads its series from https://lore.kernel.org/devicetree-compiler:
         -l https://lore.kernel.org/devicetree-compiler
 
 - Lore has no patch states, but dtc's maintainers add the Message-ID of each
-  patch they apply as a trailer, so ``gather`` marks a patch 'accepted' once
-  it is in the upstream's main branch, and ``series progress`` shows it (see
-  :ref:`series_lore`). Fetch the upstream first. ``gather-all`` is not
-  available.
+  patch they apply as a trailer, so ``gather`` and ``gather-all`` mark a
+  patch 'accepted' once it is in the upstream's main branch, and
+  ``series progress`` shows it (see :ref:`series_lore`). Fetch the upstream
+  first.
 - For reviews, set ``project: dtc`` in the ``[review]`` section. Run
   ``patman serve`` in the dtc tree to list the newest series sent to the list
   (see :ref:`a list on lore <serve_lore>`).

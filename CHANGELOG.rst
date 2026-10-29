@@ -52,6 +52,9 @@ Changed
   in a ``Message-ID:`` or ``Link:`` trailer, so ``series progress`` shows
   which patches are applied. Each patch was 'new' before, since lore has no
   patch states.
+- ``patman series gather-all`` reads each series on lore from its upstream's
+  list, and the others from patchwork, where it needed patchwork for all of
+  them before. This marks the applied patches 'accepted' too.
 - A review's card on the ``patman serve`` page says how many replies it has,
   e.g. '2 replies', counting the comments on patchwork which you are
   responding to, in amber while one still needs a response, and goes to the
