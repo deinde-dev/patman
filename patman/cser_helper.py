@@ -346,7 +346,7 @@ class CseriesHelper:
         """
         return self.db.series_get_info(idnum)
 
-    def prep_series(self, name, end=None):
+    def prep_series(self, name, end=None, version=None):
         """Prepare to work with a series
 
         Parse the branch name to determine the series name and version
@@ -359,6 +359,8 @@ class CseriesHelper:
             end (str or None): Commit to end at, e.g. 'my_branch~16'. Only
                 commits up to that are processed. Use None to process commits up
                 to the upstream branch
+            version (int or None): Version to use, e.g. 3 for the branch
+                'fix3', or None to take it from the name
 
         Return: tuple:
             str: Series name, e.g. 'fix'
@@ -366,8 +368,8 @@ class CseriesHelper:
             int: Version number, e.g. 2
             str: Message to show
         """
-        ser, version = self._parse_series_and_version(name, None)
-        if not name:
+        ser, version = self._parse_series_and_version(name, version)
+        if not name or version:
             name = self._get_branch_name(ser.name, version)
 
         # First check we have a branch with this name
@@ -468,18 +470,31 @@ class CseriesHelper:
 
         return series
 
-    def _add_series_commits(self, series, svid):
+    def _add_series_commits(self, series, svid, keep=None):
         """Add a commits from a series into the database
 
         Args:
             series (Series): Series containing commits to add
             svid (int): ser_ver-table ID to use for each commit
+            keep (dict or None): Patches already in the database whose
+                patchwork ID, state and number of comments are kept:
+                key (int): Sequence number of the commit in the series
+                value (Pcommit): Patch which matches it
         """
         to_add = [Pcommit(None, seq, commit.subject, None, commit.change_id,
                           None, None, None)
                   for seq, commit in enumerate(series.commits)]
 
         self.db.pcommit_add_list(svid, to_add)
+
+        # pcommit_add_list() stores only the seq, subject and change ID
+        if keep:
+            for pcm in self.db.pcommit_get_list(svid):
+                old = keep.get(pcm.seq)
+                if old:
+                    self.db.pcommit_update(pcm._replace(
+                        state=old.state, patch_id=old.patch_id,
+                        num_comments=old.num_comments))
 
     def sync_patches(self, ser, version, dry_run=False):
         """Update the patches of a version from its branch, if they differ

@@ -1314,15 +1314,20 @@ class Cseries(cser_helper.CseriesHelper):
             tout.info('Dry run completed')
 
     def scan(self, branch_name, mark=False, allow_unmarked=False, end=None,
-             dry_run=False):
+             dry_run=False, version=None):
         """Scan a branch and make updates to the database if it has changed
+
+        A patch which is still in the branch keeps its patchwork ID, state and
+        number of comments, so that the series need not be gathered again
 
         Args:
             branch_name (str): Name of branch to sync, or None for current one
             mark (str): True to mark each commit with a change ID
             allow_unmarked (str): True to not require each commit to be marked
-            end (str): Add only commits up to but exclu
+            end (str): Add only commits up to but excluding this one
             dry_run (bool): True to do a dry run
+            version (int or None): Version to scan, or None to take it from
+                the branch name
         """
         def _show_item(oper, seq, subject):
             col = None
@@ -1333,7 +1338,7 @@ class Cseries(cser_helper.CseriesHelper):
             out = self.col.build(col, subject) if col else subject
             tout.info(f'{oper} {seq:3} {out}')
 
-        name, ser, version, msg = self.prep_series(branch_name, end)
+        name, ser, version, msg = self.prep_series(branch_name, end, version)
         self._ensure_in_db(ser)
         svid = self.get_ser_ver(ser.idnum, version).idnum
         pcdict = self.get_pcommit_dict(svid)
@@ -1349,10 +1354,12 @@ class Cseries(cser_helper.CseriesHelper):
 
         # First check for new patches that are not in the database
         to_add = dict(enumerate(ser.commits))
+        keep = {}
         for pcm in pcdict.values():
             tout.debug(f'pcm {pcm.subject}')
             i = self._find_matched_commit(to_add, pcm)
             if i is not None:
+                keep[i] = pcm
                 del to_add[i]
 
         # Now check for patches in the database that are not in the branch
@@ -1376,15 +1383,14 @@ class Cseries(cser_helper.CseriesHelper):
                 added += 1
             else:
                 _show_item(' ', seq, cmt.subject)
-        seq = len(ser.commits)
-        for cmt in to_add.items():
-            _show_item('+', seq, cmt.subject)
-            seq += 1
+
+        # Patches beyond the end of the branch are gone too
         for seq, pcm in to_remove.items():
-            _show_item('+', seq, pcm.subject)
+            _show_item('-', seq, pcm.subject)
+            removed += 1
 
         self.db.pcommit_delete(svid)
-        self._add_series_commits(ser, svid)
+        self._add_series_commits(ser, svid, keep)
 
         # Update series description if the cover letter has changed
         branch_desc = ser.cover[0] if ser.cover else None  # pylint: disable=E1136
