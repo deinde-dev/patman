@@ -192,6 +192,8 @@ def _setup_patchwork(cser, pwork, ups, pw_url, allow_lore=False,
             tout.debug(f'  Lore list for upstream {ups!r}: {lore_url!r}')
             pwork = lorelist.LoreList(lore_url)
             pwork.upstream = ups
+            pwork.use_branch(review_mod.apply.main_branch(ups, cser.gitdir),
+                             cser.gitdir)
             return pwork
         if ups_url:
             if pw_url and pw_url != ups_url:
@@ -217,6 +219,10 @@ def _setup_patchwork(cser, pwork, ups, pw_url, allow_lore=False,
                         f' {lore_url}')
             pwork = lorelist.LoreList(lore_url)
             pwork.upstream = ups
+            if ups:
+                pwork.use_branch(review_mod.apply.main_branch(ups,
+                                                              cser.gitdir),
+                                 cser.gitdir)
             return pwork
     hint = ''
     if allow_lore and not ups_url:

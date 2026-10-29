@@ -120,8 +120,11 @@ reads its series from https://lore.kernel.org/devicetree-compiler:
     patman upstream add dtc https://github.com/dgibson/dtc \
         -l https://lore.kernel.org/devicetree-compiler
 
-- Lore has no patch states, so patman cannot tell when a series is applied,
-  and ``gather-all`` is not available.
+- Lore has no patch states, but dtc's maintainers add the Message-ID of each
+  patch they apply as a trailer, so ``gather`` marks a patch 'accepted' once
+  it is in the upstream's main branch, and ``series progress`` shows it (see
+  :ref:`series_lore`). Fetch the upstream first. ``gather-all`` is not
+  available.
 - For reviews, set ``project: dtc`` in the ``[review]`` section. Run
   ``patman serve`` in the dtc tree to list the newest series sent to the list
   (see :ref:`a list on lore <serve_lore>`).

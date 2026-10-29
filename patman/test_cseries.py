@@ -1178,6 +1178,10 @@ class TestCseries(CseriesTester):
             self.assertIsInstance(pwork, lorelist.LoreList)
             self.assertEqual('https://lore.kernel.org/my-list', pwork.url)
 
+            # The upstream's main branch says which patches are applied
+            self.assertEqual(('dtc', 'dtc/master'),
+                             (pwork.upstream, pwork.applied_ref))
+
         # Gathering all series needs patchwork
         with self.assertRaises(ValueError) as exc:
             run('gather-all', 'gather_all')

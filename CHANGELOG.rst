@@ -47,6 +47,11 @@ Added
 
 Changed
 ~~~~~~~
+- For a series on lore, as for dtc, ``patman series gather`` marks a patch
+  'accepted' once the upstream's main branch has it, found by the Message-ID
+  in a ``Message-ID:`` or ``Link:`` trailer, so ``series progress`` shows
+  which patches are applied. Each patch was 'new' before, since lore has no
+  patch states.
 - A review's card on the ``patman serve`` page says how many replies it has,
   e.g. '2 replies', counting the comments on patchwork which you are
   responding to, in amber while one still needs a response, and goes to the
