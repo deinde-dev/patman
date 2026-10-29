@@ -653,6 +653,32 @@ def add_upstream_subparser(subparsers):
     return upstream
 
 
+def add_maint_subparser(subparsers):
+    """Add the 'maint' subparser
+
+    Args:
+        subparsers (argparse action): Subparser parent
+
+    Return:
+        ArgumentParser: maint subparser
+    """
+    maint = subparsers.add_parser(
+        'maint', help="Apply and check patches as a project's maintainer")
+    maint_subparsers = maint.add_subparsers(dest='subcmd')
+    check = maint_subparsers.add_parser(
+        'check',
+        help='Check the commits not yet upstream against the [maint] rules')
+    check.add_argument(
+        '-b', '--branch',
+        help='Branch holding the commits to check (default: the one checked '
+             'out)')
+    check.add_argument(
+        '--allow-merge', action='store_true',
+        help="Allow merge commits, when the 'history' setting is "
+             "'prefer-linear'")
+    return maint
+
+
 def add_workflow_subparser(subparsers):
     """Add the 'workflow' subparser
 
@@ -1028,6 +1054,7 @@ def setup_parser():
     review = add_review_subparser(subparsers)
     series = add_series_subparser(subparsers)
     add_serve_subparser(subparsers)
+    maint = add_maint_subparser(subparsers)
     add_status_subparser(subparsers)
     upstream = add_upstream_subparser(subparsers)
     workflow = add_workflow_subparser(subparsers)
@@ -1041,6 +1068,7 @@ def setup_parser():
     parsers = {
         'main': parser,
         'database': database,
+        'maint': maint,
         'review': review,
         'series': series,
         'patchwork': patchwork,
@@ -1094,7 +1122,7 @@ def parse_args(argv=None, config_fname=None, parsers=None):
             args.cmd = full
         if 'subcmd' in args and args.subcmd in aliases:
             args.subcmd = full
-    if args.cmd in ['database', 'series', 'upstream', 'patchwork',
+    if args.cmd in ['database', 'maint', 'series', 'upstream', 'patchwork',
                     'workflow'] and not args.subcmd:
         parser.parse_args([args.cmd, '--help'])
 

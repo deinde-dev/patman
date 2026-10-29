@@ -13,6 +13,7 @@ from unittest import mock
 from u_boot_pylib import command
 from u_boot_pylib import terminal
 
+from patman import control
 from patman import maint
 from patman.test_common import Namespace
 
@@ -356,3 +357,22 @@ class TestMaint(unittest.TestCase):
             self.rules()
         self.assertEqual('No branch is checked out: use -b to say which to '
                          'check', str(exc.exception))
+
+    def test_command(self):
+        """'patman maint check' checks the queue with the [maint] rules"""
+        self.commit('good', FRED, [
+            f'Signed-off-by: {FRED}', 'Message-ID: <1@x.org>',
+            f'Signed-off-by: {ME}'])
+        orig = os.getcwd()
+        os.chdir(self.repo)
+        try:
+            with mock.patch.object(maint.settings, 'maint', DTC), \
+                    terminal.capture() as (out, _):
+                self.assertEqual(0, control.do_maint(Namespace(
+                    subcmd='check', branch=None, allow_merge=False)))
+        finally:
+            os.chdir(orig)
+        self.assertIn('All ok', out.getvalue())
+        with self.assertRaises(ValueError) as exc:
+            control.do_maint(Namespace(subcmd='apply'))
+        self.assertEqual("Unknown maint subcommand 'apply'", str(exc.exception))
