@@ -31,6 +31,7 @@ from patman import cseries
 from patman import dbmerge
 from patman import lore
 from patman import lorelist
+from patman import maint
 from patman import patchstream
 from patman import pwcache
 from patman import review as review_mod
@@ -44,7 +45,7 @@ from patman.patchwork import Patchwork
 # The parts of the manual, in the order 'patman -H' shows them
 HELP_FILES = ('patman.rst', 'configuration.rst', 'projects.rst',
               'sending.rst', 'tags.rst', 'patchwork.rst', 'caching.rst',
-              'series.rst', 'review.rst', 'serve.rst', 'db.rst')
+              'series.rst', 'review.rst', 'serve.rst', 'maint.rst', 'db.rst')
 
 
 # A link to another page of the docs, e.g. :doc:`the guide </guide/index>`
@@ -539,6 +540,21 @@ def patchwork(args, test_db=None, pwork=None):
     finally:
         cser.close_database()
 
+def do_maint(args):
+    """Process a 'maint' subcommand
+
+    Args:
+        args (Namespace): Arguments to process
+
+    Return:
+        int: Exit code: 0 if all is well, else 1
+    """
+    if args.subcmd == 'check':
+        rules = maint.get_rules(branch=args.branch)
+        return maint.do_check(rules, args.allow_merge)
+    raise ValueError(f"Unknown maint subcommand '{args.subcmd}'")
+
+
 def do_workflow(args, test_db=None):
     """Process a 'workflow' subcommand
 
@@ -863,6 +879,8 @@ def do_patman(args, test_db=None, pwork=None, cser=None):
             ret_code = do_review(args, test_db, pwork, cser) or 0
         elif args.cmd == 'workflow':
             do_workflow(args, test_db)
+        elif args.cmd == 'maint':
+            ret_code = do_maint(args)
         elif args.cmd == 'serve':
             do_serve(args, test_db)
         elif args.cmd == 'database':

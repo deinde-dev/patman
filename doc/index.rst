@@ -21,6 +21,7 @@
    series
    review
    serve
+   maint
    db
 
 .. toctree::

@@ -25,6 +25,7 @@ The commands are:
    upstream
    review
    serve
+   maint
    database
    workflow
 

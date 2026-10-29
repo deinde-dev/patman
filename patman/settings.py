@@ -489,6 +489,7 @@ def Setup(parser, project_name, argv, config_fname=None):
         bounces.add(value)
 
     _read_review(config, top_level)
+    _read_maint(config)
 
     return _UpdateDefaults(parser, config, argv)
 
@@ -512,6 +513,21 @@ def _read_review(config, top_level):
         if name in ('conventions', 'voice') and value:
             value = os.path.join(top_level, os.path.expanduser(value))
         review[name] = value
+
+
+def _read_maint(config):
+    """Read the [maint] section, which gives a project's rules for applying
+    patches (see patman.maint)
+
+    Args:
+        config (_ProjectConfigParser): Config to read
+    """
+    maint.clear()
+    for name, value in GetItems(config, 'maint'):
+        if name not in MAINT_KEYS:
+            print(f'WARNING: Unknown maint setting {name}', file=sys.stderr)
+            continue
+        maint[name] = value
 
 
 def review_project():
@@ -558,6 +574,15 @@ review = {}
 
 # Names which the [review] section can hold
 REVIEW_KEYS = ('project', 'conventions', 'voice', 'source_url')
+
+# A project's rules for applying patches, from the [maint] section, keyed by
+# name, e.g. 'upstream'
+maint = {}
+
+# Names which the [maint] section can hold
+MAINT_KEYS = ('upstream', 'signoff', 'history', 'trailers_end',
+              'pr_trailers_end', 'signoff_own', 'require', 'issue_trailers',
+              'github', 'gitlab')
 
 if __name__ == "__main__":
     import doctest
