@@ -2,6 +2,7 @@
 #
 # Copyright 2026 Simon Glass <sjg@chromium.org>
 #
+# pylint: disable=C0302
 """Read series from a mailing list on lore, for a project without patchwork
 
 Some projects, such as dtc, have a mailing list but no patchwork project. Lore
@@ -21,6 +22,11 @@ and cover letters sent to it, for the inbox on the 'patman serve' page.
 A review uses a lore list for an upstream which has one and no patchwork URL,
 e.g. 'https://lore.kernel.org/devicetree-compiler', as do 'patman series
 autolink' and 'patman series send', to find the series which you send to it
+
+Lore has no patch states, so a patch is 'new' unless the upstream branch has
+it: a maintainer who applies a patch from the list adds its Message-ID as a
+trailer, either as 'Message-ID: <msgid>' or in a link to lore, so a patch
+whose Message-ID is in the branch is 'accepted'
 """
 
 import asyncio
@@ -31,6 +37,8 @@ from types import SimpleNamespace
 from urllib.parse import quote_plus, unquote, urlparse
 import xml.etree.ElementTree as ET
 
+from u_boot_pylib import command
+from u_boot_pylib import gitutil
 from u_boot_pylib import tout
 
 from patman import lore
@@ -66,9 +74,66 @@ SEARCH_KEEP = 10 * 60
 # Prefix of the name of a series, e.g. '[v2] ' in '[v2] dm: Tidy up'
 RE_PREFIX = re.compile(r'^\[[^]]*\] ')
 
+# Hosts whose links name a message by its Message-ID, e.g. in the trailer
+# 'Link: https://lore.kernel.org/r/<msgid>'
+MSGID_HOSTS = ('lore.kernel.org', 'patch.msgid.link')
+
 # Namespaces of the elements in lore's Atom feed
 ATOM = '{http://www.w3.org/2005/Atom}'
 THREAD = '{http://purl.org/syndication/thread/1.0}'
+
+
+def trailer_msgid(value):
+    """Get the Message-ID which a Message-ID: or Link: trailer gives
+
+    Args:
+        value (str): Value of the trailer, e.g. '<abc@example.com>' or
+            'https://lore.kernel.org/r/abc@example.com'
+
+    Returns:
+        str or None: Message-ID without angle brackets, e.g.
+            'abc@example.com', or None if the value does not give one
+    """
+    value = value.strip()
+    if value.startswith('<'):
+        msgid = lore.bare_msgid(value)
+    else:
+        url = urlparse(value)
+        if url.hostname not in MSGID_HOSTS:
+            return None
+        parts = [unquote(part) for part in url.path.split('/') if part]
+        # lore has the list (or 'r') first, e.g. '/devicetree-compiler/<msgid>/'
+        if url.hostname == 'lore.kernel.org':
+            parts = parts[1:]
+        msgid = parts[0] if parts else ''
+    return msgid if '@' in msgid else None
+
+
+def applied_msgids(ref, git_dir=None):
+    """Get the Message-IDs of the patches which a branch has applied
+
+    Args:
+        ref (str): Branch to look in, e.g. 'us/main'
+        git_dir (str or None): Directory containing the git repo, or None
+            for the current directory
+
+    Returns:
+        set of str: Message-IDs without angle brackets, from the Message-ID:
+            and Link: trailers of the commits in the branch
+    """
+    if not gitutil.ref_exists(ref, git_dir):
+        tout.info(f"No branch '{ref}', so no patches are applied")
+        return set()
+    result = command.run_one(
+        'git', 'log', '--format=%(trailers:key=Message-ID,key=Link,'
+        'valueonly)', ref, cwd=git_dir, capture=True, capture_stderr=True,
+        raise_on_error=False)
+    if result.return_code:
+        tout.warning(f"Cannot read the patches applied to '{ref}': "
+                     f'{result.stderr.strip()}')
+        return set()
+    return {msgid for line in result.stdout.splitlines()
+            if (msgid := trailer_msgid(line))}
 
 
 def parse_link(link):
@@ -393,11 +458,12 @@ def _find_patches(messages, root, info):
     return found
 
 
-class LoreList(patchwork.SeriesFinder):  # pylint: disable=R0904
+class LoreList(patchwork.SeriesFinder):  # pylint: disable=R0902,R0904
     """Reads series from a mailing list on lore, standing in for Patchwork
 
-    Only what a review and autolinking need is provided. Lore has no patch states, so every
-    patch is 'new'.
+    Only what a review and autolinking need is provided. Lore has no patch
+    states, so a patch is 'new', or 'accepted' if the upstream branch set
+    with use_branch() has its Message-ID.
 
     Args:
         url (str): URL of the list on lore, e.g.
@@ -414,11 +480,45 @@ class LoreList(patchwork.SeriesFinder):  # pylint: disable=R0904
         # There is no patchwork project, but searching needs one to be set
         self.proj_id = self.link_name
         self.upstream = None
+        # Branch which says which patches are applied, and its repo
+        self.applied_ref = None
+        self.git_dir = None
+        # Message-IDs of the patches in applied_ref, once read
+        self._applied = None
         # Number of searches made, for find_series_list()
         self.request_count = 0
         # Messages of each thread read, keyed by the Message-ID of each
         # message in it
         self._threads = {}
+
+    def use_branch(self, ref, git_dir=None):
+        """Set the branch which says which patches are applied
+
+        Args:
+            ref (str): Branch, e.g. 'us/main'
+            git_dir (str or None): Directory containing the git repo, or
+                None for the current directory
+        """
+        self.applied_ref = ref
+        self.git_dir = git_dir
+        self._applied = None
+
+    def patch_state(self, patch_id):
+        """Get the state of a patch, from the branch set with use_branch()
+
+        The branch is read once, the first time a state is needed
+
+        Args:
+            patch_id (str): ID of the patch, e.g. 'lore:abc@example.com'
+
+        Returns:
+            str: 'accepted' if the branch has the patch, else 'new'
+        """
+        if self._applied is None:
+            self._applied = (applied_msgids(self.applied_ref, self.git_dir)
+                             if self.applied_ref else set())
+        msgid = str(patch_id).removeprefix(ID_PREFIX)
+        return 'accepted' if msgid in self._applied else 'new'
 
     def project_set(self, project_id, link_name):
         """Set the project, which a list on lore does not need
@@ -677,14 +777,20 @@ class LoreList(patchwork.SeriesFinder):  # pylint: disable=R0904
         """
         return None
 
-    @staticmethod
-    def get_states(_patch_ids):
-        """Get the states of patches, which lore does not have
+    def get_states(self, patch_ids):
+        """Get the states of patches, from the branch set with use_branch()
+
+        Args:
+            patch_ids (list of str): Patch IDs, e.g. ['lore:abc@example.com']
 
         Returns:
-            dict: Empty
+            dict: key (str): Patch ID, for each patch which is applied
+                value (str): 'accepted'
         """
-        return {}
+        if not self.applied_ref:
+            return {}
+        return {pid: 'accepted' for pid in patch_ids
+                if self.patch_state(pid) == 'accepted'}
 
     async def get_series(self, client, link, max_age=None):
         """Read a series from its thread on lore
@@ -742,17 +848,18 @@ class LoreList(patchwork.SeriesFinder):  # pylint: disable=R0904
     async def get_series_patch_states(self, client, link):
         """Get the state of each patch in a series
 
-        Lore has no states, so each patch is 'new'
+        Lore has no states, so each patch is 'new', or 'accepted' if it is
+        applied (see patch_state())
 
         Args:
             client (aiohttp.ClientSession): Session to use
             link (str): Message-ID of the series
 
         Returns:
-            list of str: 'new' for each patch
+            list of str: State of each patch
         """
         data = await self.get_series(client, link)
-        return ['new'] * len(data['patches'])
+        return [self.patch_state(pat['id']) for pat in data['patches']]
 
     @contextlib.contextmanager
     def collect_stats(self):
@@ -784,8 +891,9 @@ class LoreList(patchwork.SeriesFinder):  # pylint: disable=R0904
                                read_cover_comments):
         """Read the patches of a series and their replies, for its status
 
-        Lore has no states, so each patch is 'new'. The thread is read from
-        lore again, to see the patches and replies which have arrived since
+        Lore has no states, so each patch is 'new', or 'accepted' if it is
+        applied (see patch_state()). The thread is read from lore again, to
+        see the patches and replies which have arrived since
 
         Args:
             client (aiohttp.ClientSession): Session to use
@@ -806,10 +914,13 @@ class LoreList(patchwork.SeriesFinder):  # pylint: disable=R0904
             if read_comments:
                 patch = await self.get_patch(client, info['id'])
                 comments = await self.get_patch_comments(client, info['id'])
-                pat = patchwork.Patch(info['id'], 'new', patch, comments,
-                                      info)
+                pat = patchwork.Patch(info['id'],
+                                      self.patch_state(info['id']), patch,
+                                      comments, info)
             else:
-                pat = patchwork.Patch(info['id'], series_data=info)
+                pat = patchwork.Patch(info['id'],
+                                      self.patch_state(info['id']),
+                                      series_data=info)
                 pat.raw_subject = info['name']
             patches.append(pat)
 
