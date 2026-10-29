@@ -735,8 +735,12 @@ class TestWebServer(unittest.TestCase, TestCommon):
             async with TestClient(TestServer(srv.make_app())) as client:
                 out = {}
                 for path in ('/', '/static/app.js', '/api/series'):
-                    resp = await client.get(path)
-                    out[path] = resp.headers.get('Cache-Control')
+                    # Read the body, else the server cannot finish sending
+                    # one larger than the client's buffer, and the test
+                    # server waits for it when closing
+                    async with client.get(path) as resp:
+                        await resp.read()
+                        out[path] = resp.headers.get('Cache-Control')
                 return out
 
         loop = asyncio.new_event_loop()
