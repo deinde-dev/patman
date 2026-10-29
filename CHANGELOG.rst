@@ -10,6 +10,13 @@ Unreleased
 
 Added
 ~~~~~
+- Each series which you reviewed in the inbox of the ``patman serve`` page
+  says who has the next move on it: 'your move' while a reply waits for your
+  response or a review is not sent, 'waiting' once you have asked for changes
+  and there is no new version, 'stale' after 28 days of that, and 'ready' when
+  your reviews give every patch a Reviewed-by tag. New 'Your move', 'Waiting'
+  and 'Ready' filters list them, from the new 'next' field of each series in
+  ``GET /api/inbox``.
 - 'View code' under a comment in a review on the ``patman serve`` page shows
   the whole file at the code which the comment quotes, in a panel at the right
   on a wide screen. The file links to the line on Elixir for U-Boot and Linux,

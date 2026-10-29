@@ -2301,6 +2301,14 @@ function inboxApplied(list) {
   });
 }
 
+// A chip saying who has the next move on a series you reviewed, linking to
+// your reviews, or null if there is none
+function nextChip(s) {
+  const next = inboxNext(s);
+  return next && h('a', { class: `chip ${next[1]}`, href: `#/reviews/${s.reviewed}`,
+                          title: s.next.why }, next[0]);
+}
+
 // A chip saying how much of a series is applied, if any, or else the state
 // which all its patches have on patchwork
 function appliedChip(s) {
@@ -2320,6 +2328,23 @@ function appliedChip(s) {
   return h('span', { class: `chip ${a.all ? 'st-accepted' : 'st-under-review'}`,
                      title: `${a.count} of its ${npatches(total)} are applied: ${a.where}` },
            a.all ? 'applied' : `applied ${a.count}/${total}`);
+}
+
+// Who has the next move on a series which you reviewed, from the server's
+// 'next': its chip's label and class, and the inbox filter it is in
+const NEXT_MOVE = {
+  me: ['your move', 'st-changes-requested', 'me'],
+  submitter: ['waiting', 'st-under-review', 'waiting'],
+  stale: ['stale', 'st-other', 'waiting'],
+  ready: ['ready', 'st-accepted', 'ready'],
+};
+
+// The next move on a series in the inbox, or null if there is none, e.g.
+// because it is applied, which its own chip says
+function inboxNext(s) {
+  const a = s.applied;
+  if (!s.next || (a && (a.all || a.later || FINAL_STATES.has(a.state)))) return null;
+  return NEXT_MOVE[s.next.state] || null;
 }
 
 function inboxCard(s, ups) {
@@ -2343,6 +2368,7 @@ function inboxCard(s, ups) {
         title: 'Show the replies to your reviews of the earlier version, which ' +
                'are waiting for your response' },
         nreplies(s.earlier.replies)),
+      nextChip(s),
       s.mine && h('span', { class: 'chip st-other' }, 'yours'),
       s.added && h('span', { class: 'chip st-other',
                              title: 'You added this series to the inbox' }, 'added'),
@@ -2363,6 +2389,8 @@ function inboxCard(s, ups) {
                                 FINAL_STATES.has(s.applied.state));
   if (!s.reviewed && !s.mine && !applied) groups.push('todo');
   if (s.earlier) groups.push('newver');
+  const next = inboxNext(s);
+  if (next) groups.push(next[2]);
   if (s.applied && (s.applied.count || s.applied.later)) groups.push('applied');
   if (s.added) groups.push('added');
   return { card, text: `${s.name} ${s.submitter || ''}`, groups };
@@ -2450,11 +2478,17 @@ async function viewInbox(more, refresh) {
   const [addBtn, finder] = inboxFinder(ups, site, inbox.feed === false);
   fetched.append(addBtn);
   const filters = [['todo', 'To review', 'Series which you have not reviewed and are not yours'],
+                   ['me', 'Your move', 'Series you reviewed with a reply waiting for your ' +
+                                       'response, or a review not sent'],
                    ['newver', 'New versions', 'New versions of series you reviewed earlier'],
+                   ['waiting', 'Waiting', 'Series you asked for changes to, with no new ' +
+                                          'version yet, including stale ones'],
+                   ['ready', 'Ready', 'Series whose patches all have your Reviewed-by'],
                    ['applied', 'Applied', 'Series with patches applied upstream'],
                    ['all', 'All', 'All the series listed']];
   if (inbox.series.some((s) => s.added)) {
-    filters.splice(3, 0, ['added', 'Added', 'Series which you added to the inbox']);
+    filters.splice(filters.length - 1, 0,
+                   ['added', 'Added', 'Series which you added to the inbox']);
   }
   // With no feed, the inbox has only what is added to it
   const hint = inbox.feed === false && !inbox.series.length && h('div', { class: 'empty' },

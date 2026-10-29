@@ -204,6 +204,30 @@ since patman began following the events shows no state. Series which are fully
 applied, or whose patches are all superseded or rejected, are left out of 'To
 review', and 'Applied' shows each series with a patch applied.
 
+A series which you reviewed says who has the next move on it, unless it is
+applied:
+
+'your move'
+    A reply to your review is waiting for your response, or a review is not
+    sent yet
+
+'waiting'
+    Your reviews ask for changes to at least one patch, and there is no newer
+    version in the inbox yet
+
+'stale'
+    As 'waiting', but 28 days or more since you sent the last review
+
+'ready'
+    Your reviews give every patch a Reviewed-by tag
+
+The chip's tooltip says why, e.g. 'You asked for changes to 2 patches and
+there is no new version yet', and tapping it shows the reviews. 'Your move',
+'Waiting' (which includes the stale ones) and 'Ready' list each group. A
+series with a newer version in the inbox has no next move of its own, unless
+it is waiting for you, since the newer version is the one to review. Only your
+own reviews count, so a series is not 'ready' from other people's tags.
+
 The inbox is read from patchwork with one request for the 50 newest series.
 The server keeps what it reads for ten minutes, so going back to the Inbox tab,
 opening it on another device or starting the server again does not read it
