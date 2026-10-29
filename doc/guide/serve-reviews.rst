@@ -84,6 +84,14 @@ are applied, and where:
    :alt: The board series opened under 'Applied', with two of its three
          patches on us/next
 
+Once you have reviewed a series, its card says who has the next move:
+'your move' while a reply waits for your response or a review is not sent,
+'waiting' once you have asked for changes and no new version has come, which
+becomes 'stale' after four weeks, and 'ready' when your reviews give every
+patch a Reviewed-by tag. Hold a finger on the chip, or hover over it, to see
+why, and tap it to see your reviews. The 'Your move', 'Waiting' and 'Ready'
+filters list each of these.
+
 An older version of a series whose patches came in a newer one is marked
 'later version applied'. Other states on patchwork, such as
 'changes-requested' or 'superseded', show beside each patch, and on the series
