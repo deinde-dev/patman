@@ -184,6 +184,37 @@ class TestSettings(unittest.TestCase):
                 self.assertEqual({}, settings.review)
                 self.assertEqual('U-Boot', settings.review_project())
 
+    def test_maint_section(self):
+        """The [maint] section is layered like [settings], so a project can
+        ship its rules and each maintainer give their own sign-off"""
+        with cleared_command_line_args():
+            with empty_git_repository():
+                with tempfile.NamedTemporaryFile() as global_config:
+                    global_config.write(b'[maint]\n'
+                                        b'signoff: Fred <fred@x.org>\n')
+                    global_config.flush()
+                    with open('.patman-defaults', 'w', buffering=1,
+                              encoding='utf-8') as outf:
+                        outf.write('[maint]\n'
+                                   'upstream: us main\n'
+                                   'signoff: Nobody <nobody@x.org>\n'
+                                   'colour: blue\n')
+                    parser, _ = _make_parser()
+                    with mock.patch('sys.stderr') as stderr:
+                        settings.Setup(parser, 'unknown', [],
+                                       global_config.name)
+                    self.assertIn('Unknown maint setting colour',
+                                  ''.join(call.args[0] for call in
+                                          stderr.write.call_args_list))
+                    self.assertEqual({'upstream': 'us main',
+                                      'signoff': 'Fred <fred@x.org>'},
+                                     settings.maint)
+
+                # Without a [maint] section, there are no rules
+                parser, _ = _make_parser()
+                settings.Setup(parser, 'unknown', [], False)
+                self.assertEqual({}, settings.maint)
+
     def test_nested_subcommand(self):
         # A setting reaches a subcommand of a subcommand, such as
         # 'series send', as well as 'send'
