@@ -160,8 +160,12 @@ Following new versions
 
 When a new version of a series you reviewed appears on patchwork,
 ``patman review --scan`` finds it and reviews it, giving the agent your
-review of the earlier version, so that it checks whether your points were
-dealt with rather than starting again.
+latest review of each patch, so that it checks whether your points were
+dealt with rather than starting again. A patch which you had nothing more
+to say about in the last version has your review from the version before
+that, so the agent knows its code was already reviewed. A patch whose code
+is the same as in the last version you reviewed is marked as unchanged, so
+the agent only follows up your earlier points rather than finding new ones.
 
 :doc:`/review` describes all of this in full, and :doc:`serve` shows how to
 follow and work on reviews from a phone.
