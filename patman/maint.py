@@ -88,7 +88,10 @@ class Rules:  # pylint: disable=R0902
             ['make check']
         ci_push (list of tuple): Where to push the queue to run CI on it:
             str: Remote, e.g. 'david'
-            str: Refspec, with {branch} for the branch, e.g. '+{branch}:ci'
+            list of str: Refspecs, with {branch} for the branch, e.g.
+                ['+{branch}:ci']
+        publish (list of tuple): Where to push the queue to publish it, in
+            the same form, e.g. [('us', ['{branch}:main'])]
     """
     upstream: str
     branch: str
@@ -104,6 +107,7 @@ class Rules:  # pylint: disable=R0902
     repos: list = field(default_factory=list)
     test: list = field(default_factory=list)
     ci_push: list = field(default_factory=list)
+    publish: list = field(default_factory=list)
 
 
 @dataclass
@@ -194,28 +198,30 @@ def _items(value):
     return [item.strip() for item in (value or '').split(';') if item.strip()]
 
 
-def _pushes(value):
+def _pushes(name, value, example):
     """Read the places which a setting says to push to
 
     Args:
+        name (str): Name of the setting, e.g. 'ci_push'
         value (str or None): Setting, e.g. 'david +{branch}:ci; gl {branch}:ci'
+        example (str): Example of an entry, for the error
 
     Return:
         list of tuple: Each place:
             str: Remote, e.g. 'david'
-            str: Refspec, e.g. '+{branch}:ci'
+            list of str: Refspecs, e.g. ['+{branch}:ci']
 
     Raises:
-        ValueError: An entry is not a remote and a refspec
+        ValueError: An entry is not a remote and its refspecs
     """
     pushes = []
     for item in _items(value):
         words = item.split()
-        if len(words) != 2:
+        if len(words) < 2:
             raise ValueError(
-                "Each entry of the maint setting 'ci_push' needs a remote and "
-                f"a refspec, e.g. 'david +{{branch}}:ci', not '{item}'")
-        pushes.append(tuple(words))
+                f"Each entry of the maint setting '{name}' needs a remote and "
+                f"one or more refspecs, e.g. '{example}', not '{item}'")
+        pushes.append((words[0], words[1:]))
     return pushes
 
 
@@ -341,7 +347,10 @@ def get_rules(values=None, git_dir=None, branch=None):
         rules.repos += [f'{host}.com/{repo}'.lower()
                         for repo in _words(values.get(host))]
     rules.test = _items(values.get('test'))
-    rules.ci_push = _pushes(values.get('ci_push'))
+    rules.ci_push = _pushes('ci_push', values.get('ci_push'),
+                            'david +{branch}:ci')
+    rules.publish = _pushes('publish', values.get('publish'),
+                            'us {branch}:main')
     return rules
 
 

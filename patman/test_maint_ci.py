@@ -94,14 +94,23 @@ class TestMaintCi(RepoTestCase):
         rules = self.rules(test='make check; meson test -C build',
                            ci_push='david +{branch}:ci; gl {branch}:ci')
         self.assertEqual(['make check', 'meson test -C build'], rules.test)
-        self.assertEqual([('david', '+{branch}:ci'), ('gl', '{branch}:ci')],
+        self.assertEqual([('david', ['+{branch}:ci']), ('gl', ['{branch}:ci'])],
                          rules.ci_push)
         self.assertEqual(([], []), (self.rules().test, self.rules().ci_push))
         with self.assertRaises(ValueError) as exc:
             self.rules(ci_push='david')
         self.assertEqual("Each entry of the maint setting 'ci_push' needs a "
-                         "remote and a refspec, e.g. 'david +{branch}:ci', "
-                         "not 'david'", str(exc.exception))
+                         "remote and one or more refspecs, e.g. "
+                         "'david +{branch}:ci', not 'david'",
+                         str(exc.exception))
+        rules = self.rules(publish='us {branch}:main {branch}:master; '
+                                   'david {branch}:main')
+        self.assertEqual([('us', ['{branch}:main', '{branch}:master']),
+                          ('david', ['{branch}:main'])], rules.publish)
+        with self.assertRaises(ValueError) as exc:
+            self.rules(publish='us')
+        self.assertIn("'publish' needs a remote and one or more refspecs, "
+                      "e.g. 'us {branch}:main'", str(exc.exception))
 
     def test_test(self):
         """The tests run in a worktree of their own, stopping at a failure"""
@@ -216,6 +225,158 @@ class TestMaintCi(RepoTestCase):
         ret, out, _ = self.run_ci({})
         self.assertEqual(0, ret)
         self.assertNotIn('Pushed', out)
+
+    def setup_publish(self):
+        """Make bare repos to publish to, in place of the real remotes
+
+        Return:
+            dict: Path of the bare repo for each remote
+        """
+        bare = {}
+        for remote in ('us', 'david', 'gl'):
+            bare[remote] = os.path.join(self.tmpdir, f'{remote}.git')
+            self.git('init', '-q', '--bare', bare[remote], cwd=self.tmpdir)
+            if remote == 'gl':
+                self.git('remote', 'add', remote, bare[remote])
+            else:
+                self.git('remote', 'set-url', remote, bare[remote])
+        # Each has the upstream branch as it is now
+        for remote in bare:
+            self.git('push', '-q', remote, 'refs/remotes/us/main:refs/heads/main')
+        self.git('fetch', '-q', '--all')
+        return bare
+
+    def publish(self, state, answer='y', rules=None, **kwargs):
+        """Publish the queue, with CI in the given state
+
+        Args:
+            state (str): State of CI everywhere, e.g. maint_ci.SUCCESS
+            answer (str or None): Answer to give when asked, or None if
+                there should be no question
+            rules (Rules or None): Rules, or None for the dtc ones with the
+                test remotes
+            kwargs: Other arguments for do_publish()
+
+        Return:
+            tuple: Exit code, output
+        """
+        def get(system):
+            return lambda repo, sha: maint_ci.CiResult(system, repo, state,
+                                                       f'https://{system}/run')
+
+        rules = rules or self.rules(
+            upstream='us main',
+            publish='us {branch}:main {branch}:master; david {branch}:main; '
+                    'gl {branch}:main')
+        with mock.patch.dict(maint_ci.STATE_FUNCS, {'github': get('github'),
+                                                    'gitlab': get('gitlab')}), \
+                mock.patch('builtins.input', return_value=answer) as ask, \
+                terminal.capture() as (out, _):
+            ret = maint_ci.do_publish(rules, git_dir=self.repo, **kwargs)
+        if answer is None:
+            ask.assert_not_called()
+        return ret, out.getvalue()
+
+    def tip(self, bare, branch='main'):
+        """Get the commit which a branch of a bare repo is at"""
+        return command.output('git', '--git-dir', bare, 'rev-parse',
+                              '--verify', '-q', f'refs/heads/{branch}',
+                              raise_on_error=False).strip()
+
+    def test_publish(self):
+        """The queue is published once CI has passed on it, after asking"""
+        bare = self.setup_publish()
+        base = self.tip(bare['us'])
+        commit = self.add_file('a.txt', 'one\n')
+        where = 'us main:main main:master, david main:main, gl main:main'
+
+        # Not until CI has passed on the last commit
+        ret, out = self.publish(maint_ci.PENDING, None)
+        self.assertEqual(1, ret)
+        self.assertIn('  running github https://github/run\n', out)
+        self.assertTrue(out.endswith(
+            f'Not published, since CI has not passed on {commit[:12]}: run '
+            "'patman maint ci'\n"), out)
+
+        # Not if the answer is no, nor in a dry run
+        ret, out = self.publish(maint_ci.SUCCESS, 'n')
+        self.assertEqual(1, ret)
+        self.assertTrue(out.endswith('Not published\n'), out)
+        ret, out = self.publish(maint_ci.SUCCESS, None, dry_run=True)
+        self.assertEqual(0, ret)
+        self.assertTrue(out.endswith(f'Would publish {commit[:12]} to '
+                                     f'{where}\n'), out)
+        self.assertEqual([base] * 3, [self.tip(path)
+                                      for path in bare.values()])
+
+        ret, out = self.publish(maint_ci.SUCCESS)
+        self.assertEqual(0, ret, out)
+        self.assertTrue(out.endswith(f'Published {commit[:12]} to {where}\n'),
+                        out)
+        self.assertEqual([commit] * 4, [self.tip(bare['us']),
+                                        self.tip(bare['us'], 'master'),
+                                        self.tip(bare['david']),
+                                        self.tip(bare['gl'])])
+
+        # Then there is nothing more to publish, so no question
+        self.assertEqual(0, self.publish(maint_ci.SUCCESS, None)[0])
+
+    def test_publish_partly(self):
+        """Publishing again after a failure carries on where it stopped"""
+        bare = self.setup_publish()
+        base = self.tip(bare['us'])
+        commit = self.add_file('a.txt', 'one\n')
+        self.git('remote', 'set-url', '--push', 'david',
+                 os.path.join(self.tmpdir, 'missing.git'))
+        ret, out = self.publish(maint_ci.SUCCESS)
+        self.assertEqual(1, ret)
+        self.assertIn('Cannot push to david: ', out)
+        self.assertEqual((commit, base, base), (self.tip(bare['us']),
+                                                self.tip(bare['david']),
+                                                self.tip(bare['gl'])))
+
+        self.git('remote', 'set-url', '--push', 'david', bare['david'])
+        ret, out = self.publish(maint_ci.SUCCESS)
+        self.assertEqual(0, ret, out)
+        self.assertTrue(out.endswith(
+            f'Published {commit[:12]} to david main:main, gl main:main\n'),
+            out)
+        self.assertEqual((commit, commit), (self.tip(bare['david']),
+                                            self.tip(bare['gl'])))
+
+    def test_publish_refused(self):
+        """Nothing is published if the check fails or there is nowhere to
+        publish"""
+        bare = self.setup_publish()
+        base = self.tip(bare['us'])
+        broken = self.add_file('a.txt', 'one\n', [f'Signed-off-by: {FRED}'])
+        ret, out = self.publish(maint_ci.SUCCESS, None)
+        self.assertEqual(1, ret)
+        self.assertIn(f'  FAIL {broken[:12]} Add a.txt\n', out)
+        self.assertTrue(out.endswith('Not published, since the check '
+                                     'failed\n'))
+        self.assertEqual(base, self.tip(bare['us']))
+
+        # A branch which is behind the upstream has nothing to publish
+        self.git('push', '-q', 'us', 'main:main')
+        self.git('reset', '-q', '--hard', 'HEAD~1')
+        self.assertEqual(0, self.publish(maint_ci.SUCCESS, None)[0])
+        self.assertEqual(broken, self.tip(bare['us']))
+        self.assertEqual(base, self.tip(bare['david']))
+
+        # A remote which cannot be fetched stops it
+        self.git('remote', 'set-url', 'gl',
+                 os.path.join(self.tmpdir, 'missing.git'))
+        ret, out = self.publish(maint_ci.SUCCESS, None)
+        self.assertEqual(1, ret)
+        self.assertIn('Cannot fetch gl: ', out)
+
+        with self.assertRaises(ValueError) as exc:
+            self.publish(maint_ci.SUCCESS, None,
+                         self.rules(upstream='us main'))
+        self.assertEqual("Nowhere to publish: set 'publish' in the [maint] "
+                         "section of the settings, e.g. "
+                         "'publish: us {branch}:main'", str(exc.exception))
 
     def test_states(self):
         """The state of CI is read from GitHub and GitLab"""

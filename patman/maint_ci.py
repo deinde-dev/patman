@@ -2,7 +2,8 @@
 #
 # Copyright 2026 Simon Glass <sjg@chromium.org>
 #
-"""Test the queue which a maintainer is about to push, and run CI on it
+"""Test the queue which a maintainer is about to push, run CI on it and
+publish it
 
 'patman maint test' runs the project's test commands on the queue, in a
 worktree of its own, so that the tree you are working in is not touched.
@@ -11,6 +12,9 @@ worktree of its own, so that the tree you are working in is not touched.
 then waits for GitHub Actions and the GitLab pipeline to finish with the
 commit which was pushed. Any run for that commit counts, wherever it was
 started from.
+
+'patman maint publish' checks the queue again, makes sure that CI passed on
+its last commit, then pushes it to the remotes, after asking.
 """
 
 from contextlib import contextmanager
@@ -343,9 +347,8 @@ def do_ci(rules, dry_run=False, wait=True, git_dir=None,
                           f'{rules.upstream}..{rules.branch}',
                           cwd=git_dir).strip():
         return 0
-    targets = [(remote, spec.replace('{branch}', rules.branch))
-               for remote, spec in rules.ci_push]
-    where = ', '.join(f'{remote} {spec}' for remote, spec in targets)
+    targets = _targets(rules.ci_push, rules.branch)
+    where = _where(targets)
     if dry_run:
         print(f'Would push {sha[:12]} to {where}')
         return 0
@@ -360,24 +363,202 @@ def do_ci(rules, dry_run=False, wait=True, git_dir=None,
     return 0 if show_ci(wait_ci(rules, sha, sleep)) else 1
 
 
+def _targets(pushes, branch):
+    """Get the places to push a branch to, from a setting
+
+    Args:
+        pushes (list of tuple): Places, as in Rules.ci_push
+        branch (str): Branch to push
+
+    Return:
+        list of tuple: Each place:
+            str: Remote, e.g. 'david'
+            list of str: Refspecs, e.g. ['+main-push:ci']
+    """
+    return [(remote, [spec.replace('{branch}', branch) for spec in specs])
+            for remote, specs in pushes]
+
+
+def _where(targets):
+    """Say where a branch goes
+
+    Args:
+        targets (list of tuple): Places, from _targets()
+
+    Return:
+        str: e.g. 'us main-push:main main-push:master, david main-push:main'
+    """
+    return ', '.join(f"{remote} {' '.join(specs)}" for remote, specs in targets)
+
+
 def _push(targets, git_dir):
     """Push to each place in turn, stopping at the first which fails
 
     Args:
-        targets (list of tuple): Each place:
-            str: Remote, e.g. 'david'
-            str: Refspec, e.g. '+main-push:ci'
+        targets (list of tuple): Places, from _targets()
         git_dir (str or None): Directory of the git repo, or None for the
             current one
 
     Return:
         bool: True if each push worked; if not, the problem is shown
     """
-    for remote, spec in targets:
-        result = subprocess.run(['git', 'push', '--quiet', remote, spec],
+    for remote, specs in targets:
+        result = subprocess.run(['git', 'push', '--quiet', remote, *specs],
                                 cwd=git_dir, capture_output=True, text=True,
                                 check=False)
         if result.returncode:
             print(f'Cannot push to {remote}: {result.stderr.strip()}')
             return False
     return True
+
+
+def _has(remote, spec, sha, git_dir):
+    """Check whether a remote has a commit, as far as its branches were
+    fetched
+
+    Args:
+        remote (str): Remote, e.g. 'us'
+        spec (str): Refspec which would push the commit, e.g.
+            'main-push:main'
+        sha (str): Full hash of the commit
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+
+    Return:
+        bool: True if the remote's branch is at the commit
+    """
+    dest = spec.split(':')[-1].removeprefix('refs/heads/')
+    got = command.output('git', 'rev-parse', '--verify', '-q',
+                         f'refs/remotes/{remote}/{dest}', cwd=git_dir,
+                         raise_on_error=False).strip()
+    return got == sha
+
+
+def _ci_passed(rules, sha):
+    """Check that CI passed on a commit, everywhere it runs
+
+    Args:
+        rules (Rules): Rules, whose repos give the places
+        sha (str): Full hash of the commit
+
+    Return:
+        bool: True if it passed, or there is no CI; if not, the state in
+            each place is shown
+    """
+    if not _ci_places(rules):
+        return True
+    results = ci_states(rules, sha)
+    if all(res.state == SUCCESS for res in results):
+        return True
+    show_ci(results)
+    print(f"Not published, since CI has not passed on {sha[:12]}: run "
+          "'patman maint ci'")
+    return False
+
+
+def _fetch(remotes, git_dir):
+    """Fetch from remotes, so that what they have is known
+
+    Args:
+        remotes (list of str): Remotes, e.g. ['us', 'david']
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+
+    Return:
+        bool: True if each fetch worked; if not, the problem is shown
+    """
+    for remote in dict.fromkeys(remotes):
+        result = subprocess.run(['git', 'fetch', '--quiet', remote],
+                                cwd=git_dir, capture_output=True, text=True,
+                                check=False)
+        if result.returncode:
+            print(f'Cannot fetch {remote}: {result.stderr.strip()}')
+            return False
+    return True
+
+
+def _ready(rules, sha, git_dir):
+    """Check that the queue can be published, and find where to
+
+    Each remote to publish to is fetched first, so that the check is against
+    the upstream as it is, and a remote which has the commit already is
+    left out.
+
+    Args:
+        rules (Rules): Rules, giving the branch and where to push it
+        sha (str): Full hash of the branch's last commit
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+
+    Return:
+        tuple:
+            list of tuple: Places which do not have the commit yet, from
+                _targets(), or an empty list if nothing is to be published
+            int: Exit code if nothing is to be published: 0 if there is
+                nothing to publish, 1 if the branch cannot be published
+    """
+    if not _fetch([remote for remote, _ in rules.publish], git_dir):
+        return [], 1
+    if maint.do_check(rules, git_dir=git_dir):
+        print('Not published, since the check failed')
+        return [], 1
+    upstream = command.output('git', 'rev-parse', rules.upstream,
+                              cwd=git_dir).strip()
+    ahead = command.output('git', 'rev-list', '-1',
+                           f'{rules.upstream}..{rules.branch}',
+                           cwd=git_dir).strip()
+    targets = [(remote, specs) for remote, specs in
+               _targets(rules.publish, rules.branch)
+               if not all(_has(remote, spec, sha, git_dir)
+                          for spec in specs)]
+    # A branch which is behind the upstream has nothing to publish
+    if not targets or not (ahead or sha == upstream):
+        return [], 0
+    if not _ci_passed(rules, sha):
+        return [], 1
+    return targets, 0
+
+
+def do_publish(rules, dry_run=False, yes=False, git_dir=None):
+    """Publish the queue: push it to the remotes, once CI has passed on it
+
+    The remotes are fetched and the branch is checked first, then CI must
+    have passed on its last commit. Then each place which does not have that
+    commit yet is pushed to, in order, after asking, stopping at the first
+    which fails. So once a problem is fixed, publishing again carries on
+    where it stopped.
+
+    Args:
+        rules (Rules): Rules, giving the branch and where to push it
+        dry_run (bool): True to say where the branch would be pushed,
+            without pushing it
+        yes (bool): True to push without asking
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+
+    Return:
+        int: 0 if it was published, or there is nothing to publish, else 1
+
+    Raises:
+        ValueError: There is nowhere to publish, or no branch to publish
+    """
+    if not rules.publish:
+        raise ValueError("Nowhere to publish: set 'publish' in the [maint] "
+                         "section of the settings, e.g. "
+                         "'publish: us {branch}:main'")
+    sha = _branch_commit(rules, git_dir)
+    targets, ret = _ready(rules, sha, git_dir)
+    if not targets:
+        return ret
+    where = _where(targets)
+    if dry_run:
+        print(f'Would publish {sha[:12]} to {where}')
+        return 0
+    if not yes and input(f'Publish {sha[:12]} to {where}? [y/N] ').strip(
+            ).lower() not in ('y', 'yes'):
+        print('Not published')
+        return 1
+    if not _push(targets, git_dir):
+        return 1
+    print(f'Published {sha[:12]} to {where}')
+    return 0
