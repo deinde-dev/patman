@@ -582,7 +582,7 @@ maint = {}
 # Names which the [maint] section can hold
 MAINT_KEYS = ('upstream', 'push_branch', 'signoff', 'history',
               'trailers_end', 'pr_trailers_end', 'signoff_own', 'require',
-              'issue_trailers', 'github', 'gitlab')
+              'issue_trailers', 'github', 'gitlab', 'test', 'ci_push')
 
 if __name__ == "__main__":
     import doctest
