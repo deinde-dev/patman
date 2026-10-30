@@ -8,12 +8,95 @@ Maintaining a project
 A maintainer applies other people's patches to the project's tree, then pushes
 them upstream. Each project has its own rules for this, such as which trailers
 each commit ends with, and whether merge commits are allowed. Following them
-is mechanical, so patman holds them as settings and checks the commits
-against them, rather than leaving you (or an AI assistant) to read them.
+is mechanical, so patman holds them as settings, applies patches by them and
+checks the commits against them, rather than leaving you (or an AI assistant)
+to read them.
 
-``patman maint check`` checks the queue: the commits on the branch which is
-checked out, or the one given with ``-b``, which are not upstream yet. Run it
-before pushing, however the patches were applied, e.g. with ``b4 am``::
+Applying a series
+-----------------
+
+``patman maint apply`` applies a series from the mailing list to the push
+branch, ``main-push`` for an upstream branch of ``main``, which it makes from
+the upstream branch if there is none. Give it the Message-ID of the cover
+letter, or of the first patch if there is none, or a link to it on lore::
+
+    $ patman maint apply 20261102093012.81234-1-fred@x.org
+       1 [v2,1/2] libfdt: Use fdt_ro_probe_() in fdt_path_offset()
+           + Reviewed-by: David Gibson <david@gibson.dropbear.id.au>
+       2 [v2,2/2] libfdt: Drop an unused variable
+           + Reviewed-by: David Gibson <david@gibson.dropbear.id.au>
+           + Tested-by: Herve Codina <herve.codina@bootlin.com>
+    Created main-push from us/main
+
+    Checking 2 commits in us/main..main-push
+      ok   4c9e1a7b2d30 libfdt: Use fdt_ro_probe_() in fdt_path_offset()
+      ok   a81f6d02c5e9 libfdt: Drop an unused variable
+    2 of 2 patches applied to main-push
+
+For one of your own series, give its name, or nothing for the series on the
+current branch: patman applies the latest version which it sent, using the
+Message-ID it recorded then::
+
+    $ patman maint apply -n
+    Series 'readme-meson' v1: 20261028112007.3980089-1-sjg@chromium.org
+       1 [1/2] README: Explain how to build with meson
+           + Reviewed-by: David Gibson <david@gibson.dropbear.id.au>
+           + Reviewed-by: Herve Codina <herve.codina@bootlin.com>
+       2 [2/2] README: Use meson in the Python section
+           + Reviewed-by: David Gibson <david@gibson.dropbear.id.au>
+           + Reviewed-by: Herve Codina <herve.codina@bootlin.com>
+    Would apply 2 of 2 patches to main-push
+
+It reads the series from the upstream's list on lore (see
+:ref:`series_lore`), with the Reviewed-by, Acked-by and Tested-by tags given
+in reply to each patch, or to the cover letter, which go on every patch. Only
+the replies to this version count: a tag given to an earlier version must be
+added to the new one by its author. Each patch gets these tags after its own,
+then the trailers which ``trailers_end`` gives, e.g. its ``Message-ID:`` and
+your sign-off, leaving out your sign-off on your own patches if
+``signoff_own`` is ``no``. Then the push branch is checked, as below.
+
+The patches are applied in a temporary worktree, so the tree you are working
+in is not touched, whatever is checked out and whatever changes it has. If the
+push branch is checked out somewhere, they are applied there instead, once it
+has no changes. A patch which does not apply is tried again with a three-way
+merge; if that fails too, nothing is applied.
+
+It refuses a series which is not all on the list yet, or which has a newer
+version, unless given ``-f``. A series which is already upstream or on the
+push branch has nothing to apply, so it says so; if only some patches are
+there, it says which ``-P`` applies the others. ``-P`` applies only some
+patches, e.g. ``-P 1-3,5``, and ``-n`` says what would be applied without
+applying it.
+
+To apply a series again, e.g. once more tags have come in, or to throw away
+what is on the push branch, give ``-R``. This starts the push branch again
+from upstream, dropping everything on it, then applies the series. It says
+how many commits it drops and where the push branch was; with ``-n`` it only
+says what it would drop. If the series then does not apply, the push branch is
+put back as it was::
+
+    $ patman maint apply -R 20261102093012.81234-1-fred@x.org
+       1 [v2,1/2] libfdt: Use fdt_ro_probe_() in fdt_path_offset()
+           + Reviewed-by: David Gibson <david@gibson.dropbear.id.au>
+           + Acked-by: Rob Herring <robh@kernel.org>
+       2 [v2,2/2] libfdt: Drop an unused variable
+           + Reviewed-by: David Gibson <david@gibson.dropbear.id.au>
+           + Tested-by: Herve Codina <herve.codina@bootlin.com>
+    Starting main-push again from us/main, dropping 2 commits (was a81f6d02c5e9)
+
+    Checking 2 commits in us/main..main-push
+      ok   7d2b90e4f1a8 libfdt: Use fdt_ro_probe_() in fdt_path_offset()
+      ok   e05c3a9b6d12 libfdt: Drop an unused variable
+    2 of 2 patches applied to main-push
+
+Checking the queue
+------------------
+
+``patman maint check`` checks the queue: the commits which are not upstream
+yet. It checks the branch which is checked out, if that has commits of its
+own, else the push branch, or the branch given with ``-b``. Run it before
+pushing, however the patches were applied, e.g. with ``b4 am``::
 
     $ patman maint check
     Checking 3 commits in us/main..main
@@ -53,6 +136,10 @@ The settings are:
     remote may be given by its name, e.g. ``us main``, or by its URL without
     the scheme, as here, so that the rules suit everyone whatever they call
     their remotes. This one is needed
+
+``push_branch``
+    The branch which ``patman maint apply`` applies patches to (default: the
+    upstream branch with ``-push`` after it, e.g. ``main-push``)
 
 ``signoff``
     Your sign-off, e.g. ``Simon Glass <sjg@chromium.org>``. The default is

@@ -945,9 +945,22 @@ class LoreList(patchwork.SeriesFinder):  # pylint: disable=R0902,R0904
         """
         del max_age
         data = await self.get_series(client, link)
+        return await self.get_mbox(client, [patch['msgid']
+                                            for patch in data['patches']])
+
+    async def get_mbox(self, client, msgids):
+        """Get an mbox holding some messages, in the order given
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            msgids (list of str): Message-IDs, with or without angle brackets
+
+        Returns:
+            bytes: Content of the mbox
+        """
         out = []
-        for patch in data['patches']:
-            msg = await self._message(client, lore.bare_msgid(patch['msgid']))
+        for msgid in msgids:
+            msg = await self._message(client, lore.bare_msgid(msgid))
             out.append(b'From mboxrd@z Thu Jan  1 00:00:00 1970\n' +
                        msg.raw.rstrip(b'\n') + b'\n\n')
         return b''.join(out)

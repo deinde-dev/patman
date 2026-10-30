@@ -35,12 +35,15 @@ DTC = {
 }
 
 
-class TestMaint(unittest.TestCase):
-    """Test checking the queue against a project's rules"""
+class RepoTestCase(unittest.TestCase):
+    """A test with a git repo like dtc's, with its remotes"""
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix='patman.')
         self.repo = os.path.join(self.tmpdir, 'repo')
         self.git('init', '-q', '-b', 'main', self.repo, cwd=self.tmpdir)
+        # For commands which do not use self.git(), e.g. 'git am'
+        self.git('config', 'user.name', 'Simon Glass')
+        self.git('config', 'user.email', 'sjg@chromium.org')
         self.git('remote', 'add', 'us',
                  'git://git.kernel.org/pub/scm/utils/dtc/dtc.git')
         self.git('remote', 'add', 'david', 'git@github.com:dgibson/dtc.git')
@@ -86,6 +89,9 @@ class TestMaint(unittest.TestCase):
         """Get the dtc rules for the test's repo, changed as given"""
         return maint.get_rules({**DTC, **kwargs}, self.repo)
 
+
+class TestMaint(RepoTestCase):
+    """Test checking the queue against a project's rules"""
     def check(self, **kwargs):
         """Check the queue, giving the problems of each commit by subject"""
         rules = self.rules()
@@ -303,7 +309,7 @@ class TestMaint(unittest.TestCase):
         with terminal.capture() as (out, _):
             self.assertEqual(0, maint.do_check(rules, git_dir=self.repo))
         self.assertEqual(f'Checking 1 commit in us/main..main\n'
-                         f'  ok   {good[:12]} good\nAll ok\n', out.getvalue())
+                         f'  ok   {good[:12]} good\n', out.getvalue())
 
         bad = self.commit('bad', FRED, [f'Signed-off-by: {FRED}'])
         with terminal.capture() as (out, _):
@@ -343,8 +349,7 @@ class TestMaint(unittest.TestCase):
         self.assertEqual("'main' does not contain us/main, so it cannot be "
                          'pushed; to rebase it: git rebase us/main main\n'
                          'Checking 1 commit in us/main..main\n'
-                         f'  ok   {other[:12]} other\n'
-                         'All ok, once rebased on us/main\n', out.getvalue())
+                         f'  ok   {other[:12]} other\n', out.getvalue())
 
         with self.assertRaises(ValueError) as exc:
             maint.do_check(maint.get_rules(DTC, self.repo, 'queue'),
@@ -354,9 +359,23 @@ class TestMaint(unittest.TestCase):
         # With HEAD detached, the branch must be given
         self.git('checkout', '-q', '--detach')
         with self.assertRaises(ValueError) as exc:
-            self.rules()
+            maint.do_check(self.rules(), git_dir=self.repo)
         self.assertEqual('No branch is checked out: use -b to say which to '
                          'check', str(exc.exception))
+
+    def test_default_branch(self):
+        """The branch checked is the one checked out, if it has commits of
+        its own, else the push branch"""
+        self.assertEqual(('main', 'main-push'),
+                         (self.rules().branch, self.rules().push_branch))
+        self.git('branch', 'main-push')
+        self.assertEqual('main-push', self.rules().branch)
+        self.commit('mine', ME, [f'Signed-off-by: {ME}'])
+        self.assertEqual('main', self.rules().branch)
+        self.assertEqual('next-push',
+                         self.rules(push_branch='next-push').push_branch)
+        self.git('checkout', '-q', '--detach', 'HEAD~1')
+        self.assertEqual('main-push', self.rules().branch)
 
     def test_command(self):
         """'patman maint check' checks the queue with the [maint] rules"""
@@ -372,7 +391,8 @@ class TestMaint(unittest.TestCase):
                     subcmd='check', branch=None, allow_merge=False)))
         finally:
             os.chdir(orig)
-        self.assertIn('All ok', out.getvalue())
+        self.assertIn('  ok   ', out.getvalue())
+        self.assertNotIn('FAIL', out.getvalue())
         with self.assertRaises(ValueError) as exc:
-            control.do_maint(Namespace(subcmd='apply'))
-        self.assertEqual("Unknown maint subcommand 'apply'", str(exc.exception))
+            control.do_maint(Namespace(subcmd='bogus'))
+        self.assertEqual("Unknown maint subcommand 'bogus'", str(exc.exception))

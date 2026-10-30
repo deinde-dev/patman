@@ -66,7 +66,10 @@ class Rules:  # pylint: disable=R0902
     Properties:
         upstream (str): Upstream branch which the queue goes on, e.g.
             'us/main'
-        branch (str): Branch to check, e.g. 'main'
+        branch (str or None): Branch to check, e.g. 'main', or None if none
+            is checked out
+        push_branch (str): Branch which 'maint apply' applies patches to,
+            e.g. 'main-push'
         signoff (str): Maintainer's sign-off, e.g. 'Simon Glass <sjg@x.org>'
         history (str): One of HISTORY
         trailers_end (list of str): Trailers which each patch from the list
@@ -85,6 +88,8 @@ class Rules:  # pylint: disable=R0902
     upstream: str
     branch: str
     signoff: str
+    push_branch: str = ''
+
     history: str = 'linear'
     trailers_end: list = field(default_factory=lambda: ['signoff'])
     pr_trailers_end: list = field(default_factory=lambda: ['signoff'])
@@ -202,6 +207,33 @@ def current_branch(git_dir=None):
     return None if out == 'HEAD' else out
 
 
+def _default_branch(upstream, push_branch, git_dir):
+    """Get the branch to check when none is given
+
+    This is the one checked out, unless it has no commits of its own, e.g.
+    main when it is level with the upstream, in which case it is the push
+    branch, if there is one
+
+    Args:
+        upstream (str): Upstream branch, e.g. 'us/main'
+        push_branch (str): Push branch, e.g. 'main-push'
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+
+    Return:
+        str or None: Branch, or None if none is checked out and there is no
+            push branch
+    """
+    branch = current_branch(git_dir)
+    if branch and command.output('git', 'rev-list', '-1',
+                                 f'{upstream}..{branch}', cwd=git_dir,
+                                 raise_on_error=False).strip():
+        return branch
+    if gitutil.ref_exists(f'refs/heads/{push_branch}', git_dir):
+        return push_branch
+    return branch
+
+
 def get_rules(values=None, git_dir=None, branch=None):
     """Get the rules from the [maint] settings
 
@@ -210,8 +242,8 @@ def get_rules(values=None, git_dir=None, branch=None):
             config (settings.maint)
         git_dir (str or None): Directory of the git repo, or None for the
             current one
-        branch (str or None): Branch to check, or None for the one checked
-            out
+        branch (str or None): Branch to check, or None for the default (see
+            _default_branch())
 
     Return:
         Rules: The rules
@@ -242,11 +274,11 @@ def get_rules(values=None, git_dir=None, branch=None):
                              'name and email in git')
         signoff = f'{name} <{email}>'
 
-    branch = branch or current_branch(git_dir)
-    if not branch:
-        raise ValueError('No branch is checked out: use -b to say which to '
-                         'check')
-    rules = Rules(f'{remote}/{words[1]}', branch, signoff)
+    upstream = f'{remote}/{words[1]}'
+    push_branch = values.get('push_branch') or f'{words[1]}-push'
+    rules = Rules(upstream, branch or _default_branch(upstream, push_branch,
+                                                      git_dir),
+                  signoff, push_branch)
     if values.get('history'):
         _check_words('history', [values['history']], HISTORY)
         rules.history = values['history']
@@ -312,7 +344,7 @@ def read_commits(upstream, branch, git_dir=None):
     return commits
 
 
-def _email_of(ident):
+def email_of(ident):
     """Get the email address in an identity, in lower case
 
     Args:
@@ -379,7 +411,7 @@ def _is_kind(rules, kind, trailer, from_pr):
             return key == 'link' and bool(match) and match['kind'] != 'issues'
         return key == 'link' and bool(lorelist.trailer_msgid(value))
     return (key == 'signed-off-by' and
-            _email_of(value) == _email_of(rules.signoff))
+            email_of(value) == email_of(rules.signoff))
 
 
 def _describe(kinds, rules):
@@ -459,7 +491,7 @@ def _is_own(rules, cmt):
     Return:
         bool: True if its author has the email address of your sign-off
     """
-    return _email_of(cmt.email) == _email_of(rules.signoff)
+    return email_of(cmt.email) == email_of(rules.signoff)
 
 
 def check_commit(rules, cmt, from_pr=False, last_of_pr=False, direct=False):
@@ -489,7 +521,7 @@ def check_commit(rules, cmt, from_pr=False, last_of_pr=False, direct=False):
     own = _is_own(rules, cmt)
     if 'author-signoff' in rules.require and not any(
             key.lower() == 'signed-off-by' and
-            _email_of(value) == _email_of(cmt.email)
+            email_of(value) == email_of(cmt.email)
             for key, value in cmt.trailers):
         problems.append(f'No Signed-off-by from the author, {cmt.author}')
     if direct:
@@ -609,6 +641,9 @@ def do_check(rules, allow_merge=False, git_dir=None):
         int: 0 if all is well, else 1, e.g. if the branch does not contain the
             upstream branch
     """
+    if not rules.branch:
+        raise ValueError('No branch is checked out: use -b to say which to '
+                         'check')
     for ref in (rules.upstream, rules.branch):
         if not gitutil.ref_exists(ref, git_dir):
             raise ValueError(f"No branch '{ref}'")
@@ -645,8 +680,4 @@ def do_check(rules, allow_merge=False, git_dir=None):
         bad += bool(problems)
     if bad:
         print(f'{bad} of {len(commits)} with problems')
-    elif diverged:
-        print(f'All ok, once rebased on {rules.upstream}')
-    else:
-        print('All ok')
     return 1 if bad or diverged else 0

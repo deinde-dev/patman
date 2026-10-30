@@ -47,6 +47,7 @@ def run_patman():
         from patman import test_database
         from patman import test_lore
         from patman import test_maint
+        from patman import test_maint_apply
         from patman import test_review
         from patman import test_send
         from patman import test_server
@@ -71,7 +72,7 @@ def run_patman():
              test_database.TestDatabase, test_review.TestReview,
              test_send.TestSend, test_settings.TestSettings,
              test_pwcache.TestPwCache, test_lore.TestLore,
-             test_maint.TestMaint,
+             test_maint.TestMaint, test_maint_apply.TestMaintApply,
              test_server.TestWebServer, test_command.TestRunInteractive])
         sys.exit(0 if result.wasSuccessful() else 1)
 
