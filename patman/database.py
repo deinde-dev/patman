@@ -1816,6 +1816,57 @@ class Database:  # pylint:disable=R0904
                            (review_id,)).fetchone()
         return json.loads(rec[0]) if rec and rec[0] else None
 
+    def review_get_msgids(self):
+        """Get the Message-IDs of the patches which each review series has
+        reviews of
+
+        These come from the headers kept for each review which has had a
+        draft, which say which message it replies to, and from the
+        References of the replies to the reviews, which include the patch.
+        Other Message-IDs may be among them, e.g. those of the reviews.
+
+        Return:
+            dict: key (int): Series ID
+                value (set of str): Message-IDs, e.g. '<abc@example.com>'
+        """
+        out = {}
+        res = self.execute(
+            'SELECT sv.series_id, r.envelope FROM review r '
+            'JOIN ser_ver sv ON r.svid = sv.id '
+            'JOIN series s ON sv.series_id = s.id '
+            "WHERE s.source = 'review' AND r.envelope IS NOT NULL")
+        for series_id, envelope in res.fetchall():
+            try:
+                msgid = json.loads(envelope).get('in_reply_to')
+            except ValueError:
+                continue
+            if msgid:
+                out.setdefault(series_id, set()).add(msgid)
+        res = self.execute(
+            'SELECT sv.series_id, rp.refs FROM reply rp '
+            'JOIN review r ON rp.review_id = r.id '
+            'JOIN ser_ver sv ON r.svid = sv.id '
+            'JOIN series s ON sv.series_id = s.id '
+            "WHERE s.source = 'review' AND rp.refs IS NOT NULL")
+        for series_id, refs in res.fetchall():
+            out.setdefault(series_id, set()).update(refs.split())
+        return out
+
+    def series_get_review(self, series_id):
+        """Get a review series and its latest version
+
+        Args:
+            series_id (int): Series ID
+
+        Return:
+            tuple or None: (series_id, name, max_version), as for
+                series_find_review_by_name(), or None if it has no versions
+        """
+        return self.execute(
+            'SELECT s.id, s.name, MAX(sv.version) FROM series s '
+            'JOIN ser_ver sv ON sv.series_id = s.id WHERE s.id = ? '
+            'GROUP BY s.id', (series_id,)).fetchone()
+
     def review_set_draft_id(self, review_id, draft_id):
         """Set the Gmail draft ID for a review record
 

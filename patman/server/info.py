@@ -566,22 +566,52 @@ def _reviews_by_title(rcser, reviews):
         reviews (list of Series): Reviewed series
 
     Return:
-        dict: key (str): Normalised title (see _norm_title())
-            value (tuple):
-                int: Series ID
-                SerVer: Latest version reviewed
-                int: Number of replies waiting for a response
+        tuple:
+            dict: key (str): Normalised title (see _norm_title())
+                value (tuple):
+                    int: Series ID
+                    SerVer: Latest version reviewed
+                    int: Number of replies waiting for a response
+            dict: The same, keyed by series ID
     """
     latest = _latest_versions(rcser, reviewed=True)
     waiting = rcser.db.reply_count_waiting()
     by_title = {}
+    by_id = {}
     for ser in reviews:
         # A series may have been applied but not reviewed, e.g. with -a
         svr = latest.get(ser.idnum)
         if svr:
-            by_title.setdefault(_norm_title(ser.desc), (
-                ser.idnum, svr, waiting.get(ser.idnum, 0)))
-    return by_title
+            by_id[ser.idnum] = (ser.idnum, svr, waiting.get(ser.idnum, 0))
+            by_title.setdefault(_norm_title(ser.desc), by_id[ser.idnum])
+    return by_title, by_id
+
+
+def _find_earlier(data, known):
+    """Find the review of an earlier version of a series in the inbox
+
+    This is the reviewed series with the same title, else one whose patches
+    share a b4 key with the series, since its title may have changed
+
+    Args:
+        data (dict): Series from patchwork
+        known (tuple): What is known of the reviewed series:
+            dict: Reviewed series by title, from _reviews_by_title()
+            dict: Reviewed series by ID, from _reviews_by_title()
+            dict: Series ID for each b4 key, from lookup.b4_series()
+
+    Return:
+        tuple or None: Reviewed series, as in by_title, or None if none is
+            found
+    """
+    by_title, by_id, by_key = known
+    found = by_title.get(_norm_title(data.get('name')))
+    if found:
+        return found
+    for key in sorted(lookup.series_b4_keys(data)):
+        if by_key.get(key) in by_id:
+            return by_id[by_key[key]]
+    return None
 
 
 def _earlier_info(rcser, found):
@@ -792,7 +822,7 @@ def get_inbox(cser, rcser, series_list, status=None,
     reviews = rcser.db.series_get_dict(include_archived=True,
                                        reviews_only=True).values()
     review_ids = {ser.idnum for ser in reviews}
-    by_title = _reviews_by_title(rcser, reviews)
+    known = (*_reviews_by_title(rcser, reviews), lookup.b4_series(rcser.db))
     newest = _newest_versions(series_list)
     out = []
     for data in series_list:
@@ -818,7 +848,7 @@ def get_inbox(cser, rcser, series_list, status=None,
                         for pat in data.get('patches') or []],
             'reviewed': reviewed,
             'earlier': (None if reviewed else _earlier_info(
-                rcser, by_title.get(_norm_title(data.get('name'))))),
+                rcser, _find_earlier(data, known))),
             'mine': lookup.is_own_series(data, own_emails, cser.db),
             'next': reviewed and _reviewed_next(rcser, found[3], data, newest),
         })

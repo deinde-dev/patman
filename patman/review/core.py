@@ -620,7 +620,7 @@ def _register_series(cser, clean_name, version, link, series_data,
     # would linger uncommitted and be flushed by the next unrelated
     # commit() as an orphan -- a series with no ser_ver row
     try:
-        prev = cser.db.series_find_review_by_name(clean_name)
+        prev = lookup.find_earlier(cser.db, series_data, clean_name)
         if prev:
             series_id, db_name, prev_version = prev
             tout.notice(f"Previously reviewed '{db_name}' v{prev_version};"
@@ -1053,6 +1053,41 @@ def _review_link(args, pwork, cser, link, own_db=None):
         _release_review_lock(lock_fd)
 
 
+def _join_by_b4(db, groups):
+    """Join groups of review series which have the same b4 key
+
+    The versions of a series which b4 sent can be recognised by their
+    Message-IDs, even when the title changes between them.
+
+    Args:
+        db (Database): Database holding the reviews
+        groups (dict): key (str): Cleaned title
+            value (list of Series): Review series with that title
+
+    Returns:
+        dict: The groups, with those which share a b4 key joined under the
+            title of the first
+    """
+    msgids = db.review_get_msgids()
+    title_of = {}
+    by_key = {}
+    for title, group in groups.items():
+        for ser in group:
+            title_of[ser.idnum] = title
+            for key in {lookup.b4_key(mid)
+                        for mid in msgids.get(ser.idnum, ())} - {None}:
+                by_key.setdefault(key, []).append(ser.idnum)
+    for ids in by_key.values():
+        titles = sorted({title_of[sid] for sid in ids},
+                        key=lambda title: min(ser.idnum
+                                              for ser in groups[title]))
+        for title in titles[1:]:
+            groups[titles[0]] += groups.pop(title)
+            for ser in groups[titles[0]]:
+                title_of[ser.idnum] = titles[0]
+    return groups
+
+
 def _do_relink(args, cser):
     """Merge review series that were split across versions
 
@@ -1060,8 +1095,10 @@ def _do_relink(args, cser):
     keyed by the raw '[vN,0/M] ...' cover-letter subject, so the versions
     of one series did not link and follow-up reviews had no earlier
     feedback for context. Group the review series by their cleaned title,
-    merge each group into a single series holding all the versions and
-    clean the stored description.
+    and join groups whose patches were sent by b4 as versions of the same
+    series, since the title may change between versions. Merge each group
+    into a single series holding all the versions and clean the stored
+    description.
 
     Older patman also left a review series with no versions when it found
     nothing to review, e.g. a series for another project, which looks like
@@ -1084,6 +1121,7 @@ def _do_relink(args, cser):
     groups = {}
     for ser in series.values():
         groups.setdefault(lookup.clean_series_name(ser.desc), []).append(ser)
+    groups = _join_by_b4(cser.db, groups)
 
     merged = 0
     cleaned = 0
