@@ -140,13 +140,16 @@ wherever it was started from::
       ok   a2f78f549e91 README: Explain how to build with meson
       ok   e5353eb4e214 README: Use meson in the Python section
     Pushed e5353eb4e214 to david +main-push:ci, gl +main-push:ci
+    Waiting for github: https://github.com/dgibson/dtc/actions/runs/40843398095
+    Waiting for gitlab: https://gitlab.com/dgibson/dtc/-/pipelines/3002858044
       ok      github https://github.com/dgibson/dtc/actions/runs/40843398095
       ok      gitlab https://gitlab.com/dgibson/dtc/-/pipelines/3002858044
 
-Nothing is pushed if the check fails. It exits with 1 unless CI passes
-everywhere, including when CI does not start within five minutes, or does
-not finish within an hour. ``-n`` says where the branch would be pushed, and
-``-W`` pushes it without waiting.
+Each run is shown once it starts, so that you can follow it. Nothing is pushed
+if the check fails. It exits with 1 unless CI passes everywhere, including
+when CI does not start within five minutes, or does not finish within an hour.
+``-n`` says where the branch would be pushed, and ``-W`` pushes it without
+waiting.
 
 Publishing the queue
 --------------------

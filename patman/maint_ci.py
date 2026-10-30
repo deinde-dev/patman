@@ -276,7 +276,8 @@ def wait_ci(rules, sha, sleep=time.sleep, clock=time.monotonic):
     """Wait for CI to finish on a commit, in each place it runs
 
     A place with no run for the commit after CI_START is given up on, as is
-    one still running after CI_TIMEOUT.
+    one still running after CI_TIMEOUT. Each run which has to be waited for
+    is shown once it starts, so that there is a link to follow it.
 
     Args:
         rules (Rules): Rules, whose repos give the places
@@ -288,6 +289,7 @@ def wait_ci(rules, sha, sleep=time.sleep, clock=time.monotonic):
         list of CiResult: State in each place
     """
     start = clock()
+    shown = set()
     while True:
         results = ci_states(rules, sha)
         waited = clock() - start
@@ -295,6 +297,10 @@ def wait_ci(rules, sha, sleep=time.sleep, clock=time.monotonic):
                (res.state == MISSING and waited >= CI_START)
                for res in results) or waited >= CI_TIMEOUT:
             return results
+        for res in results:
+            if res.state == PENDING and res.url and res.system not in shown:
+                print(f'Waiting for {res.system}: {res.url}')
+                shown.add(res.system)
         sleep(CI_POLL)
 
 
