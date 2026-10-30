@@ -15,6 +15,7 @@ other review commands on to the modules which handle them.
 """
 
 from datetime import datetime
+import difflib
 import fcntl
 import os
 import shutil
@@ -66,11 +67,19 @@ def _bare_subject(subject):
     return patch.subject
 
 
+# Smallest similarity between the subjects of a patch in two versions for
+# them to be taken as the same patch, when no subject is identical
+MIN_SUBJECT_MATCH = 0.8
+
+
 def match_patches(subjects, old_subjects):
     """Match each patch to the same patch in an earlier version
 
     Patches may be added, dropped or moved between versions, so each is
-    matched by its subject, not its number.
+    matched by its subject, not its number. A patch's subject may also
+    change, e.g. to fix a typo which a reviewer pointed out, so a patch with
+    no identical subject is matched to the closest one which is left, if it
+    is close enough.
 
     Args:
         subjects (dict): Subject of each patch in this version
@@ -83,9 +92,21 @@ def match_patches(subjects, old_subjects):
         dict: Patch number in the earlier version, for each patch which is
             in it
     """
-    old = {_bare_subject(subj): seq for seq, subj in old_subjects.items()}
-    return {seq: old[_bare_subject(subj)] for seq, subj in subjects.items()
-            if _bare_subject(subj) in old}
+    bare = {seq: _bare_subject(subj) for seq, subj in subjects.items()}
+    left = {_bare_subject(subj): seq for seq, subj in old_subjects.items()}
+    found = {}
+    for seq, subj in bare.items():
+        if subj in left:
+            found[seq] = left.pop(subj)
+    for seq, subj in bare.items():
+        if seq in found or not left:
+            continue
+        best = max(left, key=lambda old, subj=subj: difflib.SequenceMatcher(
+            None, subj, old).ratio())
+        if difflib.SequenceMatcher(None, subj, best).ratio() >= \
+                MIN_SUBJECT_MATCH:
+            found[seq] = left.pop(best)
+    return found
 
 
 def load_previous_reviews(ctx, subjects):

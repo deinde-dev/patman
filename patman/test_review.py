@@ -2545,14 +2545,15 @@ class TestReview(CseriesTester):
                           2: 'v2 review 2'},
                          load(3, ['dm: Second', 'dm: First']))
 
-        # A patch with no review in v2 has its review from v1
+        # A patch with no review in v2 has its review from v1, and one whose
+        # subject changes a little is still matched
         db.pcommit_add_list(sv2, [
             Pcommit(None, seq, subject, None, None, None, None, None)
             for seq, subject in enumerate([
                 '[v2,1/3] dm: First', '[v2,2/3] dm: Second',
                 '[v2,3/3] dm: Third'])])
         cser.commit()
-        subjects = ['[v3,1/3] dm: First', '[v3,2/3] dm: Second',
+        subjects = ['[v3,1/3] dm: Frist', '[v3,2/3] dm: Second',
                     '[v3,3/3] dm: Third', '[v3,4/4] video: Something else']
         self.assertEqual({0: 'v1 review 0', 1: 'v2 review 1',
                           2: 'v2 review 2', 3: 'v1 review 3'},
