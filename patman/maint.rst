@@ -109,6 +109,44 @@ pushing, however the patches were applied, e.g. with ``b4 am``::
 It exits with 1 if any commit has a problem, so a script can stop before
 pushing.
 
+Testing the queue
+-----------------
+
+``patman maint test`` runs the project's tests, which the ``test`` setting
+gives, on the same branch as ``maint check``. The tests run one after the
+other in a temporary worktree of the branch's last commit, so they see only
+what is committed, the build starts clean and the tree you are working in is
+not touched. They stop at the first which fails, showing the end of its
+output::
+
+    $ patman maint test
+    Testing main-push at e5353eb4e214
+      ok   make check
+      ok   meson setup build
+      ok   meson test -C build
+
+Running CI
+----------
+
+``patman maint ci`` checks the branch as ``maint check`` does, then pushes it
+to each place which the ``ci_push`` setting gives and waits for CI to finish
+on the commit pushed, on GitHub (using ``gh``) and GitLab, as the ``github``
+and ``gitlab`` settings say. Any run for that commit counts, wherever it was
+started from::
+
+    $ patman maint ci
+    Checking 2 commits in us/main..main-push
+      ok   a2f78f549e91 README: Explain how to build with meson
+      ok   e5353eb4e214 README: Use meson in the Python section
+    Pushed e5353eb4e214 to david +main-push:ci, gl +main-push:ci
+      ok      github https://github.com/dgibson/dtc/actions/runs/40843398095
+      ok      gitlab https://gitlab.com/dgibson/dtc/-/pipelines/3002858044
+
+Nothing is pushed if the check fails. It exits with 1 unless CI passes
+everywhere, including when CI does not start within five minutes, or does
+not finish within an hour. ``-n`` says where the branch would be pushed, and
+``-W`` pushes it without waiting.
+
 The rules
 ---------
 
@@ -128,6 +166,8 @@ maintainer of the project has them. For dtc:
     issue_trailers: Closes Link
     github: dgibson/dtc
     gitlab: dgibson/dtc
+    test: make check; meson setup build; meson test -C build
+    ci_push: david +{branch}:ci; gl +{branch}:ci
 
 The settings are:
 
@@ -180,7 +220,17 @@ The settings are:
 ``github``, ``gitlab``
     The project's repos, e.g. ``dgibson/dtc``. A link to an issue must be to
     one of them, and a pull or merge request is recognised by its link to
-    one of them
+    one of them. ``maint ci`` waits for CI in each of them
+
+``test``
+    The commands which ``maint test`` runs, separated by semicolons. Each runs
+    in the shell, at the top of the tree
+
+``ci_push``
+    Where ``maint ci`` pushes the branch to run CI, separated by semicolons:
+    each is a remote and a refspec, with ``{branch}`` for the branch, e.g.
+    ``david +{branch}:ci``. The ``+`` forces the push, since a branch which
+    only runs CI is usually replaced each time
 
 What is checked
 ---------------

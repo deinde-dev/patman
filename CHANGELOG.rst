@@ -10,6 +10,11 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman maint test`` runs the project's tests, from the new ``test``
+  setting, on the commits which are about to be pushed, in a temporary
+  worktree. ``patman maint ci`` checks those commits, pushes them to the
+  branches which run CI, from the new ``ci_push`` setting, and waits for
+  GitHub Actions and the GitLab pipeline to finish on them.
 - ``patman maint apply`` applies a series from the mailing list to the push
   branch, e.g. ``main-push``, by the project's rules in the ``[maint]``
   section: it adds the review tags given in reply to this version, then the
