@@ -22,6 +22,8 @@ import shutil
 import subprocess
 import tempfile
 
+import aiohttp
+
 from u_boot_pylib import claude as claude_mod
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
@@ -143,6 +145,78 @@ def load_previous_reviews(ctx, subjects):
                 ctx.previous_versions[seq] = version
 
 
+def _patch_id(diff, git_dir):
+    """Get the ID of a patch, which is the same for any patch making the
+    same change, whatever its commit message and line numbers
+
+    Args:
+        diff (str): Patch, or just its diff
+        git_dir (str): Git directory to run in
+
+    Returns:
+        str or None: Patch ID, or None if the text has no diff
+    """
+    result = subprocess.run(
+        ['git', '--git-dir', git_dir, 'patch-id', '--stable'], input=diff,
+        capture_output=True, text=True, check=False)
+    words = result.stdout.split()
+    return words[0] if words else None
+
+
+async def find_unchanged(ctx, numbered, git_dir):
+    """Find the patches whose code is the same as in the last reviewed version
+
+    The agent was given every patch of that version, so a patch whose code
+    is the same was reviewed, even if the review found nothing to say about
+    it and so left no record. Each patch of that version is read from
+    patchwork, using a copy kept from earlier if there is one, since the
+    text of a patch never changes. If they cannot be read, no patch is
+    taken as unchanged.
+
+    Args:
+        ctx (ReviewContext): Review context (uses cser, series_id, version
+            and pwork); unchanged is filled in
+        numbered (list of tuple): Each patch of this version:
+            int: Patch number, from 1
+            Commit: Its commit, with hash and subject
+        git_dir (str): Git directory holding the commits
+    """
+    if not ctx.pwork or not ctx.cser or not ctx.series_id:
+        return
+    earlier = ctx.cser.db.review_get_earlier(ctx.series_id, ctx.version)
+    if not earlier:
+        return
+    version, prev = earlier[0]
+    old_ids = {pcm.seq + 1: (pcm.subject, pcm.patch_id)
+               for pcm in ctx.cser.db.pcommit_get_list(prev[0].svid)
+               if pcm.patch_id}
+    old_seq = match_patches({seq: cmt.subject for seq, cmt in numbered},
+                            {seq: subj for seq, (subj, _) in old_ids.items()})
+    try:
+        async with aiohttp.ClientSession() as client:
+            for seq, cmt in numbered:
+                if seq not in old_seq:
+                    continue
+                data = await ctx.pwork.get_patch(
+                    client, str(old_ids[old_seq[seq]][1]), max_age=None)
+                old_id = _patch_id(data.get('diff') or '', git_dir)
+                diff = subprocess.run(
+                    ['git', '--git-dir', git_dir, 'show', '--format=',
+                     cmt.hash], capture_output=True, text=True,
+                    check=True).stdout
+                if old_id and old_id == _patch_id(diff, git_dir):
+                    ctx.unchanged[seq] = version
+    except (ValueError, aiohttp.ClientError, OSError,
+            subprocess.CalledProcessError) as exc:
+        tout.warning(f'Cannot tell which patches are unchanged since '
+                     f'v{version}: {exc}')
+        ctx.unchanged.clear()
+        return
+    if ctx.unchanged:
+        tout.notice(f'Unchanged since v{version}: patch(es) '
+                    f'{", ".join(str(seq) for seq in sorted(ctx.unchanged))}')
+
+
 async def _run_cover_review(ctx, all_commits):
     """Run the review agent on the cover letter and parse its output
 
@@ -250,6 +324,38 @@ async def _review_single_patch(ctx, cmt, seq, all_commits):
         ctx, greeting, verdict, comments, commit_msg)
 
 
+def _number_commits(ctx, commits):
+    """Give each commit on the applied branch its patchwork patch number
+
+    Each commit is matched by subject. The applied branch may hold fewer
+    commits than the series has patches (e.g. one failed to apply), so a
+    positional index would attach a review to the wrong patchwork patch.
+
+    Args:
+        ctx (ReviewContext): Review context (uses series_data)
+        commits (list of Commit): Commits on the applied branch
+
+    Returns:
+        list of tuple: Each commit, in order:
+            int: Patch number, from 1
+            Commit: The commit
+    """
+    seq_by_subject = {}
+    for i, patch in enumerate(ctx.series_data.get('patches', [])):
+        subject = lookup.clean_series_name(patch.get('name', ''))
+        seq_by_subject.setdefault(subject, i + 1)
+
+    numbered = []
+    for i, cmt in enumerate(commits):
+        seq = seq_by_subject.get(cmt.subject)
+        if seq is None:
+            tout.warning(f"Commit '{cmt.subject}' matches no patchwork "
+                         'patch; attaching by position')
+            seq = i + 1
+        numbered.append((seq, cmt))
+    return numbered
+
+
 async def review_patches(ctx):
     """Run AI review on each patch in the applied branch
 
@@ -297,25 +403,12 @@ async def review_patches(ctx):
         elif patch_sel:
             tout.notice('The agent has no comments on the cover letter')
 
-    # Map each commit to its patchwork patch number by subject. The
-    # applied branch may hold fewer commits than the series has patches
-    # (e.g. one failed to apply), so a positional index would attach a
-    # review to the wrong patchwork patch
-    patches = ctx.series_data.get('patches', [])
-    seq_by_subject = {}
-    for i, patch in enumerate(patches):
-        subject = lookup.clean_series_name(patch.get('name', ''))
-        seq_by_subject.setdefault(subject, i + 1)
+    numbered = _number_commits(ctx, series.commits)
+    await find_unchanged(ctx, numbered, git_dir)
 
     total = ctx.patch_count or len(commits)
     reviewer_tag = ctx.reviewer_tag
-    for i, cmt in enumerate(series.commits):
-        seq = seq_by_subject.get(cmt.subject)
-        if seq is None:
-            tout.warning(f"Commit '{cmt.subject}' matches no patchwork "
-                         'patch; attaching by position')
-            seq = i + 1
-
+    for seq, cmt in numbered:
         if patch_sel and seq not in patch_sel:
             continue
 

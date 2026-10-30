@@ -361,6 +361,43 @@ time round. Apply that convention here:
 '''
 
 
+def _unchanged_text(version):
+    """Get the text which says that a patch's code is unchanged
+
+    Args:
+        version (int): Version which the code is the same as
+
+    Returns:
+        str: Text, as shown on the page
+    """
+    return f'The code in this patch is the same as in v{version}, which ' \
+        'was reviewed.'
+
+
+def _unchanged_section(version):
+    """Get the prompt section saying that a patch's code is unchanged
+
+    Args:
+        version (int or None): Version which the code is the same as, or
+            None if it has changed
+
+    Returns:
+        str: Section text, or '' if the code has changed
+    """
+    if not version:
+        return ''
+    return f'''
+UNCHANGED SINCE v{version}:
+{_unchanged_text(version)}
+
+Do NOT raise any new issue in the code of this patch: it was there to
+be reviewed in v{version}, so it is too late to pick at it now. Only
+follow up the points of the previous review, if there is one, and
+comment on the commit message if it has changed. If there is nothing
+to follow up, do not comment.
+'''
+
+
 def _comments_section(ctx):
     """Get the prompt section pointing to the comments from patchwork
 
@@ -463,8 +500,9 @@ SERIES CONTEXT (cover letter):
         series_overview=_series_overview(all_commits, seq),
         comments_section=_comments_section(ctx),
         cover_section=cover_section,
-        prev_section=_previous_section(previous_review,
-                                       ctx.previous_versions.get(seq)),
+        prev_section=(_previous_section(previous_review,
+                                        ctx.previous_versions.get(seq)) +
+                      _unchanged_section(ctx.unchanged.get(seq))),
         context_section=context_section(ctx),
         coverity_section=_coverity_section(ctx),
         conventions_section=conventions_section(),
@@ -626,6 +664,8 @@ def context_parts(ctx, all_commits, seq, previous_review):
         parts.append(('Cover letter', ctx.cover_content))
     if previous_review:
         parts.append(('Earlier review', previous_review))
+    if seq and ctx.unchanged.get(seq):
+        parts.append(('Unchanged', _unchanged_text(ctx.unchanged[seq])))
     if ctx.context:
         parts.append(('Your notes', ctx.context))
     if seq and getattr(ctx, 'coverity_text', None):

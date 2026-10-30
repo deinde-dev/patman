@@ -93,6 +93,11 @@ Changed
 
 Fixed
 ~~~~~
+- A new version of a series is reviewed with each patch's latest review
+  from any earlier version, matching a patch whose subject changed, and
+  the agent is told when a patch's code is unchanged since the last
+  version reviewed, so it does not raise new issues in code which was
+  already reviewed.
 - 'review --revise -d' and 'review --redraft' delete the old Gmail drafts
   only once the new ones are made, so a patchwork error no longer leaves
   the reviews with no drafts. A revision makes its drafts from the headers

@@ -2561,6 +2561,78 @@ class TestReview(CseriesTester):
         self.assertEqual({0: 1, 1: 2, 2: 2, 3: 1},
                          load(3, subjects, versions=True))
 
+    def test_find_unchanged(self):
+        """Patches whose code is as in the last reviewed version are found"""
+        cser = self.get_cser()
+        db = cser.db
+        sid = db.series_add('pw-x-review', 'foo bar')
+        db.series_set_source(sid, 'review')
+        sv1 = db.ser_ver_add(sid, 1, link='10')
+        db.pcommit_add_list(sv1, [
+            Pcommit(None, seq, subject, None, None, None, None, None)
+            for seq, subject in enumerate([
+                '[1/2] dm: First', '[2/2] dm: Second'])])
+        for pcm in db.pcommit_get_list(sv1):
+            db.pcommit_update(pcm._replace(patch_id=101 + pcm.seq))
+        db.review_add(sv1, 2, 'v1 review 2', 0, '2026-01-01')
+        cser.commit()
+
+        # Make two commits: the first changes 'one' as v1 did, but with a
+        # new commit message; the second changes 'two' differently
+        repo = os.path.join(self.tmpdir, 'unchanged')
+        os.mkdir(repo)
+
+        def git(*argv):
+            return subprocess.run(
+                ['git', *argv], cwd=repo, check=True, capture_output=True,
+                text=True).stdout
+
+        git('init', '-q')
+        git('config', 'user.name', 'Fred')
+        git('config', 'user.email', 'fred@example.com')
+        for fname in ('one', 'two'):
+            tools.write_file(os.path.join(repo, fname), 'a\nb\nc\n',
+                             binary=False)
+        git('add', '.')
+        git('commit', '-q', '-m', 'Base')
+        commits = []
+        for fname, text in (('one', 'a\nB\nc\n'), ('two', 'a\nb\nC\n')):
+            tools.write_file(os.path.join(repo, fname), text, binary=False)
+            git('commit', '-q', '-am', f'dm: Change {fname}')
+            commits.append(types.SimpleNamespace(
+                hash=git('rev-parse', 'HEAD').strip(),
+                subject=f'dm: {"First" if fname == "one" else "Second"}'))
+        old_diffs = {
+            '101': git('show', '--format=', commits[0].hash),
+            '102': git('show', '--format=', commits[1].hash).replace(
+                '+C', '+X')}
+        git_dir = os.path.join(repo, '.git')
+
+        async def get_patch(_client, patch_id, max_age):
+            self.assertIsNone(max_age)
+            return {'diff': old_diffs[patch_id]}
+
+        def find(**kwargs):
+            ctx = review.common.ReviewContext(
+                mock.Mock(get_patch=mock.AsyncMock(**kwargs)), cser, {})
+            ctx.series_id = sid
+            ctx.version = 2
+            with terminal.capture() as (out, err):
+                review.common.run(review.core.find_unchanged(
+                    ctx, list(enumerate(commits, 1)), git_dir))
+            return ctx.unchanged, out.getvalue(), err.getvalue()
+
+        # Only the first is the same as in v1, though v1 has no review of it
+        unchanged, out, _ = find(side_effect=get_patch)
+        self.assertEqual({1: 1}, unchanged)
+        self.assertIn('Unchanged since v1: patch(es) 1', out)
+
+        # If patchwork cannot be read, no patch is taken as unchanged
+        unchanged, _, err = find(side_effect=ValueError('status 500'))
+        self.assertEqual({}, unchanged)
+        self.assertIn('Cannot tell which patches are unchanged since v1: '
+                      'status 500', err)
+
     def test_review_stats(self):
         """Test --stats counts the reviews, emails and replies"""
         cser = self.get_cser()
@@ -3202,6 +3274,7 @@ VERDICT: approved"""
         ctx.coverity_text = '- RESOURCE_LEAK: drivers/foo.c:42'
         commits = [(1, 'abc1234', 'dm: First'), (2, 'def5678', 'dm: Second')]
         ctx.previous_versions = {0: 3, 2: 2}
+        ctx.unchanged = {2: 4}
         with mock.patch.object(review.voice, 'get_voice',
                                return_value='Be brief'), \
                 mock.patch.dict(settings.review, {}, clear=True):
@@ -3214,7 +3287,8 @@ VERDICT: approved"""
                 ctx, commits, 'Hi all')
         self.assertEqual(
             ['Writing voice', 'Series', 'Existing comments', 'Conventions',
-             'Cover letter', 'Earlier review', 'Your notes', 'Coverity'],
+             'Cover letter', 'Earlier review', 'Unchanged', 'Your notes',
+             'Coverity'],
             [title for title, _ in parts])
         self.assertEqual('Fred: Nice', dict(parts)['Existing comments'])
         self.assertIn('>>> 2/2 def5678 dm: Second', dict(parts)['Series'])
@@ -3230,8 +3304,12 @@ VERDICT: approved"""
             del want['Existing comments']
             self.assertEqual(want, got)
 
-        # Each prompt says which version the earlier review is of
+        # Each prompt says which version the earlier review is of, and the
+        # patch's prompt says when its code is unchanged
         self.assertIn('PREVIOUS REVIEW (from v2):', prompt)
+        self.assertIn('UNCHANGED SINCE v4:', prompt)
+        self.assertIn('Do NOT raise any new issue', prompt)
+        self.assertNotIn('UNCHANGED', cover_prompt)
         self.assertIn('PREVIOUS COVER-LETTER REVIEW (from v3):', cover_prompt)
         ctx.previous_versions = {}
         self.assertIn('PREVIOUS REVIEW (from earlier version):',
