@@ -208,6 +208,15 @@ publishing, or when someone else pushed the commits. Give it a range of
 commits, e.g. ``patman maint thanks us/main~3..us/main``, the first time,
 and ``-n`` to show the thanks without drafting them.
 
+To thank one series, give its Message-ID, link or name. On a branch whose
+series patman sent, ``patman maint thanks`` thanks that series by default.
+Either way it is thanked for those of its patches which are upstream, even
+if it is your own::
+
+    $ patman maint thanks
+    Series 'readme-meson' v1: 20261028112007.3980089-1-sjg@chromium.org
+    Drafted thanks for README: Explain how to build with meson
+
 The rules
 ---------
 

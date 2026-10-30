@@ -24,6 +24,7 @@ from u_boot_pylib import command
 from patman import gmail
 from patman import lore
 from patman import maint
+from patman import maint_apply
 from patman.review import common
 
 # Where the state of the thanks is kept, in the git directory
@@ -237,6 +238,124 @@ def plan_thanks(rules, llist, app, closing):
             for to, idxs in replies]
 
 
+# pylint: disable-next=R0913,R0917
+def thank(rules, llist, what=None, closing=None, account=None, dry_run=False,
+          test_db=None, git_dir=None):
+    """Draft the thanks for a series, or for a range of commits
+
+    Args:
+        rules (Rules): Rules to use
+        llist (LoreList): List to read the series from
+        what (str or None): Range of commits, e.g. 'abc123..us/main'; or a
+            series, by its Message-ID, link or name; or None for the current
+            branch's series, if patman sent it, else the commits which went
+            upstream since the thanks were last drafted
+        closing (str or None): Closing lines, e.g. 'Regards,\nSimon'
+        account (str or None): Gmail account to use
+        dry_run (bool): True to show the thanks, without drafting them
+        test_db (str or None): Directory of the test database, or None to
+            use the normal one
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+
+    Return:
+        int: 0 if the thanks were drafted, or there were none, else 1
+    """
+    link = None
+    if not what or '..' not in what:
+        link = maint_apply.find_link(what, test_db, git_dir, need=bool(what),
+                                     verb='thank')
+    if link:
+        return thank_series(rules, llist, link, closing, account, dry_run,
+                            git_dir)
+    return draft_thanks(rules, llist, what, closing, account, dry_run,
+                        git_dir=git_dir)
+
+
+# pylint: disable-next=R0913,R0917
+def thank_series(rules, llist, link, closing=None, account=None,
+                 dry_run=False, git_dir=None):
+    """Draft the thanks for a series, for its patches which are upstream
+
+    The series is thanked even if it is your own, since it is asked for.
+
+    Args:
+        rules (Rules): Rules to use
+        llist (LoreList): List to read the series from
+        link (str): Message-ID of the cover letter or first patch, or a link
+        closing (str or None): Closing lines, e.g. 'Regards,\nSimon'
+        account (str or None): Gmail account to use
+        dry_run (bool): True to show the thanks, without drafting them
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+
+    Return:
+        int: 0 if the thanks were drafted, else 1
+    """
+    async def read():
+        async with aiohttp.ClientSession() as client:
+            return await llist.get_series(client, link)
+
+    data = common.run(read())
+    app = Applied(data['id'], data)
+    name = maint_apply.series_name(data)
+    idxs = {lore.bare_msgid(pat['msgid']): idx
+            for idx, pat in enumerate(data['patches'], 1)}
+    for cmt in maint.find_commits(rules.upstream, list(idxs), git_dir):
+        if _msgid(cmt) in idxs:
+            app.commits[idxs[_msgid(cmt)]] = cmt.hash
+    if not app.commits:
+        print(f"'{name}' is not in {rules.upstream} yet")
+        return 1
+    state = read_state(git_dir)
+    if app.root in state['thanked'] and not dry_run:
+        print(f"'{name}' is thanked already")
+        return 0
+    if not _draft(rules, llist, [app], closing, account, dry_run):
+        return 1
+    if not dry_run:
+        state['thanked'].append(app.root)
+        _write_state(state, git_dir)
+    return 0
+
+
+# pylint: disable-next=R0913,R0917
+def _draft(rules, llist, apps, closing, account, dry_run, quiet=False):
+    """Draft the thanks for some series, or show them in a dry run
+
+    Args:
+        rules (Rules): Rules to use
+        llist (LoreList): List to read the series from
+        apps (list of Applied): Series to thank
+        closing (str or None): Closing lines, e.g. 'Regards,\nSimon'
+        account (str or None): Gmail account to use
+        dry_run (bool): True to show the thanks, without drafting them
+        quiet (bool): True to say nothing if there are no series to thank
+
+    Return:
+        bool: True if each was drafted, or shown
+    """
+    emails = [(env, text) for app in apps
+              for env, text in plan_thanks(rules, llist, app, closing)]
+    if dry_run:
+        for env, text in emails:
+            print(f"To: {env['to']}\nCc: {env['cc']}\n"
+                  f"Subject: {env['subject']}\n\n{text}")
+        return True
+    if emails:
+        drafted = gmail.create_drafts_from_envelopes(
+            dict(enumerate(env for env, _ in emails)),
+            dict(enumerate(text for _, text in emails)),
+            account=account, sender=rules.signoff)
+        if len(drafted) < len(emails):
+            print(f'Drafted {len(drafted)} of {len(emails)} thanks')
+            return False
+        print(f"Drafted thanks for {', '.join(app.data['name'] for app in apps)}")
+    elif not quiet:
+        print('No series to thank')
+    return True
+
+
 # pylint: disable-next=R0913,R0914,R0917
 def draft_thanks(rules, llist, rng, closing=None, account=None,
                  dry_run=False, quiet=False, git_dir=None):
@@ -264,30 +383,16 @@ def draft_thanks(rules, llist, rng, closing=None, account=None,
     if not rng:
         if not state['last']:
             raise ValueError("No thanks have been drafted here yet: give the "
-                             f"commits to thank, e.g. '{rules.upstream}~5.."
+                             f"series or commits to thank, e.g. '{rules.upstream}~5.."
                              f"{rules.upstream}'")
         rng = f"{state['last']}..{rules.upstream}"
     start, end = rng.split('..', 1)
     commits = maint.read_commits(start, end, git_dir)
     apps = common.run(find_applied(rules, llist, commits, state['thanked']))
-    emails = [(env, text) for app in apps
-              for env, text in plan_thanks(rules, llist, app, closing)]
+    if not _draft(rules, llist, apps, closing, account, dry_run, quiet):
+        return 1
     if dry_run:
-        for env, text in emails:
-            print(f"To: {env['to']}\nCc: {env['cc']}\n"
-                  f"Subject: {env['subject']}\n\n{text}")
         return 0
-    if emails:
-        drafted = gmail.create_drafts_from_envelopes(
-            dict(enumerate(env for env, _ in emails)),
-            dict(enumerate(text for _, text in emails)),
-            account=account, sender=rules.signoff)
-        if len(drafted) < len(emails):
-            print(f'Drafted {len(drafted)} of {len(emails)} thanks')
-            return 1
-        print(f"Drafted thanks for {', '.join(app.data['name'] for app in apps)}")
-    elif not quiet:
-        print('No series to thank')
     state['thanked'] += [app.root for app in apps]
     state['last'] = command.output('git', 'rev-parse', end,
                                    cwd=git_dir).strip()

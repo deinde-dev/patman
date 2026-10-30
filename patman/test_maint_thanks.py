@@ -9,6 +9,8 @@ from unittest import mock
 from u_boot_pylib import terminal
 
 from patman import control
+from patman import cseries
+from patman import maint
 from patman import maint_thanks
 from patman.review import common
 from patman.test_maint import ME
@@ -19,13 +21,16 @@ CLOSING = 'Regards,\nSimon'
 
 class TestMaintThanks(LoreTestCase):
     """Test drafting the thanks for series which a maintainer applied"""
-    def thank(self, rng='us/main..main-push', drafted=None, **kwargs):
+    def thank(self, rng='us/main..main-push', drafted=None, series=False,
+              **kwargs):
         """Draft the thanks, with Gmail faked
 
         Args:
-            rng (str or None): Commits to thank
+            rng (str or None): Commits to thank, or with series, what to
+                thank
             drafted (int or None): Number of drafts which Gmail makes, or
                 None for all of them
+            series (bool): True to use thank(), rather than draft_thanks()
             kwargs: Other arguments for draft_thanks()
 
         Return:
@@ -44,9 +49,15 @@ class TestMaintThanks(LoreTestCase):
                                'create_drafts_from_envelopes',
                                side_effect=create), \
                 terminal.capture() as (out, _):
-            ret = maint_thanks.draft_thanks(
-                self.rules(**kwargs.pop('values', {})), self.lore_list(),
-                rng, CLOSING, git_dir=self.repo, **kwargs)
+            rules = self.rules(**kwargs.pop('values', {}))
+            if series:
+                ret = maint_thanks.thank(rules, self.lore_list(), rng,
+                                         CLOSING, test_db=self.tmpdir,
+                                         git_dir=self.repo, **kwargs)
+            else:
+                ret = maint_thanks.draft_thanks(
+                    rules, self.lore_list(), rng, CLOSING, git_dir=self.repo,
+                    **kwargs)
         return ret, out.getvalue(), made
 
     def test_series_of(self):
@@ -105,6 +116,43 @@ class TestMaintThanks(LoreTestCase):
         self.assertEqual((0, 'No series to thank\n', []),
                          self.thank(None))
 
+    def test_series(self):
+        """A series is thanked by itself, by default the current branch's,
+        even if it is your own"""
+        root = self.make_series(ME)
+        self.apply(root)
+        name = maint.current_branch(self.repo)
+
+        # With no series on the branch, the commits since last time are used
+        with self.assertRaises(ValueError) as exc:
+            self.thank(None, series=True)
+        self.assertIn('No thanks have been drafted here yet', str(exc.exception))
+
+        cser = cseries.Cseries(self.tmpdir)
+        cser.open_database()
+        cser.db.ser_ver_add(cser.db.series_add(name, 'Tidy'), 1, link=root)
+        cser.db.commit()
+        cser.close_database()
+        found = f"Series '{name}' v1: {root}\n"
+        self.assertEqual((1, found + "'dtc: Tidy (v1)' is not in us/main yet\n",
+                          []), self.thank(None, series=True))
+
+        self.git('update-ref', 'refs/remotes/us/main', 'main-push')
+        commits = self.git('log', '--reverse', '--format=%h', '--abbrev=12',
+                           'HEAD..main-push').split()
+        ret, out, made = self.thank(None, series=True)
+        self.assertEqual((0, found + 'Drafted thanks for dtc: Tidy\n'),
+                         (ret, out))
+        self.assertEqual(1, len(made))
+        self.assertIn(f'[2/2] dtc: Grow the file\n      {commits[1]}\n',
+                      made[0][1])
+        self.assertEqual([root],
+                         maint_thanks.read_state(self.repo)['thanked'])
+
+        # It is thanked only once; a Message-ID may be given instead
+        self.assertEqual((0, "'dtc: Tidy (v1)' is thanked already\n", []),
+                         self.thank(root, series=True))
+
     def test_each(self):
         """The thanks may reply to each patch"""
         root = self.make_series(cover=False)
@@ -151,7 +199,7 @@ class TestMaintThanks(LoreTestCase):
         with self.assertRaises(ValueError) as exc:
             self.thank(None)
         self.assertEqual("No thanks have been drafted here yet: give the "
-                         "commits to thank, e.g. 'us/main~5..us/main'",
+                         "series or commits to thank, e.g. 'us/main~5..us/main'",
                          str(exc.exception))
 
         # A problem drafting the thanks after publishing is reported
