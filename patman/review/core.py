@@ -66,38 +66,60 @@ def _bare_subject(subject):
     return patch.subject
 
 
+def match_patches(subjects, old_subjects):
+    """Match each patch to the same patch in an earlier version
+
+    Patches may be added, dropped or moved between versions, so each is
+    matched by its subject, not its number.
+
+    Args:
+        subjects (dict): Subject of each patch in this version
+            key (int): Patch number, from 1
+            value (str): Subject, with or without its prefix
+        old_subjects (dict): Subject of each patch in the earlier version,
+            in the same form
+
+    Returns:
+        dict: Patch number in the earlier version, for each patch which is
+            in it
+    """
+    old = {_bare_subject(subj): seq for seq, subj in old_subjects.items()}
+    return {seq: old[_bare_subject(subj)] for seq, subj in subjects.items()
+            if _bare_subject(subj) in old}
+
+
 def load_previous_reviews(ctx, subjects):
     """Give each patch the review of the same patch in an earlier version
 
-    The reviews come from the latest earlier version which has any. Patches
-    may be added, dropped or moved between versions, so each is matched by
-    its subject, not its number, and a patch which is not in that version
-    has no earlier review. The cover letter has the earlier cover-letter
-    review. If the earlier version has no record of its patches, they are
+    Each patch has its review from the latest earlier version which has
+    one, since a reviewer may have nothing more to say about a patch in a
+    later version, or may not look at it again. Patches are matched as
+    match_patches() does, so a patch which is not in an earlier version has
+    no review from it. The cover letter has the latest earlier cover-letter
+    review. If an earlier version has no record of its patches, they are
     matched by number.
 
     Args:
         ctx (ReviewContext): Review context, with cser, series_id and
-            version; previous_reviews is filled in
+            version; previous_reviews and previous_versions are filled in
         subjects (dict): Subject of each patch in this version
             key (int): Patch number, from 1
             value (str): Subject, with or without its prefix
     """
-    prev = ctx.cser.db.review_get_previous(ctx.series_id, ctx.version)
-    if not prev:
-        return
-    bodies = {rev.seq: rev.body for rev in prev}
-    pcommits = ctx.cser.db.pcommit_get_list(prev[0].svid)
-    if not pcommits:
-        ctx.previous_reviews.update(bodies)
-        return
-    if 0 in bodies:
-        ctx.previous_reviews[0] = bodies[0]
-    old_seq = {_bare_subject(pcm.subject): pcm.seq + 1 for pcm in pcommits}
-    for seq, subject in subjects.items():
-        body = bodies.get(old_seq.get(_bare_subject(subject)))
-        if body:
-            ctx.previous_reviews[seq] = body
+    for version, prev in ctx.cser.db.review_get_earlier(ctx.series_id,
+                                                        ctx.version):
+        bodies = {rev.seq: rev.body for rev in prev}
+        pcommits = ctx.cser.db.pcommit_get_list(prev[0].svid)
+        if pcommits:
+            old_seq = match_patches(subjects, {pcm.seq + 1: pcm.subject
+                                               for pcm in pcommits})
+        else:
+            old_seq = {seq: seq for seq in subjects}
+        old_seq[0] = 0
+        for seq, old in old_seq.items():
+            if old in bodies and seq not in ctx.previous_reviews:
+                ctx.previous_reviews[seq] = bodies[old]
+                ctx.previous_versions[seq] = version
 
 
 async def _run_cover_review(ctx, all_commits):

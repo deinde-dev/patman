@@ -32,8 +32,8 @@ HEADINGS = (
      'Conventions', None),
     (re.compile(r'^SERIES CONTEXT \(cover letter\):$|^COVER LETTER:$'),
      'Cover letter', None),
-    (re.compile(r'^PREVIOUS (COVER-LETTER )?REVIEW \(from earlier '
-                r'version\):$'), 'Earlier review', 'This is a FOLLOW-UP'),
+    (re.compile(r'^PREVIOUS (COVER-LETTER )?REVIEW \(from (earlier '
+                r'version|v\d+)\):$'), 'Earlier review', 'This is a FOLLOW-UP'),
     (re.compile(r'^USER CONTEXT \(.*\):$'), 'Your notes', None),
     (re.compile(r'^COVERITY \(.*\):$'), 'Coverity', 'If any of these defects'),
 )

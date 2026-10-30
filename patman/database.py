@@ -1981,33 +1981,31 @@ class Database:  # pylint:disable=R0904
         res = self.execute(sql, (status,))
         return [Review(*row) for row in res.fetchall()]
 
-    def review_get_previous(self, series_id, version):
-        """Get reviews from the most recent earlier version of a series
+    def review_get_earlier(self, series_id, version):
+        """Get the reviews of each earlier version of a series
 
-        Returns the reviews of the highest version below the current one
-        that actually has reviews, so they can be provided as context when
-        reviewing a new version. Skipping over versions with no reviews
-        means a gap (e.g. an intermediate version that was never reviewed)
-        still yields the earlier feedback rather than nothing.
+        A version which was never reviewed is left out, so that a gap (e.g.
+        an intermediate version that was never reviewed) still yields the
+        earlier feedback.
 
         Args:
             series_id (int): Series ID
             version (int): Current version being reviewed
 
         Return:
-            list of Review: Reviews from the latest earlier reviewed
-                version, or empty list
+            list of tuple: For each earlier version with reviews, newest
+                first:
+                int: Version
+                list of Review: Its reviews
         """
         res = self.execute(
-            'SELECT sv.id FROM ser_ver sv '
+            'SELECT DISTINCT sv.id, sv.version FROM ser_ver sv '
             'JOIN review r ON r.svid = sv.id '
             'WHERE sv.series_id = ? AND sv.version < ? '
-            'ORDER BY sv.version DESC LIMIT 1',
+            'ORDER BY sv.version DESC',
             (series_id, version))
-        row = res.fetchone()
-        if not row:
-            return []
-        return self.review_get_for_version(row[0])
+        return [(ver, self.review_get_for_version(svid))
+                for svid, ver in res.fetchall()]
 
     # pylint: disable=R0913,R0917
     def reply_add(self, review_id, gmail_msg_id, msgid, refs, sender,

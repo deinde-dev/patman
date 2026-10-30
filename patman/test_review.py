@@ -2498,9 +2498,9 @@ class TestReview(CseriesTester):
         cser.commit()
 
         # Reviewing v3 should fall back to v1, not the empty v2
-        prev = db.review_get_previous(sid, 3)
-        self.assertEqual(1, len(prev))
-        self.assertEqual('v1 body', prev[0].body)
+        prev = db.review_get_earlier(sid, 3)
+        self.assertEqual([1], [ver for ver, _ in prev])
+        self.assertEqual(['v1 body'], [rev.body for rev in prev[0][1]])
 
     def test_load_previous_reviews(self):
         """Each patch gets the earlier review of the same patch"""
@@ -2522,12 +2522,14 @@ class TestReview(CseriesTester):
             db.review_add(sv2, seq, f'v2 review {seq}', 0, '2026-01-02')
         cser.commit()
 
-        def load(version, subjects):
+        def load(version, subjects, versions=False):
             ctx = review.common.ReviewContext(None, cser, {})
             ctx.series_id = sid
             ctx.version = version
             review.core.load_previous_reviews(ctx, dict(enumerate(subjects,
                                                                   1)))
+            if versions:
+                return ctx.previous_versions
             return ctx.previous_reviews
 
         # A new patch moves the others along, but each keeps its own review,
@@ -2538,9 +2540,25 @@ class TestReview(CseriesTester):
                      '[v2,3/4] dm: Second', '[v2,4/4] dm: Third']))
 
         # Patches are matched by number when the earlier version does not
-        # record them
-        self.assertEqual({1: 'v2 review 1', 2: 'v2 review 2'},
+        # record them. v2 has no cover-letter review, so v1's is used
+        self.assertEqual({0: 'v1 review 0', 1: 'v2 review 1',
+                          2: 'v2 review 2'},
                          load(3, ['dm: Second', 'dm: First']))
+
+        # A patch with no review in v2 has its review from v1
+        db.pcommit_add_list(sv2, [
+            Pcommit(None, seq, subject, None, None, None, None, None)
+            for seq, subject in enumerate([
+                '[v2,1/3] dm: First', '[v2,2/3] dm: Second',
+                '[v2,3/3] dm: Third'])])
+        cser.commit()
+        subjects = ['[v3,1/3] dm: First', '[v3,2/3] dm: Second',
+                    '[v3,3/3] dm: Third', '[v3,4/4] video: Something else']
+        self.assertEqual({0: 'v1 review 0', 1: 'v2 review 1',
+                          2: 'v2 review 2', 3: 'v1 review 3'},
+                         load(3, subjects))
+        self.assertEqual({0: 1, 1: 2, 2: 2, 3: 1},
+                         load(3, subjects, versions=True))
 
     def test_review_stats(self):
         """Test --stats counts the reviews, emails and replies"""
@@ -2619,7 +2637,7 @@ class TestReview(CseriesTester):
 
         # Before: separate series, v2 has no prior context
         self.assertNotEqual(s1, s2)
-        self.assertEqual([], db.review_get_previous(s2, 2))
+        self.assertEqual([], db.review_get_earlier(s2, 2))
 
         with terminal.capture() as (out, _):
             self.run_review('--relink')
@@ -2631,9 +2649,9 @@ class TestReview(CseriesTester):
         v1 = cser.db.series_find_by_link('1')
         v2 = cser.db.series_find_by_link('2')
         self.assertEqual(v1[0], v2[0])
-        prev = cser.db.review_get_previous(v1[0], 2)
-        self.assertEqual(1, len(prev))
-        self.assertEqual('v1 body', prev[0].body)
+        prev = cser.db.review_get_earlier(v1[0], 2)
+        self.assertEqual([1], [ver for ver, _ in prev])
+        self.assertEqual(['v1 body'], [rev.body for rev in prev[0][1]])
 
         # The empty review series is removed, but not your own series
         reviews = cser.db.series_get_dict(include_archived=True,
@@ -3182,6 +3200,7 @@ VERDICT: approved"""
         ctx.context = 'This is an RFC'
         ctx.coverity_text = '- RESOURCE_LEAK: drivers/foo.c:42'
         commits = [(1, 'abc1234', 'dm: First'), (2, 'def5678', 'dm: Second')]
+        ctx.previous_versions = {0: 3, 2: 2}
         with mock.patch.object(review.voice, 'get_voice',
                                return_value='Be brief'), \
                 mock.patch.dict(settings.review, {}, clear=True):
@@ -3209,6 +3228,14 @@ VERDICT: approved"""
             want = dict(want)
             del want['Existing comments']
             self.assertEqual(want, got)
+
+        # Each prompt says which version the earlier review is of
+        self.assertIn('PREVIOUS REVIEW (from v2):', prompt)
+        self.assertIn('PREVIOUS COVER-LETTER REVIEW (from v3):', cover_prompt)
+        ctx.previous_versions = {}
+        self.assertIn('PREVIOUS REVIEW (from earlier version):',
+                      review.prompts.build_review_prompt(
+                          ctx, 'def5678', 2, commits, 'Hi Fred'))
 
     def test_review_context_transcript(self):
         """The context of an older review is read from its agent's session"""

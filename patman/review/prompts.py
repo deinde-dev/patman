@@ -312,19 +312,35 @@ Rules:
 '''
 
 
-def _previous_section(previous_review):
+def _version_name(version):
+    """Get the name of an earlier version, for a prompt
+
+    Args:
+        version (int or None): Version, or None if not known
+
+    Returns:
+        str: Name, e.g. 'v2', or 'earlier version'
+    """
+    return f'v{version}' if version else 'earlier version'
+
+
+def _previous_section(previous_review, version=None):
     """Get the prompt section with the review of the previous version
 
     Args:
         previous_review (str or None): Previous review text (for v2+)
+        version (int or None): Version which the review is of, which may be
+            older than the previous version if that one had no review of
+            the patch
 
     Returns:
         str: Section text, or '' if there is no previous review
     """
     if not previous_review:
         return ''
+    name = _version_name(version)
     return f'''
-PREVIOUS REVIEW (from earlier version):
+PREVIOUS REVIEW (from {name}):
 {previous_review}
 
 This is a FOLLOW-UP review. The reviewer convention is that the
@@ -334,13 +350,12 @@ time round. Apply that convention here:
 
 - Confirm whether each point in the previous review was addressed
   (acknowledge it, or push back if it was not).
-- Do NOT raise new issues in code that already existed in the
-  previous version. If something was not flagged then, it is not
-  fair to flag it now.
+- Do NOT raise new issues in code that already existed in {name}.
+  If something was not flagged then, it is not fair to flag it now.
 - It IS fair to comment on:
-  * material the author added or substantially rewrote in this
-    version (whether in response to feedback or otherwise), and
-  * clear regressions introduced since the previous version.
+  * material the author added or substantially rewrote since {name}
+    (whether in response to feedback or otherwise), and
+  * clear regressions introduced since {name}.
 - If the previous feedback is addressed and nothing new is wrong,
   approve. Prefer 'approved' over fishing for something to say.
 '''
@@ -448,7 +463,8 @@ SERIES CONTEXT (cover letter):
         series_overview=_series_overview(all_commits, seq),
         comments_section=_comments_section(ctx),
         cover_section=cover_section,
-        prev_section=_previous_section(previous_review),
+        prev_section=_previous_section(previous_review,
+                                       ctx.previous_versions.get(seq)),
         context_section=context_section(ctx),
         coverity_section=_coverity_section(ctx),
         conventions_section=conventions_section(),
@@ -549,8 +565,9 @@ EXISTING COMMENTS:
 
     prev_section = ''
     if previous_review:
+        name = _version_name(ctx.previous_versions.get(0))
         prev_section = f'''
-PREVIOUS COVER-LETTER REVIEW (from earlier version):
+PREVIOUS COVER-LETTER REVIEW (from {name}):
 {previous_review}
 
 This is a FOLLOW-UP review. The reviewer convention is that the
