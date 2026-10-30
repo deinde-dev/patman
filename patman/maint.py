@@ -84,6 +84,11 @@ class Rules:  # pylint: disable=R0902
             e.g. ['Closes', 'Link']
         repos (list of str): Repos whose issues and pull requests may be
             linked to, e.g. ['github.com/dgibson/dtc']
+        test (list of str): Shell commands which test the queue, e.g.
+            ['make check']
+        ci_push (list of tuple): Where to push the queue to run CI on it:
+            str: Remote, e.g. 'david'
+            str: Refspec, with {branch} for the branch, e.g. '+{branch}:ci'
     """
     upstream: str
     branch: str
@@ -97,6 +102,8 @@ class Rules:  # pylint: disable=R0902
     require: list = field(default_factory=list)
     issue_trailers: list = field(default_factory=lambda: ['Closes', 'Link'])
     repos: list = field(default_factory=list)
+    test: list = field(default_factory=list)
+    ci_push: list = field(default_factory=list)
 
 
 @dataclass
@@ -173,6 +180,43 @@ def _words(value):
         list of str: Words, e.g. ['message-id', 'signoff']
     """
     return (value or '').replace(',', ' ').split()
+
+
+def _items(value):
+    """Split a setting into its items, which are separated by semicolons
+
+    Args:
+        value (str or None): Setting, e.g. 'make check; meson test -C build'
+
+    Return:
+        list of str: Items, e.g. ['make check', 'meson test -C build']
+    """
+    return [item.strip() for item in (value or '').split(';') if item.strip()]
+
+
+def _pushes(value):
+    """Read the places which a setting says to push to
+
+    Args:
+        value (str or None): Setting, e.g. 'david +{branch}:ci; gl {branch}:ci'
+
+    Return:
+        list of tuple: Each place:
+            str: Remote, e.g. 'david'
+            str: Refspec, e.g. '+{branch}:ci'
+
+    Raises:
+        ValueError: An entry is not a remote and a refspec
+    """
+    pushes = []
+    for item in _items(value):
+        words = item.split()
+        if len(words) != 2:
+            raise ValueError(
+                "Each entry of the maint setting 'ci_push' needs a remote and "
+                f"a refspec, e.g. 'david +{{branch}}:ci', not '{item}'")
+        pushes.append(tuple(words))
+    return pushes
 
 
 def _check_words(name, words, allowed):
@@ -296,6 +340,8 @@ def get_rules(values=None, git_dir=None, branch=None):
     for host in ('github', 'gitlab'):
         rules.repos += [f'{host}.com/{repo}'.lower()
                         for repo in _words(values.get(host))]
+    rules.test = _items(values.get('test'))
+    rules.ci_push = _pushes(values.get('ci_push'))
     return rules
 
 

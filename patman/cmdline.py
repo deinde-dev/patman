@@ -698,6 +698,25 @@ def add_maint_subparser(subparsers):
         '--allow-merge', action='store_true',
         help="Allow merge commits, when the 'history' setting is "
              "'prefer-linear'")
+
+    test = maint_subparsers.add_parser(
+        'test', help="Run the project's tests on the commits not yet upstream")
+    test.add_argument(
+        '-b', '--branch',
+        help='Branch to test (default: as for check)')
+
+    cip = maint_subparsers.add_parser(
+        'ci', help='Check the commits not yet upstream, push them to run CI '
+                   'and wait for it')
+    cip.add_argument(
+        '-b', '--branch',
+        help='Branch to push (default: as for check)')
+    cip.add_argument(
+        '-n', '--dry-run', action='store_true',
+        help='Say where the branch would be pushed, without pushing it')
+    cip.add_argument(
+        '-W', '--no-wait', action='store_false', dest='wait',
+        help='Push without waiting for CI to finish')
     return maint
 
 
