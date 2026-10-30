@@ -183,9 +183,12 @@ Thanking the submitters
 Once a series is upstream, patman drafts a reply in Gmail to say so (see
 :ref:`review_gmail`), for you to add any comments to and send. ``maint publish``
 does this for each series it pushes, finding them from the ``Message-ID:``
-trailers of the commits. Each series is read from lore, and the reply goes
-to its cover letter, or to its first patch if it has none, and to everyone
-the series went to. It quotes the message it replies to, as a review does::
+trailers of the commits. Each series is read from lore, and the reply is
+about its cover letter, or its first patch if it has none, and goes to
+everyone the series went to. It comes at the end of any discussion, as a
+reply to the latest message in reply to the cover letter or patch, with
+everyone on that message copied in. It quotes the cover letter or patch, as
+a review does::
 
     Hi Fred,
 

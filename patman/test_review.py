@@ -787,7 +787,7 @@ class TestReview(CseriesTester):
                          gmail._decode_hdr('=?utf-8?q?=5BPATCH=5D_Kokosi=C5=84'
                                            'ski=3A_fix?='))
         self.assertEqual('a@b.org, c@d.org',
-                         gmail._format_addrs([['a@b.org', 'c@d.org']]))
+                         gmail.format_addrs([['a@b.org', 'c@d.org']]))
 
     @staticmethod
     def gmail_msg(msg_id, hdrs, body, sent=False):

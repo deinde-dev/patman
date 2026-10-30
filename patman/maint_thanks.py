@@ -234,7 +234,7 @@ def thanks_text(app, idxs, branch, closing, own=False, msg=None):
 
 
 async def _messages(llist, app, idxs):
-    """Read the messages which the thanks reply to
+    """Read the messages which the thanks are about, with their replies
 
     Args:
         llist (LoreList): List to read them from
@@ -243,20 +243,54 @@ async def _messages(llist, app, idxs):
             for the cover letter
 
     Return:
-        dict: Each message, as from LoreList.get_patch() or get_cover(), by
-            its index
+        tuple:
+            dict: Each message, as from LoreList.get_patch() or
+                get_cover(), by its index
+            dict: Latest reply to each message, directly or not, as from
+                LoreList.get_patch_comments(), or None if it has none, by
+                its index
     """
     msgs = {}
+    latest = {}
     async with aiohttp.ClientSession() as client:
         for idx in idxs:
             if idx:
-                data = await llist.get_patch(
-                    client, app.data['patches'][idx - 1]['id'])
+                item_id = app.data['patches'][idx - 1]['id']
+                msgs[idx] = await llist.get_patch(client, item_id)
+                replies = await llist.get_patch_comments(client, item_id)
             else:
-                data = await llist.get_cover(client,
-                                             app.data['cover_letter']['id'])
-            msgs[idx] = data
-    return msgs
+                item_id = app.data['cover_letter']['id']
+                msgs[idx] = await llist.get_cover(client, item_id)
+                replies = await llist.get_cover_comments(client, item_id)
+            latest[idx] = max(replies, key=lambda rep: rep.get('date') or '',
+                              default=None)
+    return msgs, latest
+
+
+def follow_reply(env, reply):
+    """Make the thanks reply to the latest reply to the message, if any
+
+    Then the thanks come at the end of the discussion. They still go to the
+    submitter, with everyone in that reply copied in.
+
+    Args:
+        env (dict): Headers to reply to the message, see
+            gmail.review_envelopes()
+        reply (dict or None): Latest reply, as from
+            LoreList.get_patch_comments(), or None if there is none
+
+    Return:
+        dict: Headers for the thanks
+    """
+    if not reply:
+        return env
+    hdrs = reply.get('headers', {})
+    refs = hdrs.get('References') or env['references'] or ''
+    return dict(env, in_reply_to=reply['msgid'],
+                references=f"{refs} {reply['msgid']}".strip(),
+                cc=gmail.format_addrs([env['cc'], hdrs.get('From', ''),
+                                       hdrs.get('To', ''),
+                                       hdrs.get('Cc', '')]))
 
 
 def plan_thanks(rules, llist, app, closing):
@@ -281,10 +315,12 @@ def plan_thanks(rules, llist, app, closing):
     else:
         to = 0 if app.data.get('cover_letter') else 1
         replies = [(to, applied)]
-    msgs = common.run(_messages(llist, app, [to for to, _ in replies]))
+    msgs, latest = common.run(_messages(llist, app,
+                                        [to for to, _ in replies]))
     envs = gmail.review_envelopes(
         app.data, {idx: msg.get('headers', {}) for idx, msg in msgs.items()},
         [to for to, _ in replies])
+    envs = {idx: follow_reply(env, latest[idx]) for idx, env in envs.items()}
     own = (maint.email_of(app.data['submitter'].get('email', '')) ==
            maint.email_of(rules.signoff))
     return [(envs[to], thanks_text(app, idxs, branch, closing, own, msgs[to]))
@@ -407,7 +443,8 @@ def _draft(rules, llist, apps, closing, account, dry_run, state, git_dir,
     if dry_run:
         for env, text in emails:
             print(f"To: {env['to']}\nCc: {env['cc']}\n"
-                  f"Subject: {env['subject']}\n\n{text}")
+                  f"Subject: {env['subject']}\n"
+                  f"In-Reply-To: {env['in_reply_to']}\n\n{text}")
         return True
     if emails:
         drafted = gmail.create_drafts_from_envelopes(

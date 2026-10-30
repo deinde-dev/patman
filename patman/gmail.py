@@ -449,7 +449,7 @@ def _decode_hdr(val):
     return ''.join(out)
 
 
-def _format_addrs(vals):
+def format_addrs(vals):
     """Parse and re-encode a list of address-header values
 
     Args:
@@ -485,7 +485,7 @@ def _build_cc(headers, list_email):
     vals = [headers.get(field, '') for field in ('To', 'Cc')]
     if list_email:
         vals.append(list_email)
-    return _format_addrs(vals)
+    return format_addrs(vals)
 
 
 def _get_msgid(patch_data, hdrs):
@@ -530,7 +530,7 @@ def _envelope(patch_data, hdrs, fallback_addr, list_email, refs=None):
         'subject': subject,
         'in_reply_to': msgid,
         'references': msgid if refs is None else refs,
-        'to': _format_addrs([hdrs.get('Reply-To') or fallback_addr]),
+        'to': format_addrs([hdrs.get('Reply-To') or fallback_addr]),
         'cc': _build_cc(hdrs, list_email),
     }
 

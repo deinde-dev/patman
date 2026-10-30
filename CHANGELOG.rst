@@ -11,8 +11,10 @@ Unreleased
 Added
 ~~~~~
 - ``patman maint publish`` drafts a reply in Gmail to thank the submitter of
-  each series it pushes, quoting the message it replies to and listing the
-  commits, for you to add to and send.
+  each series it pushes, quoting the patch or cover letter and listing the
+  commits, for you to add to and send. It replies to the latest message
+  about that patch or cover letter, so that it comes at the end of the
+  discussion.
   ``patman maint thanks`` drafts them for what has gone upstream since, or
   for one series, by default the current branch's, even if it is your own.
   ``--redraft`` drafts them again, deleting the drafts made before.

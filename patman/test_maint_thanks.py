@@ -200,12 +200,20 @@ class TestMaintThanks(LoreTestCase):
         """The thanks may reply to each patch"""
         root = self.make_series(cover=False)
         self.apply(root)
+        self.thread += message('r1@x.org', 'Re: [PATCH 2/2] dtc: Grow the file',
+                               'Ann <ann@x.org>', 'Nice', 'fred-2@x.org')
         ret, out, made = self.thank(values={'thanks_to': 'each'})
         self.assertEqual(0, ret, out)
+
+        # A patch with a reply is thanked at the end of the discussion
         self.assertEqual(
             [('Re: [PATCH 1/2] dtc: Add a file', '<fred-1@x.org>'),
-             ('Re: [PATCH 2/2] dtc: Grow the file', '<fred-2@x.org>')],
+             ('Re: [PATCH 2/2] dtc: Grow the file', '<r1@x.org>')],
             [(env['subject'], env['in_reply_to']) for env, _ in made])
+        env = made[1][0]
+        self.assertEqual(('<fred-2@x.org> <r1@x.org>', 'fred@x.org'),
+                         (env['references'], env['to']))
+        self.assertIn('Ann <ann@x.org>', env['cc'])
         self.assertIn('[2/2] dtc: Grow the file\n', made[1][1])
         self.assertNotIn('[1/2]', made[1][1])
 
@@ -222,7 +230,8 @@ class TestMaintThanks(LoreTestCase):
         ret, out, made = self.thank(dry_run=True)
         self.assertEqual((0, []), (ret, made))
         self.assertIn('To: fred@x.org\nCc: \n'
-                      'Subject: Re: [PATCH 0/2] dtc: Tidy\n\nHi Fred,\n', out)
+                      'Subject: Re: [PATCH 0/2] dtc: Tidy\n'
+                      'In-Reply-To: <fred-0@x.org>\n\nHi Fred,\n', out)
         self.assertEqual({'last': None, 'thanked': [], 'drafts': {}},
                          maint_thanks.read_state(self.repo))
 
