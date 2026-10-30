@@ -787,12 +787,15 @@ TASK:
   approve it by ending the review with: Reviewed-by: {tag}
 - If the note asks for a change to a patch which its review approves, remove
   the Reviewed-by line
+- If the note leaves a review with nothing to say, neither a comment nor a
+  Reviewed-by line, drop it: give its '---SEQ N---' line with nothing after
+  it
 - Use {spelling} spelling
 {voice}
 OUTPUT:
 Output ONLY the reviews you changed, each as the line '---SEQ N---' followed
-by the complete new text of that review. Leave out reviews which need no
-change. Do not add any commentary.
+by the complete new text of that review, or by nothing for a review to drop.
+Leave out reviews which need no change. Do not add any commentary.
 '''
 
 

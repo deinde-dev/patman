@@ -447,11 +447,13 @@ def _needs_refinement(body):
         for l in body.splitlines())
 
 
-def parse_refined_output(log):
+def parse_refined_output(log, keep_empty=False):
     """Parse ---SEQ N--- delimited output from the refinement agent
 
     Args:
         log (str): Raw agent output
+        keep_empty (bool): True to give a review with no text as '', e.g.
+            one which a revision drops; else it is left out
 
     Returns:
         dict: Map of seq number to refined body text
@@ -459,17 +461,21 @@ def parse_refined_output(log):
     refined = {}
     current_seq = None
     current_lines = []
+
+    def add():
+        text = '\n'.join(current_lines).strip()
+        if current_seq is not None and (text or keep_empty):
+            refined[current_seq] = text
+
     for line in log.splitlines():
         match = re.match(r'^---SEQ (\d+)---$', line)
         if match:
-            if current_seq is not None and current_lines:
-                refined[current_seq] = '\n'.join(current_lines).strip()
+            add()
             current_seq = int(match.group(1))
             current_lines = []
         elif current_seq is not None:
             current_lines.append(line)
-    if current_seq is not None and current_lines:
-        refined[current_seq] = '\n'.join(current_lines).strip()
+    add()
     return refined
 
 

@@ -370,8 +370,9 @@ async def revise_reviews(ctx, reviews, note, commits, others=None,
     if not success:
         return None
     revised = {seq: emails.fix_dashes(body, ctx.em_dash)
-               for seq, body in emails.parse_refined_output(log).items()
-               if seq in reviews and body}
+               for seq, body in emails.parse_refined_output(
+                   log, keep_empty=True).items()
+               if seq in reviews}
     return {seq: body for seq, body in revised.items()
             if body != reviews[seq].strip()}
 
@@ -406,15 +407,17 @@ def _read_series_context(ctx, pwork, link):
 def _save_revisions(cser, reviews, changed):
     """Store the revised text of each review which the agent changed
 
-    A review which was changed or sent while it was being revised is left as
-    it is, and the revised text is shown instead, so that nothing is lost.
+    A review with no text left, since the note leaves it with nothing to
+    say, is deleted. A review which was changed or sent while it was being
+    revised is left as it is, and the revised text is shown instead, so that
+    nothing is lost.
 
     Args:
         cser (Cseries): Open cseries instance
         reviews (list of Review): Reviews which were revised, as they were
             before the agent changed them
-        changed (dict): Map of seq to new review body text; updated to hold
-            only the reviews which were stored
+        changed (dict): Map of seq to new review body text, '' for one to
+            drop; updated to hold only the reviews which were stored
     """
     for rev in reviews:
         if rev.seq not in changed:
@@ -426,6 +429,11 @@ def _save_revisions(cser, reviews, changed):
                          'while it was being revised, so it is left as it '
                          'is. The revised text was:')
             del changed[rev.seq]
+        elif not body:
+            cser.db.review_delete(rev.idnum)
+            tout.notice(f'Dropped the review of {_review_label(rev.seq)}, '
+                        'which has nothing left to say')
+            continue
         else:
             cser.db.review_set_body(rev.idnum, body, 'Reviewed-by:' in body)
             tout.notice(f'Revised the review of {_review_label(rev.seq)}')
@@ -504,16 +512,43 @@ def _do_revise(args, pwork, cser, link):
         return 0
 
     _save_revisions(cser, reviews, changed)
-
-    if args.create_drafts:
-        redo = [cser.db.review_get(rev.idnum) for rev in reviews
-                if rev.seq in changed]
-        # Reviews which have had a draft can be drafted again without
-        # patchwork
-        if drafts.has_envelopes(cser, redo):
-            drafts.redraft_reviews(args, cser, redo, link)
-            return 0
-        if not ctx.series_data:
-            ctx.series_data = lookup.fetch_series(pwork, link)[0]
-        drafts.replace_drafts(ctx, args, redo)
+    _redraft_revised(ctx, args, reviews, changed, link)
     return 0
+
+
+def _redraft_revised(ctx, args, reviews, changed, link):
+    """Bring the Gmail drafts of revised reviews up to date
+
+    With -d, the drafts of the reviews which changed are made again, and
+    those of the reviews dropped are deleted; without it, the drafts are
+    left as they are.
+
+    Args:
+        ctx (ReviewContext): Review context (uses cser, pwork, series_data)
+        args (Namespace): Command-line arguments (uses create_drafts)
+        reviews (list of Review): Reviews which were revised, as they were
+            before the agent changed them
+        changed (dict): Map of seq to new review body text, '' for one which
+            was dropped
+        link (str): Patchwork series link/ID
+    """
+    dropped = [rev for rev in reviews
+               if rev.seq in changed and not changed[rev.seq]]
+    if not args.create_drafts:
+        if any(rev.draft_id for rev in dropped):
+            tout.warning('The Gmail drafts of the reviews dropped are left; '
+                         'use -d to delete them')
+        return
+    if dropped:
+        drafts.delete_gmail_drafts(args, dropped)
+    redo = [ctx.cser.db.review_get(rev.idnum) for rev in reviews
+            if changed.get(rev.seq)]
+    if not redo:
+        return
+    # Reviews which have had a draft can be drafted again without patchwork
+    if drafts.has_envelopes(ctx.cser, redo):
+        drafts.redraft_reviews(args, ctx.cser, redo, link)
+        return
+    if not ctx.series_data:
+        ctx.series_data = lookup.fetch_series(ctx.pwork, link)[0]
+    drafts.replace_drafts(ctx, args, redo)
