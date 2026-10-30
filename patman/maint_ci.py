@@ -519,7 +519,7 @@ def _ready(rules, sha, git_dir):
     return targets, 0
 
 
-def do_publish(rules, dry_run=False, yes=False, git_dir=None):
+def do_publish(rules, dry_run=False, yes=False, git_dir=None, after=None):
     """Publish the queue: push it to the remotes, once CI has passed on it
 
     The remotes are fetched and the branch is checked first, then CI must
@@ -535,6 +535,9 @@ def do_publish(rules, dry_run=False, yes=False, git_dir=None):
         yes (bool): True to push without asking
         git_dir (str or None): Directory of the git repo, or None for the
             current one
+        after (function or None): Function to call once it is published,
+            with the upstream commits before and after, e.g. to thank the
+            submitters
 
     Return:
         int: 0 if it was published, or there is nothing to publish, else 1
@@ -550,6 +553,8 @@ def do_publish(rules, dry_run=False, yes=False, git_dir=None):
     targets, ret = _ready(rules, sha, git_dir)
     if not targets:
         return ret
+    old = command.output('git', 'rev-parse', rules.upstream,
+                         cwd=git_dir).strip()
     where = _where(targets)
     if dry_run:
         print(f'Would publish {sha[:12]} to {where}')
@@ -561,4 +566,6 @@ def do_publish(rules, dry_run=False, yes=False, git_dir=None):
     if not _push(targets, git_dir):
         return 1
     print(f'Published {sha[:12]} to {where}')
+    if after and old != sha:
+        after(old, sha)
     return 0

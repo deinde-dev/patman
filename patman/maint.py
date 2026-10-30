@@ -43,6 +43,10 @@ END_KINDS = ('message-id', 'link', 'signoff')
 # Rules which 'require' can give
 REQUIRE = ('author-signoff',)
 
+# What the thanks for an applied series reply to: its cover letter (or its
+# first patch, if it has none), or each patch applied
+THANKS_TO = ('cover', 'each')
+
 # A link to an issue or a pull request on GitHub, or a merge request on
 # GitLab, giving the repo, the kind and the number
 RE_ISSUE = re.compile(
@@ -92,6 +96,7 @@ class Rules:  # pylint: disable=R0902
                 ['+{branch}:ci']
         publish (list of tuple): Where to push the queue to publish it, in
             the same form, e.g. [('us', ['{branch}:main'])]
+        thanks_to (str): What the thanks reply to, one of THANKS_TO
     """
     upstream: str
     branch: str
@@ -108,6 +113,7 @@ class Rules:  # pylint: disable=R0902
     test: list = field(default_factory=list)
     ci_push: list = field(default_factory=list)
     publish: list = field(default_factory=list)
+    thanks_to: str = 'cover'
 
 
 @dataclass
@@ -351,6 +357,9 @@ def get_rules(values=None, git_dir=None, branch=None):
                             'david +{branch}:ci')
     rules.publish = _pushes('publish', values.get('publish'),
                             'us {branch}:main')
+    if values.get('thanks_to'):
+        _check_words('thanks_to', [values['thanks_to']], THANKS_TO)
+        rules.thanks_to = values['thanks_to']
     return rules
 
 

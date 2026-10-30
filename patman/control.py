@@ -34,6 +34,7 @@ from patman import lorelist
 from patman import maint
 from patman import maint_apply
 from patman import maint_ci
+from patman import maint_thanks
 from patman import patchstream
 from patman import pwcache
 from patman import review as review_mod
@@ -560,62 +561,56 @@ def do_maint(args):
         return maint_ci.do_ci(maint.get_rules(branch=args.branch),
                               args.dry_run, args.wait)
     if args.subcmd == 'publish':
-        return maint_ci.do_publish(maint.get_rules(branch=args.branch),
-                                   args.dry_run, args.yes)
+        rules = maint.get_rules(branch=args.branch)
+        return maint_ci.do_publish(
+            rules, args.dry_run, args.yes,
+            after=lambda old, new: _thank_published(args, rules, old, new))
+    if args.subcmd == 'thanks':
+        rules = maint.get_rules()
+        return maint_thanks.draft_thanks(
+            rules, maint_list(rules), args.range, _closing(args),
+            getattr(args, 'gmail_account', None), args.dry_run)
     if args.subcmd == 'apply':
         rules = maint.get_rules()
         return maint_apply.apply_series(rules, maint_list(rules),
-                                        maint_link(args.link), args.patches,
-                                        args.force, args.dry_run,
-                                        redo=args.redo)
+                                        maint_apply.find_link(args.link),
+                                        args.patches, args.force,
+                                        args.dry_run, redo=args.redo)
     raise ValueError(f"Unknown maint subcommand '{args.subcmd}'")
 
 
-def maint_link(series, test_db=None, git_dir=None):
-    """Get the link of the series which 'maint apply' is to apply
-
-    A Message-ID, or a link to lore, is used as it is. Otherwise the series
-    is one of your own, named or else the one on the current branch, and the
-    latest version which has been sent is used, by the link which patman
-    recorded when it sent it.
+def _closing(args):
+    """Get the lines which end an email, from the 'signoff' setting
 
     Args:
-        series (str or None): Message-ID, link or name of the series, or
-            None for the current branch's
-        test_db (str or None): Directory of the test database, or None to
-            use the normal one
-        git_dir (str or None): Directory of the git repo, or None for the
-            current one
+        args (Namespace): Arguments
 
     Return:
-        str: Message-ID or link of the series
-
-    Raises:
-        ValueError: The series is not known, or has not been sent
+        str or None: Lines, e.g. 'Regards,\nSimon', or None if there are none
     """
-    if series and ('@' in series or '/' in series):
-        return series
-    name = series or maint.current_branch(git_dir)
-    if not name:
-        raise ValueError('No branch is checked out: give the Message-ID of '
-                         'the series to apply')
-    cser = cseries.Cseries(test_db)
-    cser.open_database()
+    closing = getattr(args, 'signoff', None)
+    return closing.replace('\\n', '\n') if closing else None
+
+
+def _thank_published(args, rules, old, new):
+    """Draft the thanks for the series which have just been published
+
+    A problem is reported, without failing the publish, since the commits
+    are upstream by then.
+
+    Args:
+        args (Namespace): Arguments
+        rules (Rules): Rules to use
+        old (str): Upstream commit before publishing
+        new (str): Upstream commit after publishing
+    """
     try:
-        idnum = cser.db.series_find_by_name(name)
-        svers = cser.db.ser_ver_get_for_series(idnum) if idnum else []
-    finally:
-        cser.close_database()
-    if not idnum:
-        raise ValueError(f"There is no series '{name}': give the Message-ID "
-                         'of the series to apply')
-    sent = [svr for svr in svers if svr.link]
-    if not sent:
-        raise ValueError(f"Series '{name}' has not been sent: give the "
-                         'Message-ID of the series to apply')
-    latest = max(sent, key=lambda svr: svr.version)
-    print(f"Series '{name}' v{latest.version}: {latest.link}")
-    return latest.link
+        maint_thanks.draft_thanks(
+            rules, maint_list(rules), f'{old}..{new}', _closing(args),
+            getattr(args, 'gmail_account', None), quiet=True)
+    except Exception as exc:  # pylint: disable=W0718
+        print(f'Cannot draft the thanks: {exc}; to try again: patman maint '
+              f'thanks {old[:12]}..{new[:12]}')
 
 
 def maint_list(rules, test_db=None):

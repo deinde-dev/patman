@@ -26,6 +26,8 @@ On Debian and Ubuntu, the Google packages are also available with apt::
     sudo apt install python3-google-auth python3-google-auth-oauthlib \
         python3-google-auth-httplib2 python3-googleapi
 
+.. _review_gmail:
+
 Gmail API access
 ~~~~~~~~~~~~~~~~
 

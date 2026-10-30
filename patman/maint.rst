@@ -169,6 +169,39 @@ already is left out, so once the problem is fixed, publishing again carries
 on where it stopped. ``-n`` says where the branch would be pushed, and ``-y``
 pushes without asking.
 
+Once it is published, the submitters are thanked, as below.
+
+Thanking the submitters
+-----------------------
+
+Once a series is upstream, patman drafts a reply in Gmail to say so (see
+:ref:`review_gmail`), for you to add any comments to and send. ``maint publish``
+does this for each series it pushes, finding them from the ``Message-ID:``
+trailers of the commits. Each series is read from lore, and the reply goes
+to its cover letter, or to its first patch if it has none, and to everyone
+the series went to::
+
+    Hi Fred,
+
+    Applied to main, thanks.
+
+    [1/2] libfdt: Use fdt_ro_probe_() in fdt_path_offset()
+          7d2b90e4f1a8
+    [2/2] libfdt: Drop an unused variable
+          e05c3a9b6d12
+
+    Regards,
+    Simon
+
+The closing lines come from the ``signoff`` setting in ``[settings]``, as
+for reviews. Your own series are not thanked, nor are commits which did not
+come from the list. A series is thanked only once, and patman notes how far
+upstream it has thanked, so ``patman maint thanks`` drafts the thanks for
+what has gone upstream since, e.g. if Gmail could not be reached when
+publishing, or when someone else pushed the commits. Give it a range of
+commits, e.g. ``patman maint thanks us/main~3..us/main``, the first time,
+and ``-n`` to show the thanks without drafting them.
+
 The rules
 ---------
 
@@ -259,6 +292,11 @@ The settings are:
     Where ``maint publish`` pushes the branch, in the same form, e.g.
     ``us {branch}:main {branch}:master`` to push it to both ``main`` and
     ``master`` on the remote ``us``. These pushes are not forced
+
+``thanks_to``
+    What the thanks reply to: ``cover`` (the default) for the cover letter,
+    or the first patch of a series with none, listing the patches applied,
+    or ``each`` for a reply to each patch
 
 What is checked
 ---------------
