@@ -355,24 +355,29 @@ raise the ones that fall in the code each patch changes.
 New versions and reviewing again
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When reviewing a new version of a previously reviewed series, patman
-loads the most recent earlier version that has reviews as context for
-the agent, so it can check whether earlier issues were addressed and avoid
-raising fresh points the earlier versions did not. Versions are linked
-by their cleaned cover-letter title.
+When reviewing a new version of a previously reviewed series, patman gives
+the agent your earlier reviews as context, so it can check whether earlier
+issues were addressed and avoid raising fresh points the earlier versions
+did not. Versions are linked by their cleaned cover-letter title, or for a
+series sent with b4, whose title may change between versions, by the name
+of its change-id, which is in the Message-ID of each patch. The inbox finds
+your review of an earlier version in the same way.
 
-Each patch is given the earlier review of the patch with the same subject,
-since patches are often added, dropped or moved between versions. A patch
-which is new, or whose subject has changed, has no earlier review, and the
-cover letter has the earlier cover-letter review.
+Each patch is given its latest review from any earlier version, matched by
+subject, since patches are often added, dropped or moved between versions,
+or to the closest subject if it changed a little. A patch which is new has
+no earlier review, and the cover letter has the latest earlier cover-letter
+review. A patch whose code is the same as in the last version reviewed is
+marked as unchanged, so that the agent only follows up the earlier review.
 
 An older database may have stored each version as a separate, unlinked
 record, leaving follow-up reviews without this context. It may also hold a
 series with no versions, left by a review which found nothing to review,
 such as a series for another project, which looks like an earlier review
-of the next version in the inbox. Repair it by merging the split records
-and removing the empty ones, which backs up the database (to
-``<db>.bak``) first::
+of the next version in the inbox. Repair it by merging the split records,
+including the versions of a series sent with b4 under different titles, and
+removing the empty ones, which backs up the database (to ``<db>.bak``)
+first::
 
     patman review --relink
 

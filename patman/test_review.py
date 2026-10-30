@@ -2550,6 +2550,50 @@ class TestReview(CseriesTester):
         svr = cser.db.ser_ver_get_by_id(v2[3])
         self.assertEqual((9, '[v2,0/1] foo bar'), (svr.cover_id, svr.name))
 
+    def test_register_series_b4(self):
+        """A new version sent by b4 is linked by its Message-IDs, even when
+        its title changes"""
+        cser = self.get_cser()
+        db = cser.db
+        self.assertEqual(
+            ['spi-probe-speed@iav.lv', 'spi-probe-speed@iav.lv', None, None],
+            [review.lookup.b4_key(msgid) for msgid in (
+                '<20261027-spi-probe-speed-v3-1-33e056720925@iav.lv>',
+                '20260930-spi-probe-speed-v1-0-ff9aebfebdf9@iav.lv',
+                '<20261028112007.3980089-1-sjg@chromium.org>', None)])
+
+        def data(version):
+            return {'patches': [{'id': version, 'name': 'x', 'msgid':
+                                 f'<20261027-spi-probe-speed-v{version}-1-'
+                                 'abc123@iav.lv>'}],
+                    'cover_letter': None}
+
+        review.core._register_series(cser, 'spi: Probe a device', 1, '500',
+                                     data(1))
+        v1 = db.series_find_by_link('500')
+        rev = db.review_add(v1[3], 1, 'Hi', 0, '2026-01-01')
+
+        # Without the Message-ID of the patch reviewed, v2 cannot be linked
+        review.core._register_series(cser, 'cmd: sf: Probe a flash', 2, '501',
+                                     data(2))
+        self.assertNotEqual(v1[0], db.series_find_by_link('501')[0])
+
+        # The headers of a review give it, as do the References of a reply
+        db.review_set_envelope(rev, {'in_reply_to': data(1)['patches'][0][
+            'msgid']})
+        review.core._register_series(cser, 'spi: sf: Probe a flash', 3,
+                                     '502', data(3))
+        self.assertEqual(v1[0], db.series_find_by_link('502')[0])
+        db.review_set_envelope(rev, None)
+        db.reply_add(rev, 'g1', 'm1', data(1)['patches'][0]['msgid'] +
+                     ' <mine@x>', 'Fred <f@b>', '', '', 'Re: x', 'date',
+                     'body', '2026-01-02')
+        self.assertEqual({v1[0]: {data(1)['patches'][0]['msgid'], '<mine@x>'}},
+                         db.review_get_msgids())
+        self.assertEqual(
+            (v1[0], 3), review.lookup.find_earlier(db, data(4),
+                                                   'spi: Something else')[::2])
+
     def test_register_series_lore(self):
         """A patch taken from lore is recorded with no patchwork ID"""
         cser = self.get_cser()
@@ -2810,6 +2854,36 @@ class TestReview(CseriesTester):
                                           reviews_only=True)
         self.assertEqual([v1[0]], [ser.idnum for ser in reviews.values()])
         self.assertIn(own, cser.db.series_get_dict_by_id())
+
+    def test_review_relink_b4(self):
+        """Test --relink joins the versions of a series which b4 sent"""
+        cser = self.get_cser()
+        db = cser.db
+        sids = []
+        for version, title in ((1, 'spi: Probe a device'),
+                               (2, 'cmd: sf: Probe a flash')):
+            sid = db.series_add(f'pw-{version}-review', title)
+            db.series_set_source(sid, 'review')
+            svid = db.ser_ver_add(sid, version, link=str(version))
+            rev = db.review_add(svid, 1, f'v{version} body', 1, '2026-01-01')
+            db.review_set_envelope(rev, {'in_reply_to':
+                f'<20261027-spi-probe-v{version}-1-abc@iav.lv>'})
+            sids.append(sid)
+        other = db.series_add('pw-3-review', 'Something else')
+        db.series_set_source(other, 'review')
+        db.review_add(db.ser_ver_add(other, 1, link='3'), 1, 'x', 1,
+                      '2026-01-01')
+        cser.commit()
+
+        with terminal.capture() as (out, _):
+            self.run_review('--relink')
+        self.assertIn('Relinked 1', out.getvalue())
+        self.db_open()
+        self.assertEqual(
+            [sids[0], sids[0], other],
+            [cser.db.series_find_by_link(link)[0] for link in '123'])
+        self.assertEqual([1], [ver for ver, _ in
+                               cser.db.review_get_earlier(sids[0], 2)])
 
     def test_review_lock_in_progress(self):
         """Test a review is refused when one is already running for it"""

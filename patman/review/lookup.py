@@ -275,6 +275,90 @@ def safe_link(link):
     return name
 
 
+# The Message-ID of a patch or cover letter which b4 sent, e.g.
+# '20261027-spi-probe-speed-v3-1-33e056720925@iav.lv', which has the name
+# of the series' change-id (here 'spi-probe-speed') in every version
+RE_B4_MSGID = re.compile(r'^\d{8}-(.+)-v\d+-\d+-[0-9a-f]+@(.+)$')
+
+
+def b4_key(msgid):
+    """Get what stays the same in the Message-IDs of each version of a
+    series which b4 sent
+
+    Args:
+        msgid (str): Message-ID, with or without angle brackets
+
+    Returns:
+        str or None: The name of the change-id and the domain, e.g.
+            'spi-probe-speed@iav.lv', or None if b4 did not make the
+            Message-ID
+    """
+    match = RE_B4_MSGID.match((msgid or '').strip().strip('<>'))
+    return f'{match.group(1)}@{match.group(2)}' if match else None
+
+
+def series_b4_keys(series_data):
+    """Get the b4 keys of the messages in a series
+
+    Args:
+        series_data (dict): Series, as from patchwork or lore
+
+    Returns:
+        set of str: Keys (see b4_key())
+    """
+    msgs = [series_data.get('cover_letter') or {}] + \
+        list(series_data.get('patches') or [])
+    return {key for key in (b4_key(msg.get('msgid')) for msg in msgs) if key}
+
+
+def b4_series(db):
+    """Find which review series each b4 key belongs to
+
+    A series sent with b4 can be recognised in a later version from its
+    Message-IDs, even when its title changes. Where two review series have
+    the same key, e.g. versions which were reviewed before this was known,
+    the one with the latest version is given.
+
+    Args:
+        db (Database): Database holding the reviews
+
+    Returns:
+        dict: key (str): b4 key (see b4_key())
+            value (int): Series ID
+    """
+    found = {}
+    for series_id, msgids in sorted(db.review_get_msgids().items()):
+        for key in {b4_key(msgid) for msgid in msgids} - {None}:
+            found.setdefault(key, []).append(series_id)
+    return {key: max(ids, key=lambda sid: db.series_get_review(sid)[2])
+            for key, ids in found.items()}
+
+
+def find_earlier(db, series_data, clean_name):
+    """Find the review series which a new version of a series belongs to
+
+    This is the one with the same title, else one whose patches share a b4
+    key with this version's.
+
+    Args:
+        db (Database): Database holding the reviews
+        series_data (dict): Series, as from patchwork or lore
+        clean_name (str): Cleaned title of the series
+
+    Returns:
+        tuple or None: (series_id, name, max_version), or None if none is
+            found
+    """
+    prev = db.series_find_review_by_name(clean_name)
+    if prev:
+        return prev
+    by_key = b4_series(db)
+    for key in sorted(series_b4_keys(series_data)):
+        if key in by_key:
+            return db.series_get_review(by_key[key])
+    return None
+
+
 def make_review_name(link, upstream=None):
     """Build a series name for a review branch
 

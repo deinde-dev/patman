@@ -1939,6 +1939,39 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual((None, None), (items[500]['reviewed'],
                                         items[500]['earlier']))
 
+    def test_inbox_b4(self):
+        """An earlier version sent by b4 is found, though its title differs"""
+        db = self.cser.db
+        rev_id, svids = self.add_series(
+            'rev', 'spi: Probe a device', {1: [('a', 'new', 6, 0)]},
+            source='review')
+        rev = db.review_add(svids[1], 1, 'Please fix', False,
+                            '2026-10-01 10:00:00')
+        db.review_set_envelope(rev, {
+            'in_reply_to': '<20260930-spi-probe-v1-1-abc@iav.lv>'})
+        db.commit()
+        self.setup_inbox_ups()
+
+        def series(idnum, name, msgid):
+            return {'id': idnum, 'name': name, 'version': 2, 'total': 1,
+                    'patches': [{'id': idnum * 10, 'name': name,
+                                 'msgid': msgid}]}
+
+        pages = {
+            'series/?project=uboot&order=-date&page=1&per_page=50': [
+                series(300, '[v2] cmd: sf: Probe a flash',
+                       '<20261027-spi-probe-v2-1-def@iav.lv>'),
+                series(400, '[v2] cmd: sf: Probe a flash',
+                       '<20261027-other-v2-1-def@iav.lv>')],
+        }
+        srv = self.make_server()
+        srv.pwork_for_testing.fake_request = pages.get
+        _, data = self.call(srv, 'GET', '/api/inbox')
+        items = {item['id']: item for item in data['series']}
+        self.assertEqual((rev_id, 1), (items[300]['earlier']['id'],
+                                       items[300]['earlier']['version']))
+        self.assertIsNone(items[400]['earlier'])
+
     def setup_inbox_ups(self):
         """Add an upstream with a patchwork project, for the inbox"""
         db = self.cser.db

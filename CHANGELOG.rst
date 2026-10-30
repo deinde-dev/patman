@@ -120,6 +120,10 @@ Changed
 
 Fixed
 ~~~~~
+- A new version of a series sent with b4 is linked to your earlier reviews,
+  in the inbox and when it is reviewed, even when its title changes, by the
+  name of its change-id in the Message-IDs. ``review --relink`` merges such
+  versions which were stored apart.
 - A revision which leaves a review with nothing to say drops it, with its
   Gmail draft when given ``-d``, rather than reporting that no reviews
   needed changing and leaving them all as they were.
