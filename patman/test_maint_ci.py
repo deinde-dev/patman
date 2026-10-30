@@ -173,6 +173,8 @@ class TestMaintCi(RepoTestCase):
         self.assertEqual(commit, self.ci_tip())
         self.assertTrue(out.endswith(
             f'Pushed {commit[:12]} to ci +main:ci\n'
+            'Waiting for gitlab: https://gitlab/run\n'
+            'Waiting for github: https://github/run\n'
             '  ok      github https://github/run\n'
             '  ok      gitlab https://gitlab/run\n'), out)
 
