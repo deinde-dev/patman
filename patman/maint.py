@@ -26,6 +26,7 @@ caught before the commits are pushed, however they were applied.
 
 from dataclasses import dataclass, field
 import re
+import subprocess
 from urllib.parse import urlparse
 
 from u_boot_pylib import command
@@ -246,6 +247,27 @@ def _check_words(name, words, allowed):
         if word not in allowed:
             raise ValueError(f"Unknown value '{word}' in the maint setting "
                              f"'{name}': use {', '.join(allowed)}")
+
+
+def fetch(remotes, git_dir=None):
+    """Fetch from remotes, so that what they have is known
+
+    Args:
+        remotes (list of str): Remotes, e.g. ['us', 'david']
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+
+    Return:
+        bool: True if each fetch worked; if not, the problem is shown
+    """
+    for remote in dict.fromkeys(remotes):
+        result = subprocess.run(['git', 'fetch', '--quiet', remote],
+                                cwd=git_dir, capture_output=True, text=True,
+                                check=False)
+        if result.returncode:
+            print(f'Cannot fetch {remote}: {result.stderr.strip()}')
+            return False
+    return True
 
 
 def current_branch(git_dir=None):

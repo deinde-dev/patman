@@ -490,8 +490,12 @@ def find_link(series, test_db=None, git_dir=None):
 
 # pylint: disable-next=R0913,R0914,R0917
 def apply_series(rules, llist, link, patches=None, force=False,
-                 dry_run=False, git_dir=None, redo=False):
+                 dry_run=False, git_dir=None, redo=False, fetch=True):
     """Apply a series from the list to the push branch, then check it
+
+    The upstream remote is fetched first, since someone else may have pushed
+    to it, so that the push branch is made from the upstream as it is, and
+    patches which are upstream already are known.
 
     Args:
         rules (Rules): Rules to use
@@ -507,10 +511,13 @@ def apply_series(rules, llist, link, patches=None, force=False,
             current one
         redo (bool): True to start the push branch again from upstream
             first, dropping what is on it, e.g. to apply a series again
+        fetch (bool): True to fetch the upstream remote first
 
     Return:
         int: 0 if it was applied and all is well, else 1
     """
+    if fetch and not maint.fetch([rules.upstream.split('/', 1)[0]], git_dir):
+        return 1
     data, tags, newer, mbox = common.run(read_series(llist, link))
     sel = parse_patches(patches, len(data['patches']))
     if check_series(rules, data, newer, sel, force, git_dir, redo):

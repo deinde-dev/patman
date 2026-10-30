@@ -162,10 +162,11 @@ class LoreTestCase(RepoTestCase):
         Return:
             tuple: (exit code, output)
         """
+        kwargs.setdefault('fetch', False)
         with terminal.capture() as (out, _):
             ret = maint_apply.apply_series(
-                self.rules(), llist or self.lore_list(), link,
-                git_dir=self.repo, **kwargs)
+                kwargs.pop('rules', None) or self.rules(),
+                llist or self.lore_list(), link, git_dir=self.repo, **kwargs)
         return ret, out.getvalue()
 
     def trailers(self, ref):
@@ -228,6 +229,30 @@ class TestMaintApply(LoreTestCase):
             (0, "'dtc: Tidy (v1)' is on main-push already: nothing to "
                 'apply\n'), self.apply(link))
         self.assertEqual(before, self.git('rev-parse', 'main-push'))
+
+    def test_fetch(self):
+        """The upstream is fetched first, as someone may have pushed to it"""
+        link = self.make_series()
+        bare = os.path.join(self.tmpdir, 'us.git')
+        self.git('init', '-q', '--bare', bare, cwd=self.tmpdir)
+        self.git('remote', 'set-url', 'us', bare)
+        self.commit('Pushed by David', FRED, [f'Signed-off-by: {FRED}'])
+        david = self.git('rev-parse', 'HEAD').strip()
+        self.git('push', '-q', 'us', 'HEAD:refs/heads/main')
+        self.git('reset', '-q', '--hard', 'HEAD~1')
+        self.git('update-ref', 'refs/remotes/us/main', 'HEAD')
+
+        rules = self.rules(upstream='us main')
+        ret, out = self.apply(link, rules=rules, fetch=True)
+        self.assertEqual(0, ret, out)
+        self.assertEqual(david, self.git('rev-parse', 'us/main').strip())
+        self.assertEqual(david, self.git('rev-parse', 'main-push~2').strip())
+
+        # Nothing is applied if the upstream cannot be fetched
+        self.git('remote', 'set-url', 'us', os.path.join(self.tmpdir, 'no'))
+        ret, out = self.apply(link, rules=rules, fetch=True, redo=True)
+        self.assertEqual(1, ret)
+        self.assertTrue(out.startswith('Cannot fetch us: '), out)
 
     def test_own(self):
         """Your own series does not get your sign-off again"""
