@@ -211,7 +211,9 @@ upstream it has thanked, so ``patman maint thanks`` drafts the thanks for
 what has gone upstream since, e.g. if Gmail could not be reached when
 publishing, or when someone else pushed the commits. Give it a range of
 commits, e.g. ``patman maint thanks us/main~3..us/main``, the first time,
-and ``-n`` to show the thanks without drafting them.
+and ``-n`` to show the thanks without drafting them. ``--redraft`` drafts
+the thanks again for series which have them already, e.g. after changing the
+settings, and deletes the drafts made before.
 
 To thank one series, give its Message-ID, link or name. On a branch whose
 series patman sent, ``patman maint thanks`` thanks that series by default.

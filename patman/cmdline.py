@@ -742,6 +742,10 @@ def add_maint_subparser(subparsers):
     thanks.add_argument(
         '-n', '--dry-run', action='store_true',
         help='Show the thanks, without drafting them')
+    thanks.add_argument(
+        '--redraft', action='store_true',
+        help='Draft the thanks again for series thanked already, deleting '
+             'the drafts made before')
     return maint
 
 

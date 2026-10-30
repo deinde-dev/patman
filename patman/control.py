@@ -570,7 +570,7 @@ def do_maint(args):
         rules = maint.get_rules()
         return maint_thanks.thank(
             rules, maint_list(rules), args.what, _closing(args),
-            getattr(args, 'gmail_account', None), args.dry_run)
+            getattr(args, 'gmail_account', None), args.dry_run, args.redraft)
     if args.subcmd == 'apply':
         rules = maint.get_rules()
         return maint_apply.apply_series(rules, maint_list(rules),

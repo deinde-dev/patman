@@ -85,13 +85,16 @@ def read_state(git_dir=None):
             last (str or None): Upstream commit up to which thanks have been
                 drafted
             thanked (list of str): Message-IDs of the series thanked
+            drafts (dict): Gmail draft IDs of the thanks for each series
+                thanked, by its Message-ID
     """
     try:
         with open(_state_path(git_dir), encoding='utf-8') as inf:
             state = json.load(inf)
     except (OSError, ValueError):
         state = {}
-    return {'last': state.get('last'), 'thanked': state.get('thanked', [])}
+    return {'last': state.get('last'), 'thanked': state.get('thanked', []),
+            'drafts': state.get('drafts', {})}
 
 
 def _write_state(state, git_dir):
@@ -290,7 +293,7 @@ def plan_thanks(rules, llist, app, closing):
 
 # pylint: disable-next=R0913,R0917
 def thank(rules, llist, what=None, closing=None, account=None, dry_run=False,
-          test_db=None, git_dir=None):
+          redraft=False, test_db=None, git_dir=None):
     """Draft the thanks for a series, or for a range of commits
 
     Args:
@@ -303,6 +306,8 @@ def thank(rules, llist, what=None, closing=None, account=None, dry_run=False,
         closing (str or None): Closing lines, e.g. 'Regards,\nSimon'
         account (str or None): Gmail account to use
         dry_run (bool): True to show the thanks, without drafting them
+        redraft (bool): True to draft the thanks again for series thanked
+            already, deleting the drafts made before
         test_db (str or None): Directory of the test database, or None to
             use the normal one
         git_dir (str or None): Directory of the git repo, or None for the
@@ -317,14 +322,14 @@ def thank(rules, llist, what=None, closing=None, account=None, dry_run=False,
                                      verb='thank')
     if link:
         return thank_series(rules, llist, link, closing, account, dry_run,
-                            git_dir)
+                            redraft, git_dir)
     return draft_thanks(rules, llist, what, closing, account, dry_run,
-                        git_dir=git_dir)
+                        redraft=redraft, git_dir=git_dir)
 
 
 # pylint: disable-next=R0913,R0917
 def thank_series(rules, llist, link, closing=None, account=None,
-                 dry_run=False, git_dir=None):
+                 dry_run=False, redraft=False, git_dir=None):
     """Draft the thanks for a series, for its patches which are upstream
 
     The series is thanked even if it is your own, since it is asked for.
@@ -336,6 +341,8 @@ def thank_series(rules, llist, link, closing=None, account=None,
         closing (str or None): Closing lines, e.g. 'Regards,\nSimon'
         account (str or None): Gmail account to use
         dry_run (bool): True to show the thanks, without drafting them
+        redraft (bool): True to draft the thanks again if they were drafted
+            before, deleting the drafts made then
         git_dir (str or None): Directory of the git repo, or None for the
             current one
 
@@ -358,20 +365,22 @@ def thank_series(rules, llist, link, closing=None, account=None,
         print(f"'{name}' is not in {rules.upstream} yet")
         return 1
     state = read_state(git_dir)
-    if app.root in state['thanked'] and not dry_run:
-        print(f"'{name}' is thanked already")
+    if app.root in state['thanked'] and not (dry_run or redraft):
+        print(f"Thanks for '{name}' were drafted already: use --redraft to "
+              'draft them again')
         return 0
-    if not _draft(rules, llist, [app], closing, account, dry_run):
-        return 1
-    if not dry_run:
-        state['thanked'].append(app.root)
-        _write_state(state, git_dir)
-    return 0
+    return 0 if _draft(rules, llist, [app], closing, account, dry_run,
+                       state, git_dir) else 1
 
 
 # pylint: disable-next=R0913,R0917
-def _draft(rules, llist, apps, closing, account, dry_run, quiet=False):
+def _draft(rules, llist, apps, closing, account, dry_run, state, git_dir,
+           quiet=False):
     """Draft the thanks for some series, or show them in a dry run
+
+    Once they are all drafted, the series are noted as thanked, with their
+    drafts, and any drafts made for them before are deleted, so that there
+    is only one set
 
     Args:
         rules (Rules): Rules to use
@@ -380,13 +389,21 @@ def _draft(rules, llist, apps, closing, account, dry_run, quiet=False):
         closing (str or None): Closing lines, e.g. 'Regards,\nSimon'
         account (str or None): Gmail account to use
         dry_run (bool): True to show the thanks, without drafting them
+        state (dict): State of the thanks, as from read_state(), which is
+            updated and written
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
         quiet (bool): True to say nothing if there are no series to thank
 
     Return:
         bool: True if each was drafted, or shown
     """
-    emails = [(env, text) for app in apps
-              for env, text in plan_thanks(rules, llist, app, closing)]
+    roots = []
+    emails = []
+    for app in apps:
+        for env, text in plan_thanks(rules, llist, app, closing):
+            roots.append(app.root)
+            emails.append((env, text))
     if dry_run:
         for env, text in emails:
             print(f"To: {env['to']}\nCc: {env['cc']}\n"
@@ -401,14 +418,42 @@ def _draft(rules, llist, apps, closing, account, dry_run, quiet=False):
             print(f'Drafted {len(drafted)} of {len(emails)} thanks')
             return False
         print(f"Drafted thanks for {', '.join(app.data['name'] for app in apps)}")
+        _replace_drafts(state, roots, drafted, account)
     elif not quiet:
         print('No series to thank')
+    state['thanked'] += [app.root for app in apps
+                         if app.root not in state['thanked']]
+    _write_state(state, git_dir)
     return True
+
+
+def _replace_drafts(state, roots, drafted, account):
+    """Note the drafts of the thanks, deleting any made before
+
+    Drafts which were sent or deleted already are left alone.
+
+    Args:
+        state (dict): State of the thanks, as from read_state(), whose drafts
+            are updated
+        roots (list of str): Message-ID of the series which each email
+            thanks, in order
+        drafted (dict): Gmail draft ID of each email, by its index in roots
+        account (str or None): Gmail account to use
+    """
+    old = [draft for root in set(roots)
+           for draft in state['drafts'].get(root, [])]
+    if old:
+        service = gmail.get_service(account)
+        for draft_id in old:
+            gmail.delete_draft(service, draft_id)
+    for root in set(roots):
+        state['drafts'][root] = [drafted[num] for num, rt in enumerate(roots)
+                                 if rt == root]
 
 
 # pylint: disable-next=R0913,R0914,R0917
 def draft_thanks(rules, llist, rng, closing=None, account=None,
-                 dry_run=False, quiet=False, git_dir=None):
+                 dry_run=False, quiet=False, git_dir=None, redraft=False):
     """Draft the thanks for the series which a range of commits came from
 
     Args:
@@ -422,6 +467,8 @@ def draft_thanks(rules, llist, rng, closing=None, account=None,
         quiet (bool): True to say nothing if there are no series to thank
         git_dir (str or None): Directory of the git repo, or None for the
             current one
+        redraft (bool): True to draft the thanks again for series thanked
+            already, deleting the drafts made before
 
     Return:
         int: 0 if the thanks were drafted, or there were none, else 1
@@ -438,13 +485,10 @@ def draft_thanks(rules, llist, rng, closing=None, account=None,
         rng = f"{state['last']}..{rules.upstream}"
     start, end = rng.split('..', 1)
     commits = maint.read_commits(start, end, git_dir)
-    apps = common.run(find_applied(rules, llist, commits, state['thanked']))
-    if not _draft(rules, llist, apps, closing, account, dry_run, quiet):
-        return 1
-    if dry_run:
-        return 0
-    state['thanked'] += [app.root for app in apps]
-    state['last'] = command.output('git', 'rev-parse', end,
-                                   cwd=git_dir).strip()
-    _write_state(state, git_dir)
-    return 0
+    apps = common.run(find_applied(rules, llist, commits,
+                                   [] if redraft else state['thanked']))
+    if not dry_run:
+        state['last'] = command.output('git', 'rev-parse', end,
+                                       cwd=git_dir).strip()
+    return 0 if _draft(rules, llist, apps, closing, account, dry_run, state,
+                       git_dir, quiet) else 1

@@ -21,6 +21,12 @@ CLOSING = 'Regards,\nSimon'
 
 class TestMaintThanks(LoreTestCase):
     """Test drafting the thanks for series which a maintainer applied"""
+    def setUp(self):
+        super().setUp()
+        # Number of drafts made so far, and the drafts deleted
+        self.drafts = 0
+        self.deleted = []
+
     def thank(self, rng='us/main..main-push', drafted=None, series=False,
               **kwargs):
         """Draft the thanks, with Gmail faked
@@ -40,14 +46,22 @@ class TestMaintThanks(LoreTestCase):
 
         def create(envelopes, bodies, account=None, sender=None):
             self.assertEqual((None, ME), (account, sender))
+            first = self.drafts
+            self.drafts += len(envelopes)
             made.extend((envelopes[num], bodies[num])
                         for num in sorted(envelopes))
-            return {num: f'draft{num}' for num in sorted(envelopes)
+            return {num: f'draft{first + num}' for num in sorted(envelopes)
                     if drafted is None or num < drafted}
+
+        def delete(_service, draft_id):
+            self.deleted.append(draft_id)
 
         with mock.patch.object(maint_thanks.gmail,
                                'create_drafts_from_envelopes',
                                side_effect=create), \
+                mock.patch.object(maint_thanks.gmail, 'get_service'), \
+                mock.patch.object(maint_thanks.gmail, 'delete_draft',
+                                  side_effect=delete), \
                 terminal.capture() as (out, _):
             rules = self.rules(**kwargs.pop('values', {}))
             if series:
@@ -112,7 +126,16 @@ class TestMaintThanks(LoreTestCase):
         self.assertEqual((0, 'No series to thank\n', []), (ret, out, made))
         self.assertEqual(
             {'last': self.git('rev-parse', 'main-push').strip(),
-             'thanked': [root]}, maint_thanks.read_state(self.repo))
+             'thanked': [root], 'drafts': {root: ['draft0']}},
+            maint_thanks.read_state(self.repo))
+
+        # Unless it is redrafted, which replaces the drafts
+        ret, out, made = self.thank(redraft=True)
+        self.assertEqual((0, 'Drafted thanks for dtc: Tidy\n', 1),
+                         (ret, out, len(made)))
+        self.assertEqual(['draft0'], self.deleted)
+        self.assertEqual({root: ['draft1']},
+                         maint_thanks.read_state(self.repo)['drafts'])
 
         # By default, the commits are those which went upstream since
         self.git('update-ref', 'refs/remotes/us/main', 'main-push')
@@ -156,9 +179,22 @@ class TestMaintThanks(LoreTestCase):
         self.assertEqual([root],
                          maint_thanks.read_state(self.repo)['thanked'])
 
+        self.assertEqual({root: ['draft0']},
+                         maint_thanks.read_state(self.repo)['drafts'])
+
         # It is thanked only once; a Message-ID may be given instead
-        self.assertEqual((0, "'dtc: Tidy (v1)' is thanked already\n", []),
+        self.assertEqual((0, "Thanks for 'dtc: Tidy (v1)' were drafted "
+                          'already: use --redraft to draft them again\n', []),
                          self.thank(root, series=True))
+
+        # Redrafting replaces the drafts
+        ret, out, made = self.thank(root, series=True, redraft=True)
+        self.assertEqual((0, 'Drafted thanks for dtc: Tidy\n', 1),
+                         (ret, out, len(made)))
+        self.assertEqual(['draft0'], self.deleted)
+        state = maint_thanks.read_state(self.repo)
+        self.assertEqual(([root], {root: ['draft1']}),
+                         (state['thanked'], state['drafts']))
 
     def test_each(self):
         """The thanks may reply to each patch"""
@@ -187,7 +223,7 @@ class TestMaintThanks(LoreTestCase):
         self.assertEqual((0, []), (ret, made))
         self.assertIn('To: fred@x.org\nCc: \n'
                       'Subject: Re: [PATCH 0/2] dtc: Tidy\n\nHi Fred,\n', out)
-        self.assertEqual({'last': None, 'thanked': []},
+        self.assertEqual({'last': None, 'thanked': [], 'drafts': {}},
                          maint_thanks.read_state(self.repo))
 
     def test_skipped(self):
@@ -207,7 +243,7 @@ class TestMaintThanks(LoreTestCase):
         ret, out, made = self.thank(drafted=0)
         self.assertEqual((1, 'Drafted 0 of 1 thanks\n', 1),
                          (ret, out, len(made)))
-        self.assertEqual({'last': None, 'thanked': []},
+        self.assertEqual({'last': None, 'thanked': [], 'drafts': {}},
                          maint_thanks.read_state(self.repo))
 
         with self.assertRaises(ValueError) as exc:
