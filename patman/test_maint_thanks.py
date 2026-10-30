@@ -13,7 +13,7 @@ from patman import cseries
 from patman import maint
 from patman import maint_thanks
 from patman.review import common
-from patman.test_maint import ME
+from patman.test_maint import FRED, ME
 from patman.test_maint_apply import LoreTestCase, message
 
 CLOSING = 'Regards,\nSimon'
@@ -99,7 +99,10 @@ class TestMaintThanks(LoreTestCase):
                           'fred@x.org'),
                          (env['subject'], env['in_reply_to'], env['to']))
         self.assertEqual(
-            'Hi Fred,\n\nApplied to main, thanks.\n\n'
+            'Hi Fred,\n\n'
+            'On 2026-10-27T08:38:38, Fred Bloggs <fred@x.org> wrote:\n'
+            '> dtc: Tidy\n>\n> Some tidy-ups\n\n'
+            'Applied to main, thanks.\n\n'
             f'[1/2] dtc: Add a file\n      {commits[0]}\n'
             f'[2/2] dtc: Grow the file\n      {commits[1]}\n\n'
             'Regards,\nSimon\n', text)
@@ -146,6 +149,8 @@ class TestMaintThanks(LoreTestCase):
         self.assertEqual(1, len(made))
         # There is no one to greet or thank
         self.assertTrue(made[0][1].startswith(
+            'On 2026-10-27T08:38:38, Simon Glass <sjg@chromium.org> wrote:\n'
+            '> dtc: Tidy\n>\n> Some tidy-ups\n\n'
             f'Applied to main.\n\n[1/2] dtc: Add a file\n      {commits[0]}\n'
             f'[2/2] dtc: Grow the file\n      {commits[1]}\n'), made[0][1])
         self.assertEqual([root],
@@ -167,6 +172,13 @@ class TestMaintThanks(LoreTestCase):
             [(env['subject'], env['in_reply_to']) for env, _ in made])
         self.assertIn('[2/2] dtc: Grow the file\n', made[1][1])
         self.assertNotIn('[1/2]', made[1][1])
+
+        # Each reply quotes its patch, with the diffstat
+        self.assertIn(
+            'wrote:\n> dtc: Grow the file\n>\n> Do it\n>\n'
+            f'> Signed-off-by: {FRED}\n>\n'
+            '>  a.txt | 1 +\n>  1 file changed, 1 insertion(+)\n\n'
+            'Applied to main, thanks.\n', made[1][1])
 
     def test_dry_run(self):
         """A dry run shows the thanks, and notes nothing"""

@@ -33,6 +33,15 @@ STATE_FNAME = os.path.join('patman', 'thanks.json')
 # The prefix of a patch's name, e.g. '[v3,2/5] '
 RE_PREFIX = re.compile(r'^\[[^]]*\]\s*')
 
+# A line of a diffstat, e.g. ' dtc.c | 3 ++-' or ' 1 file changed, ...'
+RE_DIFFSTAT = re.compile(r'^ (\S.* \| +(\d+|Bin)|\d+ files? changed)')
+
+# How many lines of the message to quote, as a review does
+QUOTE_LINES = 20
+
+# The longest diffstat to quote, as a review does
+DIFFSTAT_LINES = 30
+
 
 @dataclass
 class Applied:
@@ -161,7 +170,36 @@ def first_name(person):
     return name.split()[0] if name else person.get('email', '').split('@')[0]
 
 
-def thanks_text(app, idxs, branch, closing, own=False):
+def quote(msg):
+    """Quote a patch or cover letter, as a review does
+
+    The subject and message are quoted, as far as the first 20 lines, then
+    a patch's diffstat, unless it is long
+
+    Args:
+        msg (dict): Patch or cover letter, as from LoreList.get_patch() or
+            get_cover()
+
+    Return:
+        list of str: Lines of the quote, starting with who wrote it
+    """
+    who = msg['submitter']
+    lines = [f"On {msg['date']}, {who['name']} <{who['email']}> wrote:"
+             if msg.get('date') else f"{who['name']} <{who['email']}> wrote:"]
+    text, _, rest = msg.get('content', '').partition('\n---\n')
+    body = [RE_PREFIX.sub('', msg.get('name', '')), '']
+    body += text.strip('\n').splitlines()
+    lines += [f'> {line}'.rstrip() for line in body[:QUOTE_LINES]]
+    if len(body) > QUOTE_LINES:
+        lines.append('> [...]')
+    stat = [line for line in rest.splitlines() if RE_DIFFSTAT.match(line)]
+    if stat and len(stat) <= DIFFSTAT_LINES:
+        lines += ['>'] + [f'> {line}' for line in stat]
+    return lines
+
+
+# pylint: disable-next=R0913,R0917
+def thanks_text(app, idxs, branch, closing, own=False, msg=None):
     """Write the thanks for some patches of a series
 
     Args:
@@ -171,15 +209,17 @@ def thanks_text(app, idxs, branch, closing, own=False):
         closing (str or None): Closing lines, e.g. 'Regards,\nSimon'
         own (bool): True if the series is your own, so that there is no one
             to greet or thank
+        msg (dict or None): Patch or cover letter replied to, to quote, as
+            from LoreList.get_patch() or get_cover()
 
     Return:
         str: Text of the email
     """
-    if own:
-        lines = [f'Applied to {branch}.', '']
-    else:
-        lines = [f"Hi {first_name(app.data['submitter'])},", '',
-                 f'Applied to {branch}, thanks.', '']
+    lines = [] if own else [f"Hi {first_name(app.data['submitter'])},", '']
+    if msg:
+        lines += quote(msg) + ['']
+    lines += [f'Applied to {branch}.' if own else
+              f'Applied to {branch}, thanks.', '']
     total = len(app.data['patches'])
     for idx in idxs:
         title = RE_PREFIX.sub('', app.data['patches'][idx - 1]['name'])
@@ -190,8 +230,8 @@ def thanks_text(app, idxs, branch, closing, own=False):
     return '\n'.join(lines) + '\n'
 
 
-async def _headers(llist, app, idxs):
-    """Read the headers of the messages which the thanks reply to
+async def _messages(llist, app, idxs):
+    """Read the messages which the thanks reply to
 
     Args:
         llist (LoreList): List to read them from
@@ -200,9 +240,10 @@ async def _headers(llist, app, idxs):
             for the cover letter
 
     Return:
-        dict: Headers of each message, by its index
+        dict: Each message, as from LoreList.get_patch() or get_cover(), by
+            its index
     """
-    hdrs = {}
+    msgs = {}
     async with aiohttp.ClientSession() as client:
         for idx in idxs:
             if idx:
@@ -211,8 +252,8 @@ async def _headers(llist, app, idxs):
             else:
                 data = await llist.get_cover(client,
                                              app.data['cover_letter']['id'])
-            hdrs[idx] = data.get('headers', {})
-    return hdrs
+            msgs[idx] = data
+    return msgs
 
 
 def plan_thanks(rules, llist, app, closing):
@@ -237,11 +278,13 @@ def plan_thanks(rules, llist, app, closing):
     else:
         to = 0 if app.data.get('cover_letter') else 1
         replies = [(to, applied)]
-    hdrs = common.run(_headers(llist, app, [to for to, _ in replies]))
-    envs = gmail.review_envelopes(app.data, hdrs, [to for to, _ in replies])
+    msgs = common.run(_messages(llist, app, [to for to, _ in replies]))
+    envs = gmail.review_envelopes(
+        app.data, {idx: msg.get('headers', {}) for idx, msg in msgs.items()},
+        [to for to, _ in replies])
     own = (maint.email_of(app.data['submitter'].get('email', '')) ==
            maint.email_of(rules.signoff))
-    return [(envs[to], thanks_text(app, idxs, branch, closing, own))
+    return [(envs[to], thanks_text(app, idxs, branch, closing, own, msgs[to]))
             for to, idxs in replies]
 
 

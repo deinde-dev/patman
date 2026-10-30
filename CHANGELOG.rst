@@ -11,7 +11,8 @@ Unreleased
 Added
 ~~~~~
 - ``patman maint publish`` drafts a reply in Gmail to thank the submitter of
-  each series it pushes, listing the commits, for you to add to and send.
+  each series it pushes, quoting the message it replies to and listing the
+  commits, for you to add to and send.
   ``patman maint thanks`` drafts them for what has gone upstream since, or
   for one series, by default the current branch's, even if it is your own.
   The new ``thanks_to`` setting says whether to reply to the cover letter or

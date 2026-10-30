@@ -185,9 +185,14 @@ Once a series is upstream, patman drafts a reply in Gmail to say so (see
 does this for each series it pushes, finding them from the ``Message-ID:``
 trailers of the commits. Each series is read from lore, and the reply goes
 to its cover letter, or to its first patch if it has none, and to everyone
-the series went to::
+the series went to. It quotes the message it replies to, as a review does::
 
     Hi Fred,
+
+    On 2026-10-27T08:38:38, Fred Bloggs <fred@x.org> wrote:
+    > libfdt: Tidy up path lookup
+    >
+    > This drops some duplication in fdt_path_offset().
 
     Applied to main, thanks.
 
