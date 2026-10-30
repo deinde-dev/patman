@@ -417,11 +417,43 @@ def read_commits(upstream, branch, git_dir=None):
     Return:
         list of Commit: Commits on the branch which are not upstream
     """
+    return _log([f'{upstream}..{branch}'], git_dir)
+
+
+def find_commits(branch, texts, git_dir=None):
+    """Find the commits on a branch whose message has any of some text
+
+    Args:
+        branch (str): Branch to look on, e.g. 'us/main'
+        texts (list of str): Text to look for, e.g. Message-IDs
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+
+    Return:
+        list of Commit: Commits found, oldest first
+    """
+    if not texts:
+        return []
+    return _log(['--fixed-strings', *[f'--grep={text}' for text in texts],
+                 branch], git_dir)
+
+
+def _log(args, git_dir):
+    """Read commits from 'git log'
+
+    Args:
+        args (list of str): Arguments which pick the commits
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+
+    Return:
+        list of Commit: Commits, oldest first
+    """
     # git writes the separators, which cannot be given in an argument
     fmt = '%x00'.join(['%H', '%P', '%an', '%ae', '%s',
                        '%(trailers:only,unfold)']) + '%x01'
-    out = command.output('git', 'log', '--reverse', f'--format={fmt}',
-                         f'{upstream}..{branch}', cwd=git_dir)
+    out = command.output('git', 'log', '--reverse', f'--format={fmt}', *args,
+                         cwd=git_dir)
     commits = []
     for item in out.split(COMMIT_SEP):
         item = item.strip('\n')

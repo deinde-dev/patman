@@ -24,6 +24,7 @@ from u_boot_pylib import command
 from patman import gmail
 from patman import lore
 from patman import maint
+from patman import maint_apply
 from patman.review import common
 
 # Where the state of the thanks is kept, in the git directory
@@ -31,6 +32,15 @@ STATE_FNAME = os.path.join('patman', 'thanks.json')
 
 # The prefix of a patch's name, e.g. '[v3,2/5] '
 RE_PREFIX = re.compile(r'^\[[^]]*\]\s*')
+
+# A line of a diffstat, e.g. ' dtc.c | 3 ++-' or ' 1 file changed, ...'
+RE_DIFFSTAT = re.compile(r'^ (\S.* \| +(\d+|Bin)|\d+ files? changed)')
+
+# How many lines of the message to quote, as a review does
+QUOTE_LINES = 20
+
+# The longest diffstat to quote, as a review does
+DIFFSTAT_LINES = 30
 
 
 @dataclass
@@ -75,13 +85,16 @@ def read_state(git_dir=None):
             last (str or None): Upstream commit up to which thanks have been
                 drafted
             thanked (list of str): Message-IDs of the series thanked
+            drafts (dict): Gmail draft IDs of the thanks for each series
+                thanked, by its Message-ID
     """
     try:
         with open(_state_path(git_dir), encoding='utf-8') as inf:
             state = json.load(inf)
     except (OSError, ValueError):
         state = {}
-    return {'last': state.get('last'), 'thanked': state.get('thanked', [])}
+    return {'last': state.get('last'), 'thanked': state.get('thanked', []),
+            'drafts': state.get('drafts', {})}
 
 
 def _write_state(state, git_dir):
@@ -160,7 +173,36 @@ def first_name(person):
     return name.split()[0] if name else person.get('email', '').split('@')[0]
 
 
-def thanks_text(app, idxs, branch, closing):
+def quote(msg):
+    """Quote a patch or cover letter, as a review does
+
+    The subject and message are quoted, as far as the first 20 lines, then
+    a patch's diffstat, unless it is long
+
+    Args:
+        msg (dict): Patch or cover letter, as from LoreList.get_patch() or
+            get_cover()
+
+    Return:
+        list of str: Lines of the quote, starting with who wrote it
+    """
+    who = msg['submitter']
+    lines = [f"On {msg['date']}, {who['name']} <{who['email']}> wrote:"
+             if msg.get('date') else f"{who['name']} <{who['email']}> wrote:"]
+    text, _, rest = msg.get('content', '').partition('\n---\n')
+    body = [RE_PREFIX.sub('', msg.get('name', '')), '']
+    body += text.strip('\n').splitlines()
+    lines += [f'> {line}'.rstrip() for line in body[:QUOTE_LINES]]
+    if len(body) > QUOTE_LINES:
+        lines.append('> [...]')
+    stat = [line for line in rest.splitlines() if RE_DIFFSTAT.match(line)]
+    if stat and len(stat) <= DIFFSTAT_LINES:
+        lines += ['>'] + [f'> {line}' for line in stat]
+    return lines
+
+
+# pylint: disable-next=R0913,R0917
+def thanks_text(app, idxs, branch, closing, own=False, msg=None):
     """Write the thanks for some patches of a series
 
     Args:
@@ -168,12 +210,19 @@ def thanks_text(app, idxs, branch, closing):
         idxs (list of int): Patches to list, by their index in the series
         branch (str): Branch they were applied to, e.g. 'main'
         closing (str or None): Closing lines, e.g. 'Regards,\nSimon'
+        own (bool): True if the series is your own, so that there is no one
+            to greet or thank
+        msg (dict or None): Patch or cover letter replied to, to quote, as
+            from LoreList.get_patch() or get_cover()
 
     Return:
         str: Text of the email
     """
-    lines = [f"Hi {first_name(app.data['submitter'])},", '',
-             f'Applied to {branch}, thanks.', '']
+    lines = [] if own else [f"Hi {first_name(app.data['submitter'])},", '']
+    if msg:
+        lines += quote(msg) + ['']
+    lines += [f'Applied to {branch}.' if own else
+              f'Applied to {branch}, thanks.', '']
     total = len(app.data['patches'])
     for idx in idxs:
         title = RE_PREFIX.sub('', app.data['patches'][idx - 1]['name'])
@@ -184,8 +233,8 @@ def thanks_text(app, idxs, branch, closing):
     return '\n'.join(lines) + '\n'
 
 
-async def _headers(llist, app, idxs):
-    """Read the headers of the messages which the thanks reply to
+async def _messages(llist, app, idxs):
+    """Read the messages which the thanks are about, with their replies
 
     Args:
         llist (LoreList): List to read them from
@@ -194,19 +243,54 @@ async def _headers(llist, app, idxs):
             for the cover letter
 
     Return:
-        dict: Headers of each message, by its index
+        tuple:
+            dict: Each message, as from LoreList.get_patch() or
+                get_cover(), by its index
+            dict: Latest reply to each message, directly or not, as from
+                LoreList.get_patch_comments(), or None if it has none, by
+                its index
     """
-    hdrs = {}
+    msgs = {}
+    latest = {}
     async with aiohttp.ClientSession() as client:
         for idx in idxs:
             if idx:
-                data = await llist.get_patch(
-                    client, app.data['patches'][idx - 1]['id'])
+                item_id = app.data['patches'][idx - 1]['id']
+                msgs[idx] = await llist.get_patch(client, item_id)
+                replies = await llist.get_patch_comments(client, item_id)
             else:
-                data = await llist.get_cover(client,
-                                             app.data['cover_letter']['id'])
-            hdrs[idx] = data.get('headers', {})
-    return hdrs
+                item_id = app.data['cover_letter']['id']
+                msgs[idx] = await llist.get_cover(client, item_id)
+                replies = await llist.get_cover_comments(client, item_id)
+            latest[idx] = max(replies, key=lambda rep: rep.get('date') or '',
+                              default=None)
+    return msgs, latest
+
+
+def follow_reply(env, reply):
+    """Make the thanks reply to the latest reply to the message, if any
+
+    Then the thanks come at the end of the discussion. They still go to the
+    submitter, with everyone in that reply copied in.
+
+    Args:
+        env (dict): Headers to reply to the message, see
+            gmail.review_envelopes()
+        reply (dict or None): Latest reply, as from
+            LoreList.get_patch_comments(), or None if there is none
+
+    Return:
+        dict: Headers for the thanks
+    """
+    if not reply:
+        return env
+    hdrs = reply.get('headers', {})
+    refs = hdrs.get('References') or env['references'] or ''
+    return dict(env, in_reply_to=reply['msgid'],
+                references=f"{refs} {reply['msgid']}".strip(),
+                cc=gmail.format_addrs([env['cc'], hdrs.get('From', ''),
+                                       hdrs.get('To', ''),
+                                       hdrs.get('Cc', '')]))
 
 
 def plan_thanks(rules, llist, app, closing):
@@ -231,15 +315,182 @@ def plan_thanks(rules, llist, app, closing):
     else:
         to = 0 if app.data.get('cover_letter') else 1
         replies = [(to, applied)]
-    hdrs = common.run(_headers(llist, app, [to for to, _ in replies]))
-    envs = gmail.review_envelopes(app.data, hdrs, [to for to, _ in replies])
-    return [(envs[to], thanks_text(app, idxs, branch, closing))
+    msgs, latest = common.run(_messages(llist, app,
+                                        [to for to, _ in replies]))
+    envs = gmail.review_envelopes(
+        app.data, {idx: msg.get('headers', {}) for idx, msg in msgs.items()},
+        [to for to, _ in replies])
+    envs = {idx: follow_reply(env, latest[idx]) for idx, env in envs.items()}
+    own = (maint.email_of(app.data['submitter'].get('email', '')) ==
+           maint.email_of(rules.signoff))
+    return [(envs[to], thanks_text(app, idxs, branch, closing, own, msgs[to]))
             for to, idxs in replies]
+
+
+# pylint: disable-next=R0913,R0917
+def thank(rules, llist, what=None, closing=None, account=None, dry_run=False,
+          redraft=False, test_db=None, git_dir=None):
+    """Draft the thanks for a series, or for a range of commits
+
+    Args:
+        rules (Rules): Rules to use
+        llist (LoreList): List to read the series from
+        what (str or None): Range of commits, e.g. 'abc123..us/main'; or a
+            series, by its Message-ID, link or name; or None for the current
+            branch's series, if patman sent it, else the commits which went
+            upstream since the thanks were last drafted
+        closing (str or None): Closing lines, e.g. 'Regards,\nSimon'
+        account (str or None): Gmail account to use
+        dry_run (bool): True to show the thanks, without drafting them
+        redraft (bool): True to draft the thanks again for series thanked
+            already, deleting the drafts made before
+        test_db (str or None): Directory of the test database, or None to
+            use the normal one
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+
+    Return:
+        int: 0 if the thanks were drafted, or there were none, else 1
+    """
+    link = None
+    if not what or '..' not in what:
+        link = maint_apply.find_link(what, test_db, git_dir, need=bool(what),
+                                     verb='thank')
+    if link:
+        return thank_series(rules, llist, link, closing, account, dry_run,
+                            redraft, git_dir)
+    return draft_thanks(rules, llist, what, closing, account, dry_run,
+                        redraft=redraft, git_dir=git_dir)
+
+
+# pylint: disable-next=R0913,R0917
+def thank_series(rules, llist, link, closing=None, account=None,
+                 dry_run=False, redraft=False, git_dir=None):
+    """Draft the thanks for a series, for its patches which are upstream
+
+    The series is thanked even if it is your own, since it is asked for.
+
+    Args:
+        rules (Rules): Rules to use
+        llist (LoreList): List to read the series from
+        link (str): Message-ID of the cover letter or first patch, or a link
+        closing (str or None): Closing lines, e.g. 'Regards,\nSimon'
+        account (str or None): Gmail account to use
+        dry_run (bool): True to show the thanks, without drafting them
+        redraft (bool): True to draft the thanks again if they were drafted
+            before, deleting the drafts made then
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+
+    Return:
+        int: 0 if the thanks were drafted, else 1
+    """
+    async def read():
+        async with aiohttp.ClientSession() as client:
+            return await llist.get_series(client, link)
+
+    data = common.run(read())
+    app = Applied(data['id'], data)
+    name = maint_apply.series_name(data)
+    idxs = {lore.bare_msgid(pat['msgid']): idx
+            for idx, pat in enumerate(data['patches'], 1)}
+    for cmt in maint.find_commits(rules.upstream, list(idxs), git_dir):
+        if _msgid(cmt) in idxs:
+            app.commits[idxs[_msgid(cmt)]] = cmt.hash
+    if not app.commits:
+        print(f"'{name}' is not in {rules.upstream} yet")
+        return 1
+    state = read_state(git_dir)
+    if app.root in state['thanked'] and not (dry_run or redraft):
+        print(f"Thanks for '{name}' were drafted already: use --redraft to "
+              'draft them again')
+        return 0
+    return 0 if _draft(rules, llist, [app], closing, account, dry_run,
+                       state, git_dir) else 1
+
+
+# pylint: disable-next=R0913,R0917
+def _draft(rules, llist, apps, closing, account, dry_run, state, git_dir,
+           quiet=False):
+    """Draft the thanks for some series, or show them in a dry run
+
+    Once they are all drafted, the series are noted as thanked, with their
+    drafts, and any drafts made for them before are deleted, so that there
+    is only one set
+
+    Args:
+        rules (Rules): Rules to use
+        llist (LoreList): List to read the series from
+        apps (list of Applied): Series to thank
+        closing (str or None): Closing lines, e.g. 'Regards,\nSimon'
+        account (str or None): Gmail account to use
+        dry_run (bool): True to show the thanks, without drafting them
+        state (dict): State of the thanks, as from read_state(), which is
+            updated and written
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+        quiet (bool): True to say nothing if there are no series to thank
+
+    Return:
+        bool: True if each was drafted, or shown
+    """
+    roots = []
+    emails = []
+    for app in apps:
+        for env, text in plan_thanks(rules, llist, app, closing):
+            roots.append(app.root)
+            emails.append((env, text))
+    if dry_run:
+        for env, text in emails:
+            print(f"To: {env['to']}\nCc: {env['cc']}\n"
+                  f"Subject: {env['subject']}\n"
+                  f"In-Reply-To: {env['in_reply_to']}\n\n{text}")
+        return True
+    if emails:
+        drafted = gmail.create_drafts_from_envelopes(
+            dict(enumerate(env for env, _ in emails)),
+            dict(enumerate(text for _, text in emails)),
+            account=account, sender=rules.signoff)
+        if len(drafted) < len(emails):
+            print(f'Drafted {len(drafted)} of {len(emails)} thanks')
+            return False
+        print(f"Drafted thanks for {', '.join(app.data['name'] for app in apps)}")
+        _replace_drafts(state, roots, drafted, account)
+    elif not quiet:
+        print('No series to thank')
+    state['thanked'] += [app.root for app in apps
+                         if app.root not in state['thanked']]
+    _write_state(state, git_dir)
+    return True
+
+
+def _replace_drafts(state, roots, drafted, account):
+    """Note the drafts of the thanks, deleting any made before
+
+    Drafts which were sent or deleted already are left alone.
+
+    Args:
+        state (dict): State of the thanks, as from read_state(), whose drafts
+            are updated
+        roots (list of str): Message-ID of the series which each email
+            thanks, in order
+        drafted (dict): Gmail draft ID of each email, by its index in roots
+        account (str or None): Gmail account to use
+    """
+    old = [draft for root in set(roots)
+           for draft in state['drafts'].get(root, [])]
+    if old:
+        service = gmail.get_service(account)
+        for draft_id in old:
+            gmail.delete_draft(service, draft_id)
+    for root in set(roots):
+        state['drafts'][root] = [drafted[num] for num, rt in enumerate(roots)
+                                 if rt == root]
 
 
 # pylint: disable-next=R0913,R0914,R0917
 def draft_thanks(rules, llist, rng, closing=None, account=None,
-                 dry_run=False, quiet=False, git_dir=None):
+                 dry_run=False, quiet=False, git_dir=None, redraft=False):
     """Draft the thanks for the series which a range of commits came from
 
     Args:
@@ -253,6 +504,8 @@ def draft_thanks(rules, llist, rng, closing=None, account=None,
         quiet (bool): True to say nothing if there are no series to thank
         git_dir (str or None): Directory of the git repo, or None for the
             current one
+        redraft (bool): True to draft the thanks again for series thanked
+            already, deleting the drafts made before
 
     Return:
         int: 0 if the thanks were drafted, or there were none, else 1
@@ -264,32 +517,15 @@ def draft_thanks(rules, llist, rng, closing=None, account=None,
     if not rng:
         if not state['last']:
             raise ValueError("No thanks have been drafted here yet: give the "
-                             f"commits to thank, e.g. '{rules.upstream}~5.."
+                             f"series or commits to thank, e.g. '{rules.upstream}~5.."
                              f"{rules.upstream}'")
         rng = f"{state['last']}..{rules.upstream}"
     start, end = rng.split('..', 1)
     commits = maint.read_commits(start, end, git_dir)
-    apps = common.run(find_applied(rules, llist, commits, state['thanked']))
-    emails = [(env, text) for app in apps
-              for env, text in plan_thanks(rules, llist, app, closing)]
-    if dry_run:
-        for env, text in emails:
-            print(f"To: {env['to']}\nCc: {env['cc']}\n"
-                  f"Subject: {env['subject']}\n\n{text}")
-        return 0
-    if emails:
-        drafted = gmail.create_drafts_from_envelopes(
-            dict(enumerate(env for env, _ in emails)),
-            dict(enumerate(text for _, text in emails)),
-            account=account, sender=rules.signoff)
-        if len(drafted) < len(emails):
-            print(f'Drafted {len(drafted)} of {len(emails)} thanks')
-            return 1
-        print(f"Drafted thanks for {', '.join(app.data['name'] for app in apps)}")
-    elif not quiet:
-        print('No series to thank')
-    state['thanked'] += [app.root for app in apps]
-    state['last'] = command.output('git', 'rev-parse', end,
-                                   cwd=git_dir).strip()
-    _write_state(state, git_dir)
-    return 0
+    apps = common.run(find_applied(rules, llist, commits,
+                                   [] if redraft else state['thanked']))
+    if not dry_run:
+        state['last'] = command.output('git', 'rev-parse', end,
+                                       cwd=git_dir).strip()
+    return 0 if _draft(rules, llist, apps, closing, account, dry_run, state,
+                       git_dir, quiet) else 1

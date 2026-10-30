@@ -11,15 +11,21 @@ Unreleased
 Added
 ~~~~~
 - ``patman maint publish`` drafts a reply in Gmail to thank the submitter of
-  each series it pushes, listing the commits, for you to add to and send.
-  ``patman maint thanks`` drafts them for what has gone upstream since, and
-  the new ``thanks_to`` setting says whether to reply to the cover letter or
+  each series it pushes, quoting the patch or cover letter and listing the
+  commits, for you to add to and send. It replies to the latest message
+  about that patch or cover letter, so that it comes at the end of the
+  discussion.
+  ``patman maint thanks`` drafts them for what has gone upstream since, or
+  for one series, by default the current branch's, even if it is your own.
+  ``--redraft`` drafts them again, deleting the drafts made before.
+  The new ``thanks_to`` setting says whether to reply to the cover letter or
   to each patch.
 - ``patman maint publish`` pushes the commits which are about to go out to
   the remotes which the new ``publish`` setting gives, once they pass the
   check and CI has passed on the last of them, after asking. It fetches the
   remotes first and leaves out those which have the commit already, so it
-  carries on where it stopped if a push fails.
+  carries on where it stopped if a push fails. It thanks the submitters once
+  the upstream has the commits, even if a later push fails.
 - ``patman maint test`` runs the project's tests, from the new ``test``
   setting, on the commits which are about to be pushed, in a temporary
   worktree. ``patman maint ci`` checks those commits, pushes them to the

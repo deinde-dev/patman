@@ -568,9 +568,9 @@ def do_maint(args):
             after=lambda old, new: _thank_published(args, rules, old, new))
     if args.subcmd == 'thanks':
         rules = maint.get_rules()
-        return maint_thanks.draft_thanks(
-            rules, maint_list(rules), args.range, _closing(args),
-            getattr(args, 'gmail_account', None), args.dry_run)
+        return maint_thanks.thank(
+            rules, maint_list(rules), args.what, _closing(args),
+            getattr(args, 'gmail_account', None), args.dry_run, args.redraft)
     if args.subcmd == 'apply':
         rules = maint.get_rules()
         return maint_apply.apply_series(rules, maint_list(rules),

@@ -335,19 +335,27 @@ class TestMaintCi(RepoTestCase):
         commit = self.add_file('a.txt', 'one\n')
         self.git('remote', 'set-url', '--push', 'david',
                  os.path.join(self.tmpdir, 'missing.git'))
-        ret, out = self.publish(maint_ci.SUCCESS)
+        after = mock.Mock()
+        ret, out = self.publish(maint_ci.SUCCESS, after=after)
         self.assertEqual(1, ret)
-        self.assertIn('Cannot push to david: ', out)
+        self.assertIn(f'Published {commit[:12]} to us main:main main:master\n'
+                      'Cannot push to david: ', out)
         self.assertEqual((commit, base, base), (self.tip(bare['us']),
                                                 self.tip(bare['david']),
                                                 self.tip(bare['gl'])))
 
+        # The upstream has the commit, so the submitters are thanked now,
+        # since publishing again does not move the upstream
+        after.assert_called_once_with(base, commit)
+
         self.git('remote', 'set-url', '--push', 'david', bare['david'])
-        ret, out = self.publish(maint_ci.SUCCESS)
+        after = mock.Mock()
+        ret, out = self.publish(maint_ci.SUCCESS, after=after)
         self.assertEqual(0, ret, out)
         self.assertTrue(out.endswith(
             f'Published {commit[:12]} to david main:main, gl main:main\n'),
             out)
+        after.assert_not_called()
         self.assertEqual((commit, commit), (self.tip(bare['david']),
                                             self.tip(bare['gl'])))
 

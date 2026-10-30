@@ -169,12 +169,13 @@ pushing::
     Publish e5353eb4e214 to us main-push:main main-push:master, david main-push:main, gl main-push:main? [y/N] y
     Published e5353eb4e214 to us main-push:main main-push:master, david main-push:main, gl main-push:main
 
-It stops at the first push which fails. A remote which has the commit
-already is left out, so once the problem is fixed, publishing again carries
-on where it stopped. ``-n`` says where the branch would be pushed, and ``-y``
-pushes without asking.
+It stops at the first push which fails, after saying where it has pushed so
+far. A remote which has the commit already is left out, so once the problem
+is fixed, publishing again carries on where it stopped. ``-n`` says where the
+branch would be pushed, and ``-y`` pushes without asking.
 
-Once it is published, the submitters are thanked, as below.
+Once the upstream has the commits, the submitters are thanked, as below,
+even if a push to another remote then fails.
 
 Thanking the submitters
 -----------------------
@@ -182,11 +183,19 @@ Thanking the submitters
 Once a series is upstream, patman drafts a reply in Gmail to say so (see
 :ref:`review_gmail`), for you to add any comments to and send. ``maint publish``
 does this for each series it pushes, finding them from the ``Message-ID:``
-trailers of the commits. Each series is read from lore, and the reply goes
-to its cover letter, or to its first patch if it has none, and to everyone
-the series went to::
+trailers of the commits. Each series is read from lore, and the reply is
+about its cover letter, or its first patch if it has none, and goes to
+everyone the series went to. It comes at the end of any discussion, as a
+reply to the latest message in reply to the cover letter or patch, with
+everyone on that message copied in. It quotes the cover letter or patch, as
+a review does::
 
     Hi Fred,
+
+    On 2026-10-27T08:38:38, Fred Bloggs <fred@x.org> wrote:
+    > libfdt: Tidy up path lookup
+    >
+    > This drops some duplication in fdt_path_offset().
 
     Applied to main, thanks.
 
@@ -205,7 +214,19 @@ upstream it has thanked, so ``patman maint thanks`` drafts the thanks for
 what has gone upstream since, e.g. if Gmail could not be reached when
 publishing, or when someone else pushed the commits. Give it a range of
 commits, e.g. ``patman maint thanks us/main~3..us/main``, the first time,
-and ``-n`` to show the thanks without drafting them.
+and ``-n`` to show the thanks without drafting them. ``--redraft`` drafts
+the thanks again for series which have them already, e.g. after changing the
+settings, and deletes the drafts made before.
+
+To thank one series, give its Message-ID, link or name. On a branch whose
+series patman sent, ``patman maint thanks`` thanks that series by default.
+Either way it is thanked for those of its patches which are upstream, even
+if it is your own, in which case the reply just says where they were
+applied, with no greeting or thanks::
+
+    $ patman maint thanks
+    Series 'readme-meson' v1: 20261028112007.3980089-1-sjg@chromium.org
+    Drafted thanks for README: Explain how to build with meson
 
 The rules
 ---------

@@ -734,12 +734,18 @@ def add_maint_subparser(subparsers):
     thanks = maint_subparsers.add_parser(
         'thanks', help='Draft the thanks for series which went upstream')
     thanks.add_argument(
-        'range', nargs='?',
-        help="Commits to thank, e.g. 'us/main~3..us/main' (default: those "
-             'which went upstream since the thanks were last drafted)')
+        'what', nargs='?', metavar='series|range',
+        help="Series to thank, by its Message-ID, link or name, or commits "
+             "to thank, e.g. 'us/main~3..us/main' (default: the current "
+             "branch's series if patman sent it, else the commits which went "
+             'upstream since the thanks were last drafted)')
     thanks.add_argument(
         '-n', '--dry-run', action='store_true',
         help='Show the thanks, without drafting them')
+    thanks.add_argument(
+        '--redraft', action='store_true',
+        help='Draft the thanks again for series thanked already, deleting '
+             'the drafts made before')
     return maint
 
 

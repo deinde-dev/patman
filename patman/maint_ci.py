@@ -358,7 +358,9 @@ def do_ci(rules, dry_run=False, wait=True, git_dir=None,
     if dry_run:
         print(f'Would push {sha[:12]} to {where}')
         return 0
-    if not _push(targets, git_dir):
+    _, problem = _push(targets, git_dir)
+    if problem:
+        print(problem)
         return 1
     print(f'Pushed {sha[:12]} to {where}')
     if wait and not _ci_places(rules):
@@ -406,16 +408,20 @@ def _push(targets, git_dir):
             current one
 
     Return:
-        bool: True if each push worked; if not, the problem is shown
+        tuple:
+            list of tuple: Places pushed to, as in targets
+            str or None: Problem with the push which failed, or None if each
+                worked
     """
+    done = []
     for remote, specs in targets:
         result = subprocess.run(['git', 'push', '--quiet', remote, *specs],
                                 cwd=git_dir, capture_output=True, text=True,
                                 check=False)
         if result.returncode:
-            print(f'Cannot push to {remote}: {result.stderr.strip()}')
-            return False
-    return True
+            return done, f'Cannot push to {remote}: {result.stderr.strip()}'
+        done.append((remote, specs))
+    return done, None
 
 
 def _has(remote, spec, sha, git_dir):
@@ -511,7 +517,9 @@ def do_publish(rules, dry_run=False, yes=False, git_dir=None, after=None):
     have passed on its last commit. Then each place which does not have that
     commit yet is pushed to, in order, after asking, stopping at the first
     which fails. So once a problem is fixed, publishing again carries on
-    where it stopped.
+    where it stopped. Once the upstream has the commits, after is called,
+    even if a later push fails, since publishing again does not move the
+    upstream.
 
     Args:
         rules (Rules): Rules, giving the branch and where to push it
@@ -530,6 +538,10 @@ def do_publish(rules, dry_run=False, yes=False, git_dir=None, after=None):
     Raises:
         ValueError: There is nowhere to publish, or no branch to publish
     """
+    def _upstream():
+        return command.output('git', 'rev-parse', rules.upstream,
+                              cwd=git_dir).strip()
+
     if not rules.publish:
         raise ValueError("Nowhere to publish: set 'publish' in the [maint] "
                          "section of the settings, e.g. "
@@ -538,8 +550,7 @@ def do_publish(rules, dry_run=False, yes=False, git_dir=None, after=None):
     targets, ret = _ready(rules, sha, git_dir)
     if not targets:
         return ret
-    old = command.output('git', 'rev-parse', rules.upstream,
-                         cwd=git_dir).strip()
+    old = _upstream()
     where = _where(targets)
     if dry_run:
         print(f'Would publish {sha[:12]} to {where}')
@@ -548,9 +559,13 @@ def do_publish(rules, dry_run=False, yes=False, git_dir=None, after=None):
             ).lower() not in ('y', 'yes'):
         print('Not published')
         return 1
-    if not _push(targets, git_dir):
-        return 1
-    print(f'Published {sha[:12]} to {where}')
-    if after and old != sha:
-        after(old, sha)
-    return 0
+    done, problem = _push(targets, git_dir)
+    if done:
+        print(f'Published {sha[:12]} to {_where(done)}')
+    if problem:
+        print(problem)
+    # A push updates the remote-tracking branch, so this is the new upstream
+    new = _upstream()
+    if after and old != new:
+        after(old, new)
+    return 1 if problem else 0
