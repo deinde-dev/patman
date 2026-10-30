@@ -557,7 +557,8 @@ def do_maint(args):
         rules = maint.get_rules()
         return maint_apply.apply_series(rules, maint_list(rules),
                                         maint_link(args.link), args.patches,
-                                        args.force, args.dry_run)
+                                        args.force, args.dry_run,
+                                        redo=args.redo)
     raise ValueError(f"Unknown maint subcommand '{args.subcmd}'")
 
 

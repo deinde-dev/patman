@@ -286,7 +286,7 @@ def series_name(data):
 
 
 # pylint: disable-next=R0913,R0917
-def check_series(rules, data, newer, sel, force, git_dir):
+def check_series(rules, data, newer, sel, force, git_dir, redo=False):
     """Check that a series can be applied
 
     Args:
@@ -298,6 +298,8 @@ def check_series(rules, data, newer, sel, force, git_dir):
             which there is a newer version
         git_dir (str or None): Directory of the git repo, or None for the
             current one
+        redo (bool): True if the push branch is to start again from
+            upstream, so that what is on it does not count
 
     Return:
         bool: True if the patches are all applied already, so there is
@@ -317,7 +319,8 @@ def check_series(rules, data, newer, sel, force, git_dir):
             f"'{name}' is not the latest version: v{newer[0]['version']} is "
             f"{newer[0]['id']}; use -f to apply it anyway")
     refs = [rules.upstream]
-    if gitutil.ref_exists(f'refs/heads/{rules.push_branch}', git_dir):
+    if not redo and gitutil.ref_exists(f'refs/heads/{rules.push_branch}',
+                                       git_dir):
         refs.append(rules.push_branch)
     for ref in refs:
         have = lorelist.applied_msgids(ref, git_dir)
@@ -379,9 +382,67 @@ def plan(rules, data, tags, sel):
     return trailers
 
 
+def _set_branch(branch, target, git_dir):
+    """Move a branch to a commit, as 'git branch -f' does
+
+    Where the branch is checked out, its worktree is reset to the commit
+    instead, which git requires
+
+    Args:
+        branch (str): Branch to move, e.g. 'main-push'
+        target (str): Commit to move it to
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+
+    Raises:
+        ValueError: The worktree which has the branch is not clean
+    """
+    path = _worktree_of(branch, git_dir)
+    if path:
+        if _git('status', '--porcelain', '--untracked-files=no',
+                cwd=path).stdout.strip():
+            raise ValueError(f'{branch} is checked out in {path}, which has '
+                             'changes: commit or stash them first')
+        _git('reset', '--quiet', '--hard', target, cwd=path)
+    else:
+        command.run_one('git', 'branch', '--quiet', '--force', '--no-track',
+                        branch, target, cwd=git_dir)
+
+
+def _restart(rules, dry_run, git_dir):
+    """Start the push branch again from upstream, dropping what is on it
+
+    Args:
+        rules (Rules): Rules to use
+        dry_run (bool): True to say what would be dropped, without dropping
+            it
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+
+    Return:
+        str or None: The commit the push branch was at, so that it can be
+            put back, or None if there is no push branch yet
+    """
+    branch = rules.push_branch
+    if not gitutil.ref_exists(f'refs/heads/{branch}', git_dir):
+        return None
+    old = command.output('git', 'rev-parse', branch, cwd=git_dir).strip()
+    count = int(command.output('git', 'rev-list', '--count',
+                               f'{rules.upstream}..{branch}', cwd=git_dir))
+    verb = 'Would start' if dry_run else 'Starting'
+    msg = f'{verb} {branch} again from {rules.upstream}'
+    if count:
+        msg += f", dropping {count} commit{'s' if count > 1 else ''} " \
+            f'(was {old[:12]})'
+    print(msg)
+    if not dry_run:
+        _set_branch(branch, rules.upstream, git_dir)
+    return old
+
+
 # pylint: disable-next=R0913,R0914,R0917
 def apply_series(rules, llist, link, patches=None, force=False,
-                 dry_run=False, git_dir=None):
+                 dry_run=False, git_dir=None, redo=False):
     """Apply a series from the list to the push branch, then check it
 
     Args:
@@ -396,15 +457,18 @@ def apply_series(rules, llist, link, patches=None, force=False,
             it
         git_dir (str or None): Directory of the git repo, or None for the
             current one
+        redo (bool): True to start the push branch again from upstream
+            first, dropping what is on it, e.g. to apply a series again
 
     Return:
         int: 0 if it was applied and all is well, else 1
     """
     data, tags, newer, mbox = common.run(read_series(llist, link))
     sel = parse_patches(patches, len(data['patches']))
-    if check_series(rules, data, newer, sel, force, git_dir):
+    if check_series(rules, data, newer, sel, force, git_dir, redo):
         return 0
     trailers = plan(rules, data, tags, sel)
+    old = _restart(rules, dry_run, git_dir) if redo else None
     if dry_run:
         print(f'Would apply {_count(sel, data)} to {rules.push_branch}')
         return 0
@@ -418,6 +482,8 @@ def apply_series(rules, llist, link, patches=None, force=False,
     problem = _apply_in_tree(rules.branch, b''.join(msgs[idx] for idx in sel),
                              trailers, git_dir)
     if problem:
+        if old:
+            _set_branch(rules.branch, old, git_dir)
         print(f"Cannot apply '{series_name(data)}' to {rules.branch}, even "
               'with a three-way merge, so nothing is applied; perhaps ask for '
               f'a rebase:\n{problem}')

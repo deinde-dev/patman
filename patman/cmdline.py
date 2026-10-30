@@ -682,6 +682,10 @@ def add_maint_subparser(subparsers):
     apply.add_argument(
         '-n', '--dry-run', action='store_true',
         help='Show what would be applied, without applying it')
+    apply.add_argument(
+        '-R', '--redo', action='store_true',
+        help='Start the push branch again from upstream first, dropping what '
+             'is on it, e.g. to apply a series again')
 
     check = maint_subparsers.add_parser(
         'check',

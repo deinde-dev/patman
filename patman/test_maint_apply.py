@@ -8,6 +8,7 @@ import email
 import email.policy
 import os
 import re
+from unittest import mock
 
 from u_boot_pylib import terminal
 
@@ -324,6 +325,76 @@ class TestMaintApply(RepoTestCase):
         self.assertEqual(f'main-push is checked out in {self.repo}, which has '
                          'changes: commit or stash them first',
                          str(exc.exception))
+
+    def test_redo(self):
+        """-R starts the push branch again, e.g. to pick up new tags"""
+        link = self.make_series()
+        ret, out = self.apply(link)
+        self.assertEqual(0, ret, out)
+
+        # Another series is on the push branch, and a tag comes in
+        self.git('checkout', '-q', 'main-push')
+        with open(os.path.join(self.repo, 'b.txt'), 'w',
+                  encoding='utf-8') as outf:
+            outf.write('other\n')
+        self.git('add', 'b.txt')
+        self.commit('dtc: Other', ME, [f'Signed-off-by: {ME}'])
+        self.git('checkout', '-q', 'main')
+        self.reply('r1@x.org', 'fred-1@x.org', HERVE,
+                   f'Reviewed-by: {HERVE}')
+        before = self.git('rev-parse', 'main-push').strip()
+        self.assertEqual('3', self.git('rev-list', '--count',
+                                       'us/main..main-push').strip())
+
+        # A dry run says what would be dropped, and drops nothing
+        ret, out = self.apply(link, redo=True, dry_run=True)
+        self.assertEqual(0, ret, out)
+        self.assertIn('Would start main-push again from us/main, dropping 3 '
+                      f'commits (was {before[:12]})\n', out)
+        self.assertEqual(before, self.git('rev-parse', 'main-push').strip())
+
+        ret, out = self.apply(link, redo=True)
+        self.assertEqual(0, ret, out)
+        self.assertIn('Starting main-push again from us/main, dropping 3 '
+                      f'commits (was {before[:12]})\n', out)
+        self.assertEqual(
+            ['dtc: Add a file', 'dtc: Grow the file'],
+            self.git('log', '--reverse', '--format=%s',
+                     'us/main..main-push').splitlines())
+        self.assertIn(f'Reviewed-by: {HERVE}', self.trailers('main-push')[0])
+        self.assertEqual('main', maint.current_branch(self.repo))
+
+    def test_redo_fails(self):
+        """-R leaves the push branch as it was if the series does not apply,
+        or the branch is checked out with changes"""
+        link = self.make_series()
+        ret, out = self.apply(link)
+        self.assertEqual(0, ret, out)
+        before = self.git('rev-parse', 'main-push')
+
+        with mock.patch.object(maint_apply, '_am', return_value='no good'):
+            ret, out = self.apply(link, redo=True)
+        self.assertEqual(1, ret)
+        self.assertIn('so nothing is applied', out)
+        self.assertEqual(before, self.git('rev-parse', 'main-push'))
+
+        self.git('checkout', '-q', 'main-push')
+        with open(os.path.join(self.repo, 'a.txt'), 'a',
+                  encoding='utf-8') as outf:
+            outf.write('changed\n')
+        with self.assertRaises(ValueError) as exc:
+            self.apply(link, redo=True)
+        self.assertEqual(f'main-push is checked out in {self.repo}, which has '
+                         'changes: commit or stash them first',
+                         str(exc.exception))
+        self.assertEqual(before, self.git('rev-parse', 'main-push'))
+
+        # Once it is clean, it is reset where it is checked out
+        self.git('checkout', '-q', '--', 'a.txt')
+        ret, out = self.apply(link, redo=True)
+        self.assertEqual(0, ret, out)
+        self.assertEqual('', self.git('status', '--porcelain'))
+        self.assertEqual(2, len(self.trailers('main-push')))
 
     def test_checked_out(self):
         """The push branch is applied to where it is checked out"""
