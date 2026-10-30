@@ -438,7 +438,7 @@ class TestMaintApply(RepoTestCase):
 
         def link(series):
             with terminal.capture() as (out, _):
-                found = control.maint_link(series, self.tmpdir, self.repo)
+                found = maint_apply.find_link(series, self.tmpdir, self.repo)
             return found, out.getvalue().strip()
 
         # A Message-ID or link is used as it is

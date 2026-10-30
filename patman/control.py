@@ -565,57 +565,10 @@ def do_maint(args):
     if args.subcmd == 'apply':
         rules = maint.get_rules()
         return maint_apply.apply_series(rules, maint_list(rules),
-                                        maint_link(args.link), args.patches,
-                                        args.force, args.dry_run,
-                                        redo=args.redo)
+                                        maint_apply.find_link(args.link),
+                                        args.patches, args.force,
+                                        args.dry_run, redo=args.redo)
     raise ValueError(f"Unknown maint subcommand '{args.subcmd}'")
-
-
-def maint_link(series, test_db=None, git_dir=None):
-    """Get the link of the series which 'maint apply' is to apply
-
-    A Message-ID, or a link to lore, is used as it is. Otherwise the series
-    is one of your own, named or else the one on the current branch, and the
-    latest version which has been sent is used, by the link which patman
-    recorded when it sent it.
-
-    Args:
-        series (str or None): Message-ID, link or name of the series, or
-            None for the current branch's
-        test_db (str or None): Directory of the test database, or None to
-            use the normal one
-        git_dir (str or None): Directory of the git repo, or None for the
-            current one
-
-    Return:
-        str: Message-ID or link of the series
-
-    Raises:
-        ValueError: The series is not known, or has not been sent
-    """
-    if series and ('@' in series or '/' in series):
-        return series
-    name = series or maint.current_branch(git_dir)
-    if not name:
-        raise ValueError('No branch is checked out: give the Message-ID of '
-                         'the series to apply')
-    cser = cseries.Cseries(test_db)
-    cser.open_database()
-    try:
-        idnum = cser.db.series_find_by_name(name)
-        svers = cser.db.ser_ver_get_for_series(idnum) if idnum else []
-    finally:
-        cser.close_database()
-    if not idnum:
-        raise ValueError(f"There is no series '{name}': give the Message-ID "
-                         'of the series to apply')
-    sent = [svr for svr in svers if svr.link]
-    if not sent:
-        raise ValueError(f"Series '{name}' has not been sent: give the "
-                         'Message-ID of the series to apply')
-    latest = max(sent, key=lambda svr: svr.version)
-    print(f"Series '{name}' v{latest.version}: {latest.link}")
-    return latest.link
 
 
 def maint_list(rules, test_db=None):
