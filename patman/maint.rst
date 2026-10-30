@@ -169,12 +169,13 @@ pushing::
     Publish e5353eb4e214 to us main-push:main main-push:master, david main-push:main, gl main-push:main? [y/N] y
     Published e5353eb4e214 to us main-push:main main-push:master, david main-push:main, gl main-push:main
 
-It stops at the first push which fails. A remote which has the commit
-already is left out, so once the problem is fixed, publishing again carries
-on where it stopped. ``-n`` says where the branch would be pushed, and ``-y``
-pushes without asking.
+It stops at the first push which fails, after saying where it has pushed so
+far. A remote which has the commit already is left out, so once the problem
+is fixed, publishing again carries on where it stopped. ``-n`` says where the
+branch would be pushed, and ``-y`` pushes without asking.
 
-Once it is published, the submitters are thanked, as below.
+Once the upstream has the commits, the submitters are thanked, as below,
+even if a push to another remote then fails.
 
 Thanking the submitters
 -----------------------
