@@ -3,8 +3,8 @@
 patman maint
 ============
 
-Check the commits which you are about to push as a maintainer, against the
-project's rules in the ``[maint]`` section of the settings (see
-:doc:`/maint`).
+Apply series from the list as a maintainer, and check the commits which you
+are about to push, by the project's rules in the ``[maint]`` section of the
+settings (see :doc:`/maint`).
 
 .. patman-command:: maint

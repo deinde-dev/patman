@@ -10,6 +10,18 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman maint apply`` applies a series from the mailing list to the push
+  branch, e.g. ``main-push``, by the project's rules in the ``[maint]``
+  section: it adds the review tags given in reply to this version, then the
+  trailers each patch ends with, such as its Message-ID and your sign-off, and
+  checks the result with ``maint check``. It applies the patches in a
+  temporary worktree, so the tree you are working in is not touched,
+  refuses a series which is incomplete or has a newer version, and says when
+  one is applied already. Without a Message-ID it applies the current
+  branch's series, if patman has sent it. ``-R`` starts the push branch again
+  from upstream first, dropping what is on it, to apply a series again.
+  ``maint check`` now checks the push branch when the branch checked out has
+  no commits of its own.
 - ``patman maint check`` checks the commits which a maintainer is about to
   push, i.e. those on the branch which are not upstream yet, against the
   project's rules in the new ``[maint]`` section of the settings: which

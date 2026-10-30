@@ -128,9 +128,10 @@ reads its series from https://lore.kernel.org/devicetree-compiler:
 - For reviews, set ``project: dtc`` in the ``[review]`` section. Run
   ``patman serve`` in the dtc tree to list the newest series sent to the list
   (see :ref:`a list on lore <serve_lore>`).
-- A maintainer can check the commits to be pushed against dtc's rules with
-  ``patman maint check``, which has dtc's ``[maint]`` section as its example
-  (see :ref:`maint`).
+- A maintainer can apply series from the list by dtc's rules with
+  ``patman maint apply``, and check the commits to be pushed with
+  ``patman maint check``, whose chapter has dtc's ``[maint]`` section as its
+  example (see :ref:`maint`).
 
 Patman does not detect a dtc tree, so there is no ``[dtc_settings]``
 section; put dtc's settings in the tree's ``.patman``. Example settings in
