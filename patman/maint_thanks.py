@@ -161,7 +161,7 @@ def first_name(person):
     return name.split()[0] if name else person.get('email', '').split('@')[0]
 
 
-def thanks_text(app, idxs, branch, closing):
+def thanks_text(app, idxs, branch, closing, own=False):
     """Write the thanks for some patches of a series
 
     Args:
@@ -169,12 +169,17 @@ def thanks_text(app, idxs, branch, closing):
         idxs (list of int): Patches to list, by their index in the series
         branch (str): Branch they were applied to, e.g. 'main'
         closing (str or None): Closing lines, e.g. 'Regards,\nSimon'
+        own (bool): True if the series is your own, so that there is no one
+            to greet or thank
 
     Return:
         str: Text of the email
     """
-    lines = [f"Hi {first_name(app.data['submitter'])},", '',
-             f'Applied to {branch}, thanks.', '']
+    if own:
+        lines = [f'Applied to {branch}.', '']
+    else:
+        lines = [f"Hi {first_name(app.data['submitter'])},", '',
+                 f'Applied to {branch}, thanks.', '']
     total = len(app.data['patches'])
     for idx in idxs:
         title = RE_PREFIX.sub('', app.data['patches'][idx - 1]['name'])
@@ -234,7 +239,9 @@ def plan_thanks(rules, llist, app, closing):
         replies = [(to, applied)]
     hdrs = common.run(_headers(llist, app, [to for to, _ in replies]))
     envs = gmail.review_envelopes(app.data, hdrs, [to for to, _ in replies])
-    return [(envs[to], thanks_text(app, idxs, branch, closing))
+    own = (maint.email_of(app.data['submitter'].get('email', '')) ==
+           maint.email_of(rules.signoff))
+    return [(envs[to], thanks_text(app, idxs, branch, closing, own))
             for to, idxs in replies]
 
 

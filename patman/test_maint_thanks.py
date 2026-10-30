@@ -144,8 +144,10 @@ class TestMaintThanks(LoreTestCase):
         self.assertEqual((0, found + 'Drafted thanks for dtc: Tidy\n'),
                          (ret, out))
         self.assertEqual(1, len(made))
-        self.assertIn(f'[2/2] dtc: Grow the file\n      {commits[1]}\n',
-                      made[0][1])
+        # There is no one to greet or thank
+        self.assertTrue(made[0][1].startswith(
+            f'Applied to main.\n\n[1/2] dtc: Add a file\n      {commits[0]}\n'
+            f'[2/2] dtc: Grow the file\n      {commits[1]}\n'), made[0][1])
         self.assertEqual([root],
                          maint_thanks.read_state(self.repo)['thanked'])
 
