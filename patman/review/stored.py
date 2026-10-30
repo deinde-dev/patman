@@ -439,7 +439,8 @@ def _do_revise(args, pwork, cser, link):
 
     Only reviews which have not been sent are changed. With -i, only those
     patches' reviews are given to the agent. With -d, the Gmail drafts of the
-    reviews which change are recreated.
+    reviews which change are recreated. The old drafts are deleted only once
+    the new ones are made.
 
     Args:
         args (Namespace): Command-line arguments
@@ -506,9 +507,7 @@ def _do_revise(args, pwork, cser, link):
     if args.create_drafts:
         redo = [cser.db.review_get(rev.idnum) for rev in reviews
                 if rev.seq in changed]
-        drafts.delete_gmail_drafts(args, redo)
         if not ctx.series_data:
             ctx.series_data = lookup.fetch_series(pwork, link)[0]
-        drafts.create_drafts(ctx, args, {rev.seq: rev.body for rev in redo},
-                             {rev.seq: rev.idnum for rev in redo})
+        drafts.replace_drafts(ctx, args, redo)
     return 0

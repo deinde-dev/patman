@@ -57,11 +57,15 @@ def create_drafts(ctx, args, review_bodies, review_ids):
         args (Namespace): Command-line arguments (for gmail_account, dry_run)
         review_bodies (dict): Map of seq to review body text
         review_ids (dict): Map of seq to review record ID
+
+    Returns:
+        dict: Map of seq to the ID of the draft created for it, empty for a
+            dry run
     """
     to_draft = dict(review_bodies)
     if not to_draft:
         tout.notice('All reviews already have Gmail drafts')
-        return
+        return {}
 
     patch_headers = {}
     patches = ctx.series_data.get('patches', [])
@@ -91,17 +95,35 @@ def create_drafts(ctx, args, review_bodies, review_ids):
     where = _draft_location(ctx)
     if args.dry_run:
         tout.notice(f'Dry run: would create {len(to_draft)} draft(s){where}')
-    else:
-        # Keep the headers, so that the review can be drafted again
-        # without asking patchwork for them
-        for seq, env in envelopes.items():
-            if seq in review_ids:
-                ctx.cser.db.review_set_envelope(review_ids[seq], env)
-        for seq, draft_id in draft_ids.items():
-            if seq in review_ids:
-                ctx.cser.db.review_set_draft_id(review_ids[seq], draft_id)
-        ctx.cser.commit()
-        tout.notice(f'Created {len(draft_ids)} Gmail draft(s){where}')
+        return {}
+    # Keep the headers, so that the review can be drafted again without
+    # asking patchwork for them
+    for seq, env in envelopes.items():
+        if seq in review_ids:
+            ctx.cser.db.review_set_envelope(review_ids[seq], env)
+    for seq, draft_id in draft_ids.items():
+        if seq in review_ids:
+            ctx.cser.db.review_set_draft_id(review_ids[seq], draft_id)
+    ctx.cser.commit()
+    tout.notice(f'Created {len(draft_ids)} Gmail draft(s){where}')
+    return draft_ids
+
+
+def replace_drafts(ctx, args, reviews):
+    """Create Gmail drafts for reviews, then delete any they had before
+
+    The old drafts are deleted only once the new ones are made, so that a
+    review is not left with no draft if patchwork or Gmail fails part way.
+
+    Args:
+        ctx (ReviewContext): Review context
+        args (Namespace): Command-line arguments (for gmail_account, dry_run)
+        reviews (list of Review): Reviews to draft, as they were before the
+            new drafts are made, so with their old draft IDs
+    """
+    draft_ids = create_drafts(ctx, args, {rev.seq: rev.body for rev in reviews},
+                              {rev.seq: rev.idnum for rev in reviews})
+    delete_gmail_drafts(args, [rev for rev in reviews if rev.seq in draft_ids])
 
 
 def _sender(args, reviewer_name, reviewer_email):
@@ -202,8 +224,9 @@ def has_envelopes(cser, reviews):
 def redraft_reviews(args, cser, reviews, link):
     """Recreate the Gmail drafts of reviews, using their stored headers
 
-    Any existing drafts of the reviews are deleted first, so that they do
-    not linger as duplicates in the same Gmail thread.
+    Any existing drafts of the reviews are deleted once the new ones are
+    made, so that they do not linger as duplicates in the same Gmail thread
+    but are kept if the new ones cannot be made.
 
     Args:
         args (Namespace): Command-line arguments (uses dry_run and
@@ -215,8 +238,6 @@ def redraft_reviews(args, cser, reviews, link):
     """
     envelopes = {rev.seq: cser.db.review_get_envelope(rev.idnum)
                  for rev in reviews}
-    if not args.dry_run:
-        delete_gmail_drafts(args, reviews)
     name, email = _reviewer_from_bodies(reviews)
     draft_ids = gmail.create_drafts_from_envelopes(
         envelopes, {rev.seq: rev.body for rev in reviews},
@@ -230,6 +251,7 @@ def redraft_reviews(args, cser, reviews, link):
         if rev.seq in draft_ids:
             cser.db.review_set_draft_id(rev.idnum, draft_ids[rev.seq])
     cser.commit()
+    delete_gmail_drafts(args, [rev for rev in reviews if rev.seq in draft_ids])
     tout.notice(f'Created {len(draft_ids)} Gmail draft(s) (link {link})')
 
 
@@ -432,13 +454,6 @@ def draft_stored_reviews(args, reviews, series_data, pwork, cser):
     if not need_draft:
         tout.notice('All reviews already have Gmail drafts')
         return
-    if args.redraft:
-        # Remove the drafts we are about to recreate so they do not linger
-        # as duplicates in the same Gmail thread
-        delete_gmail_drafts(args, need_draft)
-    review_bodies = {rev.seq: rev.body for rev in need_draft}
-    review_ids = {rev.seq: rev.idnum
-                  for rev in need_draft}
     ctx = common.ReviewContext(pwork, cser, series_data)
     ctx.reviewer_name, ctx.reviewer_email = _reviewer_from_bodies(need_draft)
-    create_drafts(ctx, args, review_bodies, review_ids)
+    replace_drafts(ctx, args, need_draft)

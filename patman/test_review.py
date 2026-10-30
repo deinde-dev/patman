@@ -1360,7 +1360,8 @@ class TestReview(CseriesTester):
                                   return_value=({'id': 123}, 'x', 1, 2)), \
                 mock.patch.object(
                     review.drafts, 'delete_gmail_drafts') as delete, \
-                mock.patch.object(review.drafts, 'create_drafts') as create, \
+                mock.patch.object(review.drafts, 'create_drafts',
+                                  return_value={1: 'd1b'}) as create, \
                 terminal.capture() as (out, _):
             self.assertEqual(
                 0, review.stored._do_revise(args, None, cser, '123'))
@@ -1391,6 +1392,59 @@ class TestReview(CseriesTester):
         with self.assertRaises(ValueError) as exc:
             review.stored._do_revise(args, None, cser, '123')
         self.assertIn('No unsent reviews', str(exc.exception))
+
+    def test_review_revise_redraft(self):
+        """Revised reviews get new drafts before the old ones go"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'Fred series', None)
+        db.series_set_source(sid, 'review')
+        svid = db.ser_ver_add(sid, 1, link='123')
+        first = db.review_add(svid, 1, 'Hi Fred,\n\nNit', False,
+                              '2026-10-01T00:00:00')
+        db.review_set_draft_id(first, 'd1')
+        db.commit()
+
+        bodies = iter(['Revised', 'Revised again'])
+
+        async def mock_agent(_prompt, _options):
+            return True, f'---SEQ 1---\nHi Fred,\n\n{next(bodies)}\n'
+
+        def run(**kwargs):
+            args = cmdline.parse_args(
+                ['review', '-s', '123', '--revise', 'Change it', '-d'],
+                config_fname=False)
+            with mock.patch.object(review.core.claude_mod,
+                                   'run_agent_collect',
+                                   side_effect=mock_agent), \
+                    mock.patch.object(review.core.claude_mod,
+                                      'check_available', return_value=True), \
+                    mock.patch.object(review.common, 'ClaudeAgentOptions',
+                                      mock.MagicMock()), \
+                    mock.patch.object(review.stored, '_review_commits',
+                                      return_value=[]), \
+                    mock.patch.object(review.lookup, 'fetch_series',
+                                      **kwargs) as fetch, \
+                    mock.patch.object(gmail, 'check_available',
+                                      return_value=True), \
+                    mock.patch.object(gmail, 'get_service'), \
+                    mock.patch.object(gmail, 'delete_draft') as delete, \
+                    mock.patch.object(gmail, 'create_drafts_from_envelopes',
+                                      return_value={1: 'd1b'}) as create, \
+                    terminal.capture() as (out, _):
+                try:
+                    ret = review.stored._do_revise(args, None, cser, '123')
+                except ValueError as exc:
+                    ret = str(exc)
+            return (ret, fetch, [call.args[1]
+                                 for call in delete.call_args_list],
+                    create, out.getvalue())
+
+        # If patchwork fails while the new draft is made, the old one is kept
+        with mock.patch.object(review.drafts, 'create_drafts',
+                               side_effect=ValueError('status 500')):
+            ret, _, deleted, _, _ = run(return_value=({'id': 123}, 'x', 1, 2))
+        self.assertEqual(('status 500', []), (ret, deleted))
 
     def test_review_revise_context(self):
         """A revision is given the rest of the series as context"""
