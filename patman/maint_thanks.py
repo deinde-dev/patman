@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 import json
 import os
 import re
+import time
 
 import aiohttp
 
@@ -85,8 +86,10 @@ def read_state(git_dir=None):
             last (str or None): Upstream commit up to which thanks have been
                 drafted
             thanked (list of str): Message-IDs of the series thanked
-            drafts (dict): Gmail draft IDs of the thanks for each series
-                thanked, by its Message-ID
+            drafts (dict): Drafts of the thanks for each series thanked,
+                by its Message-ID, see drafts_of()
+            done (list of str): Message-IDs of the series finished with, see
+                'patman maint done'
     """
     try:
         with open(_state_path(git_dir), encoding='utf-8') as inf:
@@ -94,10 +97,10 @@ def read_state(git_dir=None):
     except (OSError, ValueError):
         state = {}
     return {'last': state.get('last'), 'thanked': state.get('thanked', []),
-            'drafts': state.get('drafts', {})}
+            'drafts': state.get('drafts', {}), 'done': state.get('done', [])}
 
 
-def _write_state(state, git_dir):
+def write_state(state, git_dir):
     """Write the state of the thanks
 
     Args:
@@ -363,6 +366,37 @@ def thank(rules, llist, what=None, closing=None, account=None, dry_run=False,
                         redraft=redraft, git_dir=git_dir)
 
 
+def find_upstream(rules, llist, link, git_dir=None):
+    """Read a series and find which of its patches are upstream
+
+    Args:
+        rules (Rules): Rules to use
+        llist (LoreList): List to read the series from
+        link (str): Message-ID of the cover letter or first patch, or a link
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+
+    Return:
+        tuple:
+            Applied: Series, with the commit of each patch which is upstream
+            list of maint.Commit: Those commits, oldest first
+    """
+    async def read():
+        async with aiohttp.ClientSession() as client:
+            return await llist.get_series(client, link)
+
+    data = common.run(read())
+    app = Applied(data['id'], data)
+    idxs = {lore.bare_msgid(pat['msgid']): idx
+            for idx, pat in enumerate(data['patches'], 1)}
+    cmts = [cmt for cmt in maint.find_commits(rules.upstream, list(idxs),
+                                              git_dir)
+            if _msgid(cmt) in idxs]
+    for cmt in cmts:
+        app.commits[idxs[_msgid(cmt)]] = cmt.hash
+    return app, cmts
+
+
 # pylint: disable-next=R0913,R0917
 def thank_series(rules, llist, link, closing=None, account=None,
                  dry_run=False, redraft=False, git_dir=None):
@@ -385,18 +419,8 @@ def thank_series(rules, llist, link, closing=None, account=None,
     Return:
         int: 0 if the thanks were drafted, else 1
     """
-    async def read():
-        async with aiohttp.ClientSession() as client:
-            return await llist.get_series(client, link)
-
-    data = common.run(read())
-    app = Applied(data['id'], data)
-    name = maint_apply.series_name(data)
-    idxs = {lore.bare_msgid(pat['msgid']): idx
-            for idx, pat in enumerate(data['patches'], 1)}
-    for cmt in maint.find_commits(rules.upstream, list(idxs), git_dir):
-        if _msgid(cmt) in idxs:
-            app.commits[idxs[_msgid(cmt)]] = cmt.hash
+    app, _ = find_upstream(rules, llist, link, git_dir)
+    name = maint_apply.series_name(app.data)
     if not app.commits:
         print(f"'{name}' is not in {rules.upstream} yet")
         return 1
@@ -460,7 +484,7 @@ def _draft(rules, llist, apps, closing, account, dry_run, state, git_dir,
         print('No series to thank')
     state['thanked'] += [app.root for app in apps
                          if app.root not in state['thanked']]
-    _write_state(state, git_dir)
+    write_state(state, git_dir)
     return True
 
 
@@ -477,15 +501,34 @@ def _replace_drafts(state, roots, drafted, account):
         drafted (dict): Gmail draft ID of each email, by its index in roots
         account (str or None): Gmail account to use
     """
-    old = [draft for root in set(roots)
-           for draft in state['drafts'].get(root, [])]
+    old = [draft['id'] for root in set(roots)
+           for draft in drafts_of(state, root)]
     if old:
         service = gmail.get_service(account)
         for draft_id in old:
             gmail.delete_draft(service, draft_id)
+    now = int(time.time())
     for root in set(roots):
-        state['drafts'][root] = [drafted[num] for num, rt in enumerate(roots)
+        state['drafts'][root] = [{'id': drafted[num], 'time': now}
+                                 for num, rt in enumerate(roots)
                                  if rt == root]
+
+
+def drafts_of(state, root):
+    """Get the drafts of the thanks for a series
+
+    Args:
+        state (dict): State of the thanks, as from read_state()
+        root (str): Message-ID of the series
+
+    Return:
+        list of dict: Each draft, in the order of the emails:
+            id (str): Gmail draft ID
+            time (int or None): When it was made, in seconds since the
+                epoch, if known
+    """
+    return [draft if isinstance(draft, dict) else {'id': draft, 'time': None}
+            for draft in state['drafts'].get(root, [])]
 
 
 # pylint: disable-next=R0913,R0914,R0917

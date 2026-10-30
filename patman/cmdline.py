@@ -746,6 +746,24 @@ def add_maint_subparser(subparsers):
         '--redraft', action='store_true',
         help='Draft the thanks again for series thanked already, deleting '
              'the drafts made before')
+
+    done = maint_subparsers.add_parser(
+        'done', help='Finish with a series once its thanks are sent')
+    done.add_argument(
+        'what', nargs='?', metavar='series',
+        help="Series, by its Message-ID, link or name (default: the current "
+             "branch's series if patman sent it, else each series which is "
+             'thanked but not finished with)')
+    done.add_argument(
+        '-f', '--force', action='store_true',
+        help='Finish with it even if it is not all upstream, or the thanks '
+             'were not sent')
+    done.add_argument(
+        '-n', '--dry-run', action='store_true',
+        help='Say what would be done, without doing it')
+    done.add_argument(
+        '-y', '--yes', action='store_true',
+        help='Archive your series without asking first')
     return maint
 
 

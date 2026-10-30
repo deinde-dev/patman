@@ -10,6 +10,11 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman maint done`` finishes with a series once the thanks are sent: it
+  checks that the series is upstream and that the thanks went out, lists any
+  issue it closes which is still open, and archives your own series after
+  asking. With no series it goes through each which is thanked but not
+  finished with.
 - ``patman maint publish`` drafts a reply in Gmail to thank the submitter of
   each series it pushes, quoting the patch or cover letter and listing the
   commits, for you to add to and send. It replies to the latest message

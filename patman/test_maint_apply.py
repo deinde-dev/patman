@@ -119,6 +119,26 @@ class LoreTestCase(RepoTestCase):
                 msg.get_content(), None if msgid == root else root)
         return root
 
+    def add_series(self, link=None):
+        """Note the current branch as a series which patman sent
+
+        Args:
+            link (str or None): Message-ID it was sent with, or None to set
+                up the database with no series
+
+        Return:
+            str: Name of the series
+        """
+        name = maint.current_branch(self.repo)
+        cser = cseries.Cseries(self.tmpdir)
+        cser.open_database()
+        if link:
+            cser.db.ser_ver_add(cser.db.series_add(name, 'Tidy'), 1,
+                                link=link)
+            cser.db.commit()
+        cser.close_database()
+        return name
+
     def reply(self, msgid, to, sender, body):
         """Add a reply to the thread
 
