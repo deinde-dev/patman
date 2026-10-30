@@ -485,7 +485,10 @@ the Gmail drafts of the reviews which change::
     patman review -s 497923 -U us --revise 'Drop the comments about style'
 
 The review approves the patch (with a ``Reviewed-by`` tag) if the note says
-the patch is fine, and stops approving it if the note asks for a change.
+the patch is fine, and stops approving it if the note asks for a change. A
+review which the note leaves with nothing to say, e.g. 'No new comments on
+code which was reviewed before', is dropped, along with its Gmail draft
+when ``-d`` is given.
 
 Sending the reviews
 ~~~~~~~~~~~~~~~~~~~

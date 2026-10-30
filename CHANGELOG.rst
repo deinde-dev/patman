@@ -120,6 +120,9 @@ Changed
 
 Fixed
 ~~~~~
+- A revision which leaves a review with nothing to say drops it, with its
+  Gmail draft when given ``-d``, rather than reporting that no reviews
+  needed changing and leaving them all as they were.
 - A new version of a series is reviewed with each patch's latest review
   from any earlier version, matching a patch whose subject changed, and
   the agent is told when a patch's code is unchanged since the last

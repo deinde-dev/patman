@@ -1393,6 +1393,85 @@ class TestReview(CseriesTester):
             review.stored._do_revise(args, None, cser, '123')
         self.assertIn('No unsent reviews', str(exc.exception))
 
+    def test_review_revise_drop(self):
+        """A review which a revision leaves with nothing to say is dropped"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'Fred series', None)
+        db.series_set_source(sid, 'review')
+        svid = db.ser_ver_add(sid, 1, link='123')
+        ids = {}
+        for seq in (0, 1, 2):
+            ids[seq] = db.review_add(svid, seq, f'Hi Fred,\n\nNit {seq}',
+                                     False, '2026-10-01T00:00:00')
+            db.review_set_draft_id(ids[seq], f'd{seq}')
+            db.review_set_envelope(ids[seq], {'subject': f'Re: {seq}'})
+        db.commit()
+
+        async def mock_agent(_prompt, _options):
+            return True, ('---SEQ 0---\nHi Fred,\n\nBetter\n'
+                          '---SEQ 1---\n\n---SEQ 2---\n')
+
+        def run(*argv):
+            args = cmdline.parse_args(
+                ['review', '-s', '123', '--revise', 'No new comments', *argv],
+                config_fname=False)
+            with mock.patch.object(review.core.claude_mod,
+                                   'run_agent_collect',
+                                   side_effect=mock_agent), \
+                    mock.patch.object(review.core.claude_mod,
+                                      'check_available', return_value=True), \
+                    mock.patch.object(review.common, 'ClaudeAgentOptions',
+                                      mock.MagicMock()), \
+                    mock.patch.object(review.stored, '_review_commits',
+                                      return_value=[]), \
+                    mock.patch.object(gmail, 'check_available',
+                                      return_value=True), \
+                    mock.patch.object(gmail, 'get_service'), \
+                    mock.patch.object(gmail, 'delete_draft') as delete, \
+                    mock.patch.object(gmail, 'create_drafts_from_envelopes',
+                                      return_value={0: 'd0b'}) as create, \
+                    terminal.capture() as (out, err):
+                ret = review.stored._do_revise(args, None, cser, '123')
+            return (ret, sorted(call.args[1] for call in delete.call_args_list),
+                    create, out.getvalue() + err.getvalue())
+
+        ret, deleted, create, out = run('-d')
+        self.assertEqual((0, ['d0', 'd1', 'd2']), (ret, deleted))
+        self.assertEqual({0: 'Hi Fred,\n\nBetter'}, create.call_args.args[1])
+        self.assertIn('Dropped the review of patch 1, which has nothing left '
+                      'to say', out)
+        self.assertEqual([0], [rev.seq for rev in
+                               db.review_get_for_version(svid)])
+        self.assertEqual('d0b', db.review_get(ids[0]).draft_id)
+
+        # Without -d, the Gmail drafts are left, and it says so
+        for seq in (1, 2):
+            ids[seq] = db.review_add(svid, seq, f'Hi Fred,\n\nNit {seq}',
+                                     False, '2026-10-01T00:00:00')
+            db.review_set_draft_id(ids[seq], f'd{seq}')
+        db.commit()
+        ret, deleted, create, out = run()
+        self.assertEqual((0, []), (ret, deleted))
+        create.assert_not_called()
+        self.assertIn('The Gmail drafts of the reviews dropped are left; use '
+                      '-d to delete them', out)
+
+        # With only reviews to drop, no drafts are made
+        for seq in (1, 2):
+            db.review_add(svid, seq, f'Hi Fred,\n\nNit {seq}', False,
+                          '2026-10-01T00:00:00')
+        db.commit()
+        ret, deleted, create, out = run('-d')
+        self.assertEqual((0, []), (ret, deleted))
+        create.assert_not_called()
+
+        # The output gives a dropped review as having no text
+        self.assertEqual({0: 'x', 1: ''}, review.emails.parse_refined_output(
+            '---SEQ 0---\nx\n---SEQ 1---\n', keep_empty=True))
+        self.assertEqual({0: 'x'}, review.emails.parse_refined_output(
+            '---SEQ 0---\nx\n---SEQ 1---\n'))
+
     def test_review_revise_redraft(self):
         """Revised reviews get new drafts before the old ones go"""
         cser = self.get_database()
