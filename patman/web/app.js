@@ -1234,7 +1234,8 @@ async function viewReview(id, wantVer) {
     return new Map((ver ? ver.reviews : []).map((r) => [r.id, r]));
   };
   // Start a job on some reviews (seqs, or those which 'want' for all) and show
-  // it on their cards, staying on this page
+  // it on their cards, staying on this page. Gives the job, or nothing if it
+  // could not be started
   const runHere = async (path, data, seqs, verb, want, msg) => {
     let job;
     try {
@@ -1248,6 +1249,7 @@ async function viewReview(id, wantVer) {
                                                           : want(r)))
       .map((r) => entries.get(r.id));
     follow(job, verb, targets);
+    return job;
   };
   // Show a job on the cards it acts on, leaving them out of the buttons at
   // the top until it finishes
@@ -1435,12 +1437,22 @@ async function viewReview(id, wantVer) {
     const st = await api(`jobs/${jid}`).catch(() => null);
     if (st) follow(st, st.title.split(' ')[0], targets);
   });
+  // Once the revision starts, the form gives way to a line saying so, until
+  // it finishes and the cards show the revised reviews; if it fails, the line
+  // stays to say so
   const reviseAll = h('div', {});
+  const reviseAllNow = async (note, drafts, msg) => {
+    const job = await revise([], null, note, drafts, msg);
+    if (!job) return;
+    const strip = h('div', { class: 'jobstrip busy' });
+    fill(reviseAll, h('div', { class: 'card' }, strip));
+    const st = await followJob(job, strip, 'Revising all the reviews');
+    if (st && jobStatus(st)[0] === 'ok') fill(reviseAll);
+  };
   const askAll = () => fill(reviseAll, h('div', { class: 'card' },
     h('div', { class: 'name' }, 'Revise all the reviews'),
-    reviseForm(null, sv.reviews.some(hasDraft),
-               () => fill(reviseAll),
-               (note, drafts, msg) => revise([], null, note, drafts, msg))));
+    reviseForm(null, sv.reviews.some(hasDraft), () => fill(reviseAll),
+               reviseAllNow)));
   // Review this version again, as a job, and show the job
   const reviewAgain = async (context) => {
     const job = await api('review', { json: { target: sv.link, ups: ser.upstream,
