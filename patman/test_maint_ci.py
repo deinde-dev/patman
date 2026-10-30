@@ -448,7 +448,12 @@ class TestMaintCi(RepoTestCase):
 
     def test_command(self):
         """'patman maint test' and 'patman maint ci' use the [maint] rules"""
-        self.add_file('a.txt', 'one\n')
+        queue = self.add_file('a.txt', 'one\n')
+        self.git('branch', 'main-push')
+
+        # The branch checked out is not the queue, even with commits of its
+        # own, which here would fail the check
+        self.add_file('b.txt', 'two\n', GOOD + ['Series-links: 1:123'])
         test_args = cmdline.parse_args(['maint', 'test'], config_fname=False)
         ci_args = cmdline.parse_args(['maint', 'ci', '-n'], config_fname=False)
         orig = os.getcwd()
@@ -462,8 +467,10 @@ class TestMaintCi(RepoTestCase):
                 self.assertEqual(0, control.do_maint(ci_args))
         finally:
             os.chdir(orig)
-        self.assertIn('  ok   grep -q one a.txt\n', out.getvalue())
-        self.assertIn('Would push ', out.getvalue())
+        self.assertIn(f'Testing main-push at {queue[:12]}\n'
+                      '  ok   grep -q one a.txt\n', out.getvalue())
+        self.assertIn(f'Would push {queue[:12]} to ci +main-push:ci\n',
+                      out.getvalue())
         args = cmdline.parse_args(['maint', 'ci', '-W', '-b', 'main'],
                                   config_fname=False)
         self.assertEqual((False, False, 'main'),

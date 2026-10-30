@@ -290,7 +290,7 @@ def _default_branch(upstream, push_branch, git_dir):
     return branch
 
 
-def get_rules(values=None, git_dir=None, branch=None):
+def get_rules(values=None, git_dir=None, branch=None, queue=False):
     """Get the rules from the [maint] settings
 
     Args:
@@ -300,6 +300,8 @@ def get_rules(values=None, git_dir=None, branch=None):
             current one
         branch (str or None): Branch to check, or None for the default (see
             _default_branch())
+        queue (bool): True if the default branch is the push branch, which
+            holds the queue, e.g. to test, run CI on or publish it
 
     Return:
         Rules: The rules
@@ -332,9 +334,10 @@ def get_rules(values=None, git_dir=None, branch=None):
 
     upstream = f'{remote}/{words[1]}'
     push_branch = values.get('push_branch') or f'{words[1]}-push'
-    rules = Rules(upstream, branch or _default_branch(upstream, push_branch,
-                                                      git_dir),
-                  signoff, push_branch)
+    if not branch:
+        branch = push_branch if queue else _default_branch(
+            upstream, push_branch, git_dir)
+    rules = Rules(upstream, branch, signoff, push_branch)
     if values.get('history'):
         _check_words('history', [values['history']], HISTORY)
         rules.history = values['history']

@@ -703,14 +703,14 @@ def add_maint_subparser(subparsers):
         'test', help="Run the project's tests on the commits not yet upstream")
     test.add_argument(
         '-b', '--branch',
-        help='Branch to test (default: as for check)')
+        help='Branch to test (default: the push branch)')
 
     cip = maint_subparsers.add_parser(
         'ci', help='Check the commits not yet upstream, push them to run CI '
                    'and wait for it')
     cip.add_argument(
         '-b', '--branch',
-        help='Branch to push (default: as for check)')
+        help='Branch to push (default: the push branch)')
     cip.add_argument(
         '-n', '--dry-run', action='store_true',
         help='Say where the branch would be pushed, without pushing it')
@@ -723,7 +723,7 @@ def add_maint_subparser(subparsers):
                         'once CI has passed on them')
     pub.add_argument(
         '-b', '--branch',
-        help='Branch to publish (default: as for check)')
+        help='Branch to publish (default: the push branch)')
     pub.add_argument(
         '-n', '--dry-run', action='store_true',
         help='Say where the branch would be pushed, without pushing it')

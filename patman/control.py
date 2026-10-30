@@ -556,12 +556,13 @@ def do_maint(args):
         rules = maint.get_rules(branch=args.branch)
         return maint.do_check(rules, args.allow_merge)
     if args.subcmd == 'test':
-        return maint_ci.do_test(maint.get_rules(branch=args.branch))
+        return maint_ci.do_test(maint.get_rules(branch=args.branch,
+                                                queue=True))
     if args.subcmd == 'ci':
-        return maint_ci.do_ci(maint.get_rules(branch=args.branch),
+        return maint_ci.do_ci(maint.get_rules(branch=args.branch, queue=True),
                               args.dry_run, args.wait)
     if args.subcmd == 'publish':
-        rules = maint.get_rules(branch=args.branch)
+        rules = maint.get_rules(branch=args.branch, queue=True)
         return maint_ci.do_publish(
             rules, args.dry_run, args.yes,
             after=lambda old, new: _thank_published(args, rules, old, new))
