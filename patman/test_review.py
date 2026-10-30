@@ -1440,11 +1440,24 @@ class TestReview(CseriesTester):
                                  for call in delete.call_args_list],
                     create, out.getvalue())
 
-        # If patchwork fails while the new draft is made, the old one is kept
+        # Without its headers, the draft needs patchwork; if that fails, the
+        # old draft is kept
         with mock.patch.object(review.drafts, 'create_drafts',
                                side_effect=ValueError('status 500')):
             ret, _, deleted, _, _ = run(return_value=({'id': 123}, 'x', 1, 2))
         self.assertEqual(('status 500', []), (ret, deleted))
+
+        # With them, patchwork is not needed
+        db.review_set_envelope(first, {'subject': 'Re: [PATCH 1/2] x'})
+        db.commit()
+        ret, fetch, deleted, create, out = run()
+        self.assertEqual((0, ['d1']), (ret, deleted))
+        fetch.assert_not_called()
+        self.assertEqual(({1: {'subject': 'Re: [PATCH 1/2] x'}},
+                          {1: 'Hi Fred,\n\nRevised again'}),
+                         create.call_args.args)
+        self.assertEqual('d1b', db.review_get(first).draft_id)
+        self.assertIn('Created 1 Gmail draft(s)', out)
 
     def test_review_revise_context(self):
         """A revision is given the rest of the series as context"""

@@ -93,6 +93,10 @@ Changed
 
 Fixed
 ~~~~~
+- 'review --revise -d' and 'review --redraft' delete the old Gmail drafts
+  only once the new ones are made, so a patchwork error no longer leaves
+  the reviews with no drafts. A revision makes its drafts from the headers
+  stored with the reviews, so it does not need patchwork.
 - When autolink cannot find a version on lore, its list of possible matches
   shows each series once, rather than again under the title of its first
   patch, with the Message-ID of its cover letter.
