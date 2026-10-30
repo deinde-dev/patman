@@ -309,7 +309,7 @@ class TestMaint(RepoTestCase):
         with terminal.capture() as (out, _):
             self.assertEqual(0, maint.do_check(rules, git_dir=self.repo))
         self.assertEqual(f'Checking 1 commit in us/main..main\n'
-                         f'  ok   {good[:12]} good\nAll ok\n', out.getvalue())
+                         f'  ok   {good[:12]} good\n', out.getvalue())
 
         bad = self.commit('bad', FRED, [f'Signed-off-by: {FRED}'])
         with terminal.capture() as (out, _):
@@ -349,8 +349,7 @@ class TestMaint(RepoTestCase):
         self.assertEqual("'main' does not contain us/main, so it cannot be "
                          'pushed; to rebase it: git rebase us/main main\n'
                          'Checking 1 commit in us/main..main\n'
-                         f'  ok   {other[:12]} other\n'
-                         'All ok, once rebased on us/main\n', out.getvalue())
+                         f'  ok   {other[:12]} other\n', out.getvalue())
 
         with self.assertRaises(ValueError) as exc:
             maint.do_check(maint.get_rules(DTC, self.repo, 'queue'),
@@ -392,7 +391,8 @@ class TestMaint(RepoTestCase):
                     subcmd='check', branch=None, allow_merge=False)))
         finally:
             os.chdir(orig)
-        self.assertIn('All ok', out.getvalue())
+        self.assertIn('  ok   ', out.getvalue())
+        self.assertNotIn('FAIL', out.getvalue())
         with self.assertRaises(ValueError) as exc:
             control.do_maint(Namespace(subcmd='apply'))
         self.assertEqual("Unknown maint subcommand 'apply'", str(exc.exception))

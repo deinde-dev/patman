@@ -680,8 +680,4 @@ def do_check(rules, allow_merge=False, git_dir=None):
         bad += bool(problems)
     if bad:
         print(f'{bad} of {len(commits)} with problems')
-    elif diverged:
-        print(f'All ok, once rebased on {rules.upstream}')
-    else:
-        print('All ok')
     return 1 if bad or diverged else 0
