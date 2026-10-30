@@ -62,8 +62,8 @@ def title(msg):
     return str(msg['Subject']).rsplit('] ', maxsplit=1)[-1]
 
 
-class TestMaintApply(RepoTestCase):
-    """Test applying a series from the list"""
+class LoreTestCase(RepoTestCase):
+    """A test with a git repo like dtc's and a thread on a fake lore"""
     def setUp(self):
         super().setUp()
         self.thread = ''
@@ -179,6 +179,9 @@ class TestMaintApply(RepoTestCase):
         return [part.strip().splitlines() for part in out.split('\0')
                 if part.strip()]
 
+
+class TestMaintApply(LoreTestCase):
+    """Test applying a series from the list"""
     def test_apply(self):
         """A series is applied to the push branch, with its tags"""
         link = self.make_series()

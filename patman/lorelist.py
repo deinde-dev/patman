@@ -845,6 +845,40 @@ class LoreList(patchwork.SeriesFinder):  # pylint: disable=R0902,R0904
             'patches': patches,
         }
 
+    async def series_of(self, client, msgid):
+        """Find the series which a patch was sent in
+
+        This follows the replies back from the patch to the cover letter, or
+        to the first patch if there is none, through messages of the same
+        version and count, so that a series sent in reply to an older
+        version is not taken as part of it.
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            msgid (str): Message-ID of the patch, with or without angle
+                brackets
+
+        Returns:
+            str or None: Message-ID of the cover letter or first patch, as
+                get_series() takes, or None if the message is not part of a
+                series which can be found
+
+        Raises:
+            ValueError: Lore does not have the message
+        """
+        msg = await self._message(client, lore.bare_msgid(msgid))
+        info = subject_info(msg)
+        while info and info[1]:
+            parent = lore.bare_msgid(str(msg.get('In-Reply-To', '')))
+            pmsg = next((item for item in await self._thread(
+                client, msgid_of(msg)) if msgid_of(item) == parent), None)
+            pinfo = subject_info(pmsg) if pmsg else None
+            if not pinfo or pinfo[0] != info[0] or pinfo[2] != info[2] or \
+                    pinfo[1] >= info[1]:
+                break
+            msg, info = pmsg, pinfo
+        return msgid_of(msg) if info and info[1] <= 1 else None
+
     async def get_series_patch_states(self, client, link):
         """Get the state of each patch in a series
 
