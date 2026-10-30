@@ -33,6 +33,7 @@ from patman import lore
 from patman import lorelist
 from patman import maint
 from patman import maint_apply
+from patman import maint_ci
 from patman import patchstream
 from patman import pwcache
 from patman import review as review_mod
@@ -553,6 +554,11 @@ def do_maint(args):
     if args.subcmd == 'check':
         rules = maint.get_rules(branch=args.branch)
         return maint.do_check(rules, args.allow_merge)
+    if args.subcmd == 'test':
+        return maint_ci.do_test(maint.get_rules(branch=args.branch))
+    if args.subcmd == 'ci':
+        return maint_ci.do_ci(maint.get_rules(branch=args.branch),
+                              args.dry_run, args.wait)
     if args.subcmd == 'apply':
         rules = maint.get_rules()
         return maint_apply.apply_series(rules, maint_list(rules),

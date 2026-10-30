@@ -12,8 +12,11 @@ from unittest import mock
 from u_boot_pylib import command
 from u_boot_pylib import terminal
 
+from patman import cmdline
+from patman import control
+from patman import maint
 from patman import maint_ci
-from patman.test_maint import FRED, ME, RepoTestCase
+from patman.test_maint import DTC, FRED, ME, RepoTestCase
 
 # Trailers which pass the dtc rules
 GOOD = [f'Signed-off-by: {FRED}', 'Message-ID: <1@x.org>',
@@ -276,3 +279,26 @@ class TestMaintCi(RepoTestCase):
                 error='no network')]))
         self.assertEqual('  running gitlab dgibson/dtc: no network\n',
                          out.getvalue())
+
+    def test_command(self):
+        """'patman maint test' and 'patman maint ci' use the [maint] rules"""
+        self.add_file('a.txt', 'one\n')
+        test_args = cmdline.parse_args(['maint', 'test'], config_fname=False)
+        ci_args = cmdline.parse_args(['maint', 'ci', '-n'], config_fname=False)
+        orig = os.getcwd()
+        os.chdir(self.repo)
+        try:
+            with mock.patch.dict(maint.settings.maint, {
+                    **DTC, 'test': 'grep -q one a.txt',
+                    'ci_push': 'ci +{branch}:ci'}, clear=True), \
+                    terminal.capture() as (out, _):
+                self.assertEqual(0, control.do_maint(test_args))
+                self.assertEqual(0, control.do_maint(ci_args))
+        finally:
+            os.chdir(orig)
+        self.assertIn('  ok   grep -q one a.txt\n', out.getvalue())
+        self.assertIn('Would push ', out.getvalue())
+        args = cmdline.parse_args(['maint', 'ci', '-W', '-b', 'main'],
+                                  config_fname=False)
+        self.assertEqual((False, False, 'main'),
+                         (args.wait, args.dry_run, args.branch))
