@@ -147,6 +147,28 @@ everywhere, including when CI does not start within five minutes, or does
 not finish within an hour. ``-n`` says where the branch would be pushed, and
 ``-W`` pushes it without waiting.
 
+Publishing the queue
+--------------------
+
+``patman maint publish`` pushes the branch to the remotes which the
+``publish`` setting gives, in order. First it fetches them, so that it knows
+what they have, and checks the branch as ``maint check`` does. Then CI must
+have passed on the branch's last commit, everywhere it runs; if anything was
+applied or changed since ``maint ci``, run that again. It asks before
+pushing::
+
+    $ patman maint publish
+    Checking 2 commits in us/main..main-push
+      ok   a2f78f549e91 README: Explain how to build with meson
+      ok   e5353eb4e214 README: Use meson in the Python section
+    Publish e5353eb4e214 to us main-push:main main-push:master, david main-push:main, gl main-push:main? [y/N] y
+    Published e5353eb4e214 to us main-push:main main-push:master, david main-push:main, gl main-push:main
+
+It stops at the first push which fails. A remote which has the commit
+already is left out, so once the problem is fixed, publishing again carries
+on where it stopped. ``-n`` says where the branch would be pushed, and ``-y``
+pushes without asking.
+
 The rules
 ---------
 
@@ -168,6 +190,7 @@ maintainer of the project has them. For dtc:
     gitlab: dgibson/dtc
     test: make check; meson setup build; meson test -C build
     ci_push: david +{branch}:ci; gl +{branch}:ci
+    publish: us {branch}:main {branch}:master; david {branch}:main; gl {branch}:main
 
 The settings are:
 
@@ -228,9 +251,14 @@ The settings are:
 
 ``ci_push``
     Where ``maint ci`` pushes the branch to run CI, separated by semicolons:
-    each is a remote and a refspec, with ``{branch}`` for the branch, e.g.
+    each is a remote and its refspecs, with ``{branch}`` for the branch, e.g.
     ``david +{branch}:ci``. The ``+`` forces the push, since a branch which
     only runs CI is usually replaced each time
+
+``publish``
+    Where ``maint publish`` pushes the branch, in the same form, e.g.
+    ``us {branch}:main {branch}:master`` to push it to both ``main`` and
+    ``master`` on the remote ``us``. These pushes are not forced
 
 What is checked
 ---------------
