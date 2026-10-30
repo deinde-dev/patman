@@ -730,6 +730,16 @@ def add_maint_subparser(subparsers):
     pub.add_argument(
         '-y', '--yes', action='store_true',
         help='Push without asking first')
+
+    thanks = maint_subparsers.add_parser(
+        'thanks', help='Draft the thanks for series which went upstream')
+    thanks.add_argument(
+        'range', nargs='?',
+        help="Commits to thank, e.g. 'us/main~3..us/main' (default: those "
+             'which went upstream since the thanks were last drafted)')
+    thanks.add_argument(
+        '-n', '--dry-run', action='store_true',
+        help='Show the thanks, without drafting them')
     return maint
 
 

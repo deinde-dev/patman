@@ -34,6 +34,7 @@ from patman import lorelist
 from patman import maint
 from patman import maint_apply
 from patman import maint_ci
+from patman import maint_thanks
 from patman import patchstream
 from patman import pwcache
 from patman import review as review_mod
@@ -560,8 +561,15 @@ def do_maint(args):
         return maint_ci.do_ci(maint.get_rules(branch=args.branch),
                               args.dry_run, args.wait)
     if args.subcmd == 'publish':
-        return maint_ci.do_publish(maint.get_rules(branch=args.branch),
-                                   args.dry_run, args.yes)
+        rules = maint.get_rules(branch=args.branch)
+        return maint_ci.do_publish(
+            rules, args.dry_run, args.yes,
+            after=lambda old, new: _thank_published(args, rules, old, new))
+    if args.subcmd == 'thanks':
+        rules = maint.get_rules()
+        return maint_thanks.draft_thanks(
+            rules, maint_list(rules), args.range, _closing(args),
+            getattr(args, 'gmail_account', None), args.dry_run)
     if args.subcmd == 'apply':
         rules = maint.get_rules()
         return maint_apply.apply_series(rules, maint_list(rules),
@@ -569,6 +577,40 @@ def do_maint(args):
                                         args.patches, args.force,
                                         args.dry_run, redo=args.redo)
     raise ValueError(f"Unknown maint subcommand '{args.subcmd}'")
+
+
+def _closing(args):
+    """Get the lines which end an email, from the 'signoff' setting
+
+    Args:
+        args (Namespace): Arguments
+
+    Return:
+        str or None: Lines, e.g. 'Regards,\nSimon', or None if there are none
+    """
+    closing = getattr(args, 'signoff', None)
+    return closing.replace('\\n', '\n') if closing else None
+
+
+def _thank_published(args, rules, old, new):
+    """Draft the thanks for the series which have just been published
+
+    A problem is reported, without failing the publish, since the commits
+    are upstream by then.
+
+    Args:
+        args (Namespace): Arguments
+        rules (Rules): Rules to use
+        old (str): Upstream commit before publishing
+        new (str): Upstream commit after publishing
+    """
+    try:
+        maint_thanks.draft_thanks(
+            rules, maint_list(rules), f'{old}..{new}', _closing(args),
+            getattr(args, 'gmail_account', None), quiet=True)
+    except Exception as exc:  # pylint: disable=W0718
+        print(f'Cannot draft the thanks: {exc}; to try again: patman maint '
+              f'thanks {old[:12]}..{new[:12]}')
 
 
 def maint_list(rules, test_db=None):

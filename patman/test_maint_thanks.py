@@ -8,6 +8,7 @@ from unittest import mock
 
 from u_boot_pylib import terminal
 
+from patman import control
 from patman import maint_thanks
 from patman.review import common
 from patman.test_maint import ME
@@ -152,3 +153,13 @@ class TestMaintThanks(LoreTestCase):
         self.assertEqual("No thanks have been drafted here yet: give the "
                          "commits to thank, e.g. 'us/main~5..us/main'",
                          str(exc.exception))
+
+        # A problem drafting the thanks after publishing is reported
+        with mock.patch.object(control, 'maint_list',
+                               side_effect=ValueError('no list')), \
+                terminal.capture() as (out, _):
+            control._thank_published(  # pylint: disable=W0212
+                mock.Mock(signoff=None), self.rules(), 'a' * 40, 'b' * 40)
+        self.assertEqual('Cannot draft the thanks: no list; to try again: '
+                         f"patman maint thanks {'a' * 12}..{'b' * 12}\n",
+                         out.getvalue())

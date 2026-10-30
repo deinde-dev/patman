@@ -302,17 +302,22 @@ class TestMaintCi(RepoTestCase):
         ret, out = self.publish(maint_ci.SUCCESS, 'n')
         self.assertEqual(1, ret)
         self.assertTrue(out.endswith('Not published\n'), out)
-        ret, out = self.publish(maint_ci.SUCCESS, None, dry_run=True)
+        after = mock.Mock()
+        ret, out = self.publish(maint_ci.SUCCESS, None, dry_run=True,
+                                after=after)
         self.assertEqual(0, ret)
+        after.assert_not_called()
         self.assertTrue(out.endswith(f'Would publish {commit[:12]} to '
                                      f'{where}\n'), out)
         self.assertEqual([base] * 3, [self.tip(path)
                                       for path in bare.values()])
 
-        ret, out = self.publish(maint_ci.SUCCESS)
+        after = mock.Mock()
+        ret, out = self.publish(maint_ci.SUCCESS, after=after)
         self.assertEqual(0, ret, out)
         self.assertTrue(out.endswith(f'Published {commit[:12]} to {where}\n'),
                         out)
+        after.assert_called_once_with(base, commit)
         self.assertEqual([commit] * 4, [self.tip(bare['us']),
                                         self.tip(bare['us'], 'master'),
                                         self.tip(bare['david']),
