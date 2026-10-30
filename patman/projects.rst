@@ -131,9 +131,9 @@ reads its series from https://lore.kernel.org/devicetree-compiler:
 - A maintainer can apply series from the list by dtc's rules with
   ``patman maint apply``, check the commits to be pushed with
   ``patman maint check``, test them with ``patman maint test``, run CI on
-  them with ``patman maint ci`` and push them with ``patman maint publish``.
-  The chapter has dtc's ``[maint]`` section as its example (see
-  :ref:`maint`).
+  them with ``patman maint ci`` and push them with ``patman maint publish``,
+  which drafts the thanks too. The chapter has dtc's ``[maint]`` section as
+  its example (see :ref:`maint`).
 
 Patman does not detect a dtc tree, so there is no ``[dtc_settings]``
 section; put dtc's settings in the tree's ``.patman``. Example settings in
