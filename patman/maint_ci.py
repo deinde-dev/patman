@@ -462,27 +462,6 @@ def _ci_passed(rules, sha):
     return False
 
 
-def _fetch(remotes, git_dir):
-    """Fetch from remotes, so that what they have is known
-
-    Args:
-        remotes (list of str): Remotes, e.g. ['us', 'david']
-        git_dir (str or None): Directory of the git repo, or None for the
-            current one
-
-    Return:
-        bool: True if each fetch worked; if not, the problem is shown
-    """
-    for remote in dict.fromkeys(remotes):
-        result = subprocess.run(['git', 'fetch', '--quiet', remote],
-                                cwd=git_dir, capture_output=True, text=True,
-                                check=False)
-        if result.returncode:
-            print(f'Cannot fetch {remote}: {result.stderr.strip()}')
-            return False
-    return True
-
-
 def _ready(rules, sha, git_dir):
     """Check that the queue can be published, and find where to
 
@@ -503,7 +482,7 @@ def _ready(rules, sha, git_dir):
             int: Exit code if nothing is to be published: 0 if there is
                 nothing to publish, 1 if the branch cannot be published
     """
-    if not _fetch([remote for remote, _ in rules.publish], git_dir):
+    if not maint.fetch([remote for remote, _ in rules.publish], git_dir):
         return [], 1
     if maint.do_check(rules, git_dir=git_dir):
         print('Not published, since the check failed')

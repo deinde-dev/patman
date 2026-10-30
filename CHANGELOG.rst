@@ -120,6 +120,9 @@ Changed
 
 Fixed
 ~~~~~
+- ``patman maint apply`` fetches the upstream first, so that the push branch
+  is made from the upstream as it is and patches which someone else has
+  pushed count as applied already.
 - ``patman maint test``, ``maint ci`` and ``maint publish`` act on the push
   branch, which holds the queue, rather than the branch checked out, which
   may be a working branch with patman's tags in it. ``-b`` gives another.
