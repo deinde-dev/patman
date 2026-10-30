@@ -10,6 +10,11 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman maint publish`` pushes the commits which are about to go out to
+  the remotes which the new ``publish`` setting gives, once they pass the
+  check and CI has passed on the last of them, after asking. It fetches the
+  remotes first and leaves out those which have the commit already, so it
+  carries on where it stopped if a push fails.
 - ``patman maint test`` runs the project's tests, from the new ``test``
   setting, on the commits which are about to be pushed, in a temporary
   worktree. ``patman maint ci`` checks those commits, pushes them to the

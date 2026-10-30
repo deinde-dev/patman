@@ -559,6 +559,9 @@ def do_maint(args):
     if args.subcmd == 'ci':
         return maint_ci.do_ci(maint.get_rules(branch=args.branch),
                               args.dry_run, args.wait)
+    if args.subcmd == 'publish':
+        return maint_ci.do_publish(maint.get_rules(branch=args.branch),
+                                   args.dry_run, args.yes)
     if args.subcmd == 'apply':
         rules = maint.get_rules()
         return maint_apply.apply_series(rules, maint_list(rules),
