@@ -665,6 +665,24 @@ def add_maint_subparser(subparsers):
     maint = subparsers.add_parser(
         'maint', help="Apply and check patches as a project's maintainer")
     maint_subparsers = maint.add_subparsers(dest='subcmd')
+    apply = maint_subparsers.add_parser(
+        'apply', help='Apply a series from the list to the push branch')
+    apply.add_argument(
+        'link', nargs='?',
+        help='Message-ID of the cover letter or first patch, a link to it on '
+             "lore, or the name of one of your series (default: the current "
+             "branch's series)")
+    apply.add_argument(
+        '-P', '--patches',
+        help="Patches to apply, counting from 1, e.g. '1-3,5' (default: all)")
+    apply.add_argument(
+        '-f', '--force', action='store_true',
+        help='Apply the series even if it is not complete, or there is a '
+             'newer version')
+    apply.add_argument(
+        '-n', '--dry-run', action='store_true',
+        help='Show what would be applied, without applying it')
+
     check = maint_subparsers.add_parser(
         'check',
         help='Check the commits not yet upstream against the [maint] rules')

@@ -394,5 +394,5 @@ class TestMaint(RepoTestCase):
         self.assertIn('  ok   ', out.getvalue())
         self.assertNotIn('FAIL', out.getvalue())
         with self.assertRaises(ValueError) as exc:
-            control.do_maint(Namespace(subcmd='apply'))
-        self.assertEqual("Unknown maint subcommand 'apply'", str(exc.exception))
+            control.do_maint(Namespace(subcmd='bogus'))
+        self.assertEqual("Unknown maint subcommand 'bogus'", str(exc.exception))

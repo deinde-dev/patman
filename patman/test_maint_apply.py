@@ -11,6 +11,8 @@ import re
 
 from u_boot_pylib import terminal
 
+from patman import control
+from patman import cseries
 from patman import lore
 from patman import lorelist
 from patman import maint
@@ -333,3 +335,56 @@ class TestMaintApply(RepoTestCase):
         with open(os.path.join(self.repo, 'a.txt'), encoding='utf-8') as inf:
             self.assertEqual('one\ntwo\n', inf.read())
         self.assertEqual('', self.git('status', '--porcelain'))
+
+    def test_command(self):
+        """'patman maint apply' reads the series from the upstream's list"""
+        cser = cseries.Cseries(self.tmpdir)
+        cser.open_database()
+        cser.db.upstream_add('us', 'https://us', lore_url=LIST)
+        cser.db.commit()
+        cser.close_database()
+        llist = control.maint_list(self.rules(), self.tmpdir)
+        self.assertEqual((LIST, 'us'), (llist.url, llist.upstream))
+        with self.assertRaises(ValueError) as exc:
+            control.maint_list(maint.get_rules(
+                {'upstream': 'david main', 'signoff': ME}, self.repo),
+                self.tmpdir)
+        self.assertEqual("The upstream 'david' has no list on lore: give it "
+                         "one with 'patman upstream set david -l <url>'",
+                         str(exc.exception))
+
+    def test_link(self):
+        """The series to apply may be given by name, or be the branch's"""
+        cser = cseries.Cseries(self.tmpdir)
+        cser.open_database()
+        sid = cser.db.series_add(maint.current_branch(self.repo), 'Fix it')
+        cser.db.ser_ver_add(sid, 1, link='v1@x.org')
+        cser.db.ser_ver_add(sid, 2, link='v2@x.org')
+        cser.db.ser_ver_add(sid, 3)
+        cser.db.ser_ver_add(cser.db.series_add('unsent', 'Not yet'), 1)
+        cser.db.commit()
+        cser.close_database()
+
+        def link(series):
+            with terminal.capture() as (out, _):
+                found = control.maint_link(series, self.tmpdir, self.repo)
+            return found, out.getvalue().strip()
+
+        # A Message-ID or link is used as it is
+        self.assertEqual(('a@x.org', ''), link('a@x.org'))
+        self.assertEqual((f'{LIST}/a@x.org/', ''), link(f'{LIST}/a@x.org/'))
+
+        # Else the latest version which has been sent is used, of the
+        # current branch's series or the one named
+        name = maint.current_branch(self.repo)
+        want = ('v2@x.org', f"Series '{name}' v2: v2@x.org")
+        self.assertEqual(want, link(None))
+        self.assertEqual(want, link(name))
+
+        for series, msg in (
+                ('unsent', "Series 'unsent' has not been sent"),
+                ('bogus', "There is no series 'bogus'")):
+            with self.assertRaises(ValueError) as exc:
+                link(series)
+            self.assertEqual(f'{msg}: give the Message-ID of the series to '
+                             'apply', str(exc.exception))
