@@ -120,6 +120,9 @@ Changed
 
 Fixed
 ~~~~~
+- ``patman maint test``, ``maint ci`` and ``maint publish`` act on the push
+  branch, which holds the queue, rather than the branch checked out, which
+  may be a working branch with patman's tags in it. ``-b`` gives another.
 - A new version of a series sent with b4 is linked to your earlier reviews,
   in the inbox and when it is reviewed, even when its title changes, by the
   name of its change-id in the Message-IDs. ``review --relink`` merges such

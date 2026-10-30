@@ -365,13 +365,19 @@ class TestMaint(RepoTestCase):
 
     def test_default_branch(self):
         """The branch checked is the one checked out, if it has commits of
-        its own, else the push branch"""
+        its own, else the push branch; the queue is on the push branch"""
         self.assertEqual(('main', 'main-push'),
                          (self.rules().branch, self.rules().push_branch))
         self.git('branch', 'main-push')
         self.assertEqual('main-push', self.rules().branch)
         self.commit('mine', ME, [f'Signed-off-by: {ME}'])
         self.assertEqual('main', self.rules().branch)
+
+        # The queue is always on the push branch, unless another is given
+        self.assertEqual('main-push', maint.get_rules(DTC, self.repo,
+                                                      queue=True).branch)
+        self.assertEqual('other', maint.get_rules(DTC, self.repo, 'other',
+                                                  queue=True).branch)
         self.assertEqual('next-push',
                          self.rules(push_branch='next-push').push_branch)
         self.git('checkout', '-q', '--detach', 'HEAD~1')

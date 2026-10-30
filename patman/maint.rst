@@ -113,11 +113,12 @@ Testing the queue
 -----------------
 
 ``patman maint test`` runs the project's tests, which the ``test`` setting
-gives, on the same branch as ``maint check``. The tests run one after the
-other in a temporary worktree of the branch's last commit, so they see only
-what is committed, the build starts clean and the tree you are working in is
-not touched. They stop at the first which fails, showing the end of its
-output::
+gives, on the push branch, which holds the queue, or the branch given with
+``-b``; ``maint ci`` and ``maint publish`` use the same branch. The tests run
+one after the other in a temporary worktree of the branch's last commit, so
+they see only what is committed, the build starts clean and the tree you are
+working in is not touched. They stop at the first which fails, showing the end
+of its output::
 
     $ patman maint test
     Testing main-push at e5353eb4e214
@@ -128,11 +129,11 @@ output::
 Running CI
 ----------
 
-``patman maint ci`` checks the branch as ``maint check`` does, then pushes it
-to each place which the ``ci_push`` setting gives and waits for CI to finish
-on the commit pushed, on GitHub (using ``gh``) and GitLab, as the ``github``
-and ``gitlab`` settings say. Any run for that commit counts, wherever it was
-started from::
+``patman maint ci`` checks the push branch as ``maint check`` does, then
+pushes it to each place which the ``ci_push`` setting gives and waits for CI
+to finish on the commit pushed, on GitHub (using ``gh``) and GitLab, as the
+``github`` and ``gitlab`` settings say. Any run for that commit counts,
+wherever it was started from::
 
     $ patman maint ci
     Checking 2 commits in us/main..main-push
@@ -150,7 +151,7 @@ not finish within an hour. ``-n`` says where the branch would be pushed, and
 Publishing the queue
 --------------------
 
-``patman maint publish`` pushes the branch to the remotes which the
+``patman maint publish`` pushes the push branch to the remotes which the
 ``publish`` setting gives, in order. First it fetches them, so that it knows
 what they have, and checks the branch as ``maint check`` does. Then CI must
 have passed on the branch's last commit, everywhere it runs; if anything was
