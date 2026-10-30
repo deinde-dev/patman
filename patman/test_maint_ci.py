@@ -463,3 +463,21 @@ class TestMaintCi(RepoTestCase):
                                   config_fname=False)
         self.assertEqual((False, False, 'main'),
                          (args.wait, args.dry_run, args.branch))
+
+        # Publishing asks first, unless given -y
+        self.setup_publish()
+        pub_args = cmdline.parse_args(['maint', 'publish', '-n'],
+                                      config_fname=False)
+        self.assertEqual((True, False), (pub_args.dry_run, pub_args.yes))
+        self.assertTrue(cmdline.parse_args(['maint', 'publish', '-y'],
+                                           config_fname=False).yes)
+        os.chdir(self.repo)
+        try:
+            with mock.patch.dict(maint.settings.maint, {
+                    **DTC, 'upstream': 'us main', 'publish': 'us {branch}:main',
+                    'github': '', 'gitlab': ''}, clear=True), \
+                    terminal.capture() as (out, _):
+                self.assertEqual(0, control.do_maint(pub_args))
+        finally:
+            os.chdir(orig)
+        self.assertIn('Would publish ', out.getvalue())

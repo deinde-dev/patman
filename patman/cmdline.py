@@ -717,6 +717,19 @@ def add_maint_subparser(subparsers):
     cip.add_argument(
         '-W', '--no-wait', action='store_false', dest='wait',
         help='Push without waiting for CI to finish')
+
+    pub = maint_subparsers.add_parser(
+        'publish', help='Push the commits not yet upstream to the remotes, '
+                        'once CI has passed on them')
+    pub.add_argument(
+        '-b', '--branch',
+        help='Branch to publish (default: as for check)')
+    pub.add_argument(
+        '-n', '--dry-run', action='store_true',
+        help='Say where the branch would be pushed, without pushing it')
+    pub.add_argument(
+        '-y', '--yes', action='store_true',
+        help='Push without asking first')
     return maint
 
 
