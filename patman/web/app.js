@@ -2254,7 +2254,8 @@ function inboxDetails(s, ups, jobBox) {
                            `Open the series on ${siteName(s.web_url)}, in a new tab`,
                            'btn light small')),
     reviewBox, tryBox,
-    s.earlier && s.earlier.parts.length > 0 && earlierDetails(s.earlier, ups));
+    s.earlier && s.earlier.parts.length > 0 && earlierDetails(s.earlier, ups),
+    s.older && s.older.length > 0 && olderDetails(s.older, ups));
 }
 
 // Show your review of an earlier version of a series in the inbox, which is
@@ -2283,6 +2284,61 @@ function earlierDetails(e, ups) {
     h('div', { class: 'actions' },
       h('a', { class: 'btn light small', href: `#/reviews/${e.id}`,
                title: 'Show your reviews of the earlier version' }, 'Your reviews')));
+}
+
+// Show each series in the inbox once, at its newest version, putting the
+// older versions in its 'older', newest first. Versions go together if they
+// belong to the same review of yours, else if they have the same title and
+// submitter. Pull requests are kept apart, since each has the same title
+function inboxCombine(list) {
+  const key = (s) => {
+    const rev = s.reviewed || (s.earlier && s.earlier.id);
+    if (rev) return `r${rev}`;
+    const name = s.name || '';
+    if (/^\[[^\]]*\bPULL\b|^(\[[^\]]*\]\s*)*please pull\b/i.test(name)) return `i${s.id}`;
+    const title = name.replace(/^(\[[^\]]*\]\s*)+/, '').trim().toLowerCase();
+    return `t${s.submitter || ''}\n${title}`;
+  };
+  const groups = new Map();
+  for (const s of list) {
+    const k = key(s);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(s);
+  }
+  const shown = [];
+  for (const s of list) {
+    const group = groups.get(key(s));
+    if (!group) continue;
+    groups.delete(key(s));
+    group.sort((a, b) => (b.version || 1) - (a.version || 1) ||
+                         (b.date || '').localeCompare(a.date || ''));
+    const [newest, ...older] = group;
+    newest.older = older;
+    shown.push(newest);
+  }
+  return shown;
+}
+
+// List the older versions of a series in the inbox, from inboxCombine()
+function olderDetails(older, ups) {
+  return h('div', {},
+    h('div', { class: 'section' }, older.length > 1 ? 'Older versions' : 'Older version'),
+    h('div', { class: 'list' }, older.map((o) => h('div', { class: 'row' },
+      h('span', { class: 'seq' }, `v${o.version || 1}`),
+      h('div', { class: 'grow' },
+        o.cover_id ? h('a', { href: mailHref('cover', o.cover_id, ups),
+                              title: 'Read its cover letter and the comments' }, o.name)
+          : o.patches.length ? h('a', { href: mailHref('patch', o.patches[0].id, ups),
+                                        title: 'Read its first patch and the comments' },
+                                 o.name)
+            : o.name,
+        h('span', { class: 'when' }, ` ${ago(parseTime(o.date, true))}`)),
+      o.reviewed && h('a', { class: 'chip st-accepted', href: `#/reviews/${o.reviewed}`,
+                             title: 'Show your reviews of this series' }, 'reviewed'),
+      nextChip(o),
+      appliedChip(o),
+      o.web_url && extLink(o.web_url, siteName(o.web_url),
+                           `Open this version on ${siteName(o.web_url)}, in a new tab`)))));
 }
 
 // Say how much of each series in the inbox is applied, either upstream or
@@ -2386,6 +2442,10 @@ function inboxCard(s, ups) {
                              title: 'You added this series to the inbox' }, 'added'),
       appliedChip(s),
       !s.received_all && h('span', { class: 'chip st-changes-requested' }, 'incomplete'),
+      s.older && s.older.length > 0 && h('span', {
+        class: 'chip st-other', title: 'Older versions of this series are in the inbox too; ' +
+                                       'tap the series to see them' },
+        `also ${s.older.map((o) => `v${o.version || 1}`).join(', ')}`),
       jobBox));
   if (s.job) inboxJobs.set(s.id, s.job);
   if (inboxJobs.has(s.id)) trackInboxJob(jobBox, inboxJobs.get(s.id));
@@ -2403,6 +2463,8 @@ function inboxCard(s, ups) {
   if (s.earlier) groups.push('newver');
   const next = inboxNext(s);
   if (next) groups.push(next[2]);
+  // An older version may still be waiting for you
+  if ((s.older || []).some((o) => (inboxNext(o) || [])[2] === 'me')) groups.push('me');
   if (s.applied && (s.applied.count || s.applied.later)) groups.push('applied');
   if (s.added) groups.push('added');
   return { card, text: `${s.name} ${s.submitter || ''}`, groups };
@@ -2506,7 +2568,8 @@ async function viewInbox(more, refresh) {
   const hint = inbox.feed === false && !inbox.series.length && h('div', { class: 'empty' },
     `Nothing is in this inbox yet: find a series on ${site} to add it`);
   setView('Inbox', 'inbox', false, upsTabs, fetched, finder,
-    ...(hint ? [hint] : filteredList('inbox', inbox.series.map((s) => inboxCard(s, ups)),
+    ...(hint ? [hint] : filteredList('inbox',
+                                     inboxCombine(inbox.series).map((s) => inboxCard(s, ups)),
                                      filters)),
     loadMore);
 }
