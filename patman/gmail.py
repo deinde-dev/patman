@@ -971,7 +971,8 @@ def sync_drafts(service, items):
     """Check whether drafts have been sent or deleted
 
     The thread of each draft which still exists is noted, so that the
-    message we send can be found there later. Our message may be the draft
+    message we send can be found there later. A draft whose message is no
+    longer a draft was sent, though Gmail may still give it. Our message may be the draft
     itself or one we wrote instead, so it is looked for (see _find_sent())
     even while the draft exists, if the item asks for this. A draft which
     has gone, with no message from us, was deleted without being sent.
@@ -1012,7 +1013,8 @@ def sync_drafts(service, items):
         try:
             draft = service.users().drafts().get(
                 userId='me', id=item.draft_id, format='minimal').execute()
-            exists = True
+            # Gmail may still give a draft which was sent, as its message
+            exists = 'DRAFT' in draft.get('message', {}).get('labelIds', [])
             found_id = draft.get('message', {}).get('threadId')
             if found_id and found_id != thread_id:
                 threads[item.idnum] = found_id
