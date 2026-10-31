@@ -215,7 +215,8 @@ def _reviews_to_draft(args, reviews):
     Returns:
         list of Review: Reviews to draft
     """
-    sel = common.parse_patch_selection(getattr(args, 'patches', None))
+    sel = common.parse_patch_selection(getattr(args, 'patches', None),
+                                       common.last_seq(reviews))
     return [rev for rev in reviews
             if needs_draft(rev, args.redraft) and (not sel or rev.seq in sel)]
 

@@ -45,6 +45,9 @@ RE_PREFIX = re.compile(r'^(\[[^]]*\]\s*)+')
 def parse_patches(spec, count):
     """Parse a list of patch numbers, e.g. '1-3,5'
 
+    A range may leave out its start or its end, so '-3' is '1-3' and '4-' is
+    the fourth patch onwards.
+
     Args:
         spec (str or None): Patch numbers, counting from 1, or None for all
         count (int): Number of patches in the series
@@ -59,12 +62,15 @@ def parse_patches(spec, count):
         return list(range(count))
     out = set()
     for part in spec.split(','):
-        first, _, last = part.strip().partition('-')
+        first, dash, last = part.strip().partition('-')
         try:
-            start, end = int(first), int(last or first)
+            if not (first or last):
+                raise ValueError(part)
+            start = int(first or 1) if dash else int(first)
+            end = int(last or count) if dash else start
         except ValueError as exc:
-            raise ValueError(f"Cannot parse '{spec}': use e.g. '1-3,5'") \
-                from exc
+            raise ValueError(f"Cannot parse '{spec}': use e.g. '1-3,5' or "
+                             "'4-'") from exc
         if not 1 <= start <= end <= count:
             raise ValueError(f"Patch '{part}' is not in the series, which "
                              f'has {count} patch{"es" if count != 1 else ""}')

@@ -121,6 +121,30 @@ class TestReview(CseriesTester):
             self.assertEqual(os.pathsep.join([empty, local]),
                              os.environ['PATH'])
 
+    def test_parse_patch_selection(self):
+        """A patch selection may have ranges with no start or no end"""
+        parse = review.common.parse_patch_selection
+        self.assertIsNone(parse(None, 6))
+        self.assertEqual({1, 3, 4, 5}, parse('1,3-5', 6))
+        self.assertEqual({1, 2, 3}, parse('-3', 6))
+        self.assertEqual({2, 4, 5, 6}, parse('2, 4-', 6))
+        self.assertEqual({0, 1, 2}, parse('0,-2'))
+        for spec, msg in (
+                ('-', "Cannot parse patch selection '-': use e.g. '1,3-5' or "
+                      "'4-'"),
+                ('1,,2', "Cannot parse patch selection '1,,2': use e.g. "
+                         "'1,3-5' or '4-'"),
+                ('3-1', "The range '3-1' in the patch selection is back to "
+                        'front')):
+            with self.assertRaises(ValueError) as exc:
+                parse(spec, 6)
+            self.assertEqual(msg, str(exc.exception))
+
+        # Without the last patch, a range with no end cannot be resolved
+        with self.assertRaises(ValueError) as exc:
+            parse('4-')
+        self.assertIn("Cannot tell where '4-' ends", str(exc.exception))
+
     def test_review_list_models(self):
         """--list-models prints the accepted aliases and exits cleanly"""
         args = Namespace(list_models=True, model=None)

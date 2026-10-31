@@ -814,7 +814,7 @@ def _find_or_register(ctx, args, clean_name, link):
         return series_id, svid
 
     # When reviewing specific patches, allow adding to existing reviews
-    patch_sel = common.parse_patch_selection(args.patches)
+    patch_sel = ctx.patch_selection
     if patch_sel:
         reviewed_seqs = {r.seq for r in reviews}
         new_seqs = patch_sel - reviewed_seqs
@@ -992,6 +992,8 @@ def _review_link(args, pwork, cser, link, own_db=None):
         _check_wanted(args, ctx, link, clean_name, own_db or cser.db)
         ctx.version = version
         ctx.patch_count = patch_count
+        ctx.patch_selection = common.parse_patch_selection(args.patches,
+                                                           patch_count)
 
         result = _find_or_register(ctx, args, clean_name, link)
         if result is None:
@@ -1030,7 +1032,6 @@ def _review_link(args, pwork, cser, link, own_db=None):
             tout.notice('Apply-only mode; skipping review')
             return 0
 
-        ctx.patch_selection = common.parse_patch_selection(args.patches)
         ctx.reviewer_name, ctx.reviewer_email = common.parse_reviewer(args)
         ctx.signoff = args.signoff or None
         if ctx.signoff:

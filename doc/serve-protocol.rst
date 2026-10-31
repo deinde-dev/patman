@@ -500,7 +500,8 @@ Review a series, or part of one. The body has one of ``target``, ``patch`` and
 - ``title`` (str): words from the cover-letter title, to search for
 - ``version`` (int): with ``title``, the version to review
 - ``whole`` (bool): with a patch, review its whole series
-- ``index`` (str): review only these patches, e.g. ``1,3-5``
+- ``index`` (str): review only these patches, e.g. ``1,3-5``, where a range
+  may leave out its start or its end, e.g. ``-3`` or ``4-``
 - ``ups`` (str): upstream whose patchwork server to use
 - ``drafts`` (bool): create Gmail drafts of the reviews
 - ``force`` (bool): review the series again

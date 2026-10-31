@@ -75,12 +75,14 @@ def _do_delete(args, cser, link):
     if not existing:
         raise ValueError(f'Series {link} has not been reviewed')
     _, name, version, svid = existing
-    sel = common.parse_patch_selection(args.patches)
+    all_reviews = cser.db.review_get_for_version(svid)
+    sel = common.parse_patch_selection(args.patches,
+                                       common.last_seq(all_reviews))
     if not sel:
         raise ValueError('Use -i to say which reviews to delete, with 0 for '
                          'the cover letter')
-    reviews = sorted((rev for rev in cser.db.review_get_for_version(svid)
-                      if rev.seq in sel), key=lambda rev: rev.seq)
+    reviews = sorted((rev for rev in all_reviews if rev.seq in sel),
+                     key=lambda rev: rev.seq)
     missing = sel - {rev.seq for rev in reviews}
     if missing:
         labels = ', '.join(_review_label(seq) for seq in sorted(missing))
@@ -129,8 +131,10 @@ def _do_send(args, cser, link):
     if not existing:
         raise ValueError(f'Series {link} has not been reviewed')
     _, name, version, svid = existing
-    sel = common.parse_patch_selection(args.patches)
-    reviews = sorted((rev for rev in cser.db.review_get_for_version(svid)
+    all_reviews = cser.db.review_get_for_version(svid)
+    sel = common.parse_patch_selection(args.patches,
+                                       common.last_seq(all_reviews))
+    reviews = sorted((rev for rev in all_reviews
                       if rev.status in (database.REVIEW_DRAFT,
                                         database.REVIEW_EDITED) and
                       rev.draft_id and (not sel or rev.seq in sel)),
@@ -464,8 +468,9 @@ def _do_revise(args, pwork, cser, link):
     if not existing:
         raise ValueError(f'Series {link} has not been reviewed')
     _, name, version, svid = existing
-    sel = common.parse_patch_selection(args.patches)
     all_reviews = cser.db.review_get_for_version(svid)
+    sel = common.parse_patch_selection(args.patches,
+                                       common.last_seq(all_reviews))
     reviews = [rev for rev in all_reviews
                if rev.status not in (database.REVIEW_SENT,
                                      database.REVIEW_REPLIED) and

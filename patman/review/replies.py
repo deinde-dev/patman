@@ -622,7 +622,8 @@ def respond_to_comment(args, pwork, cser, link):
     if not existing:
         raise ValueError(f'Series {link} has not been reviewed')
     svid = existing[3]
-    sel = common.parse_patch_selection(args.patches)
+    sel = common.parse_patch_selection(
+        args.patches, common.last_seq(cser.db.review_get_for_version(svid)))
     if not sel or len(sel) != 1:
         raise ValueError('Use -i to say which patch the comment is about, '
                          'with 0 for the cover letter')

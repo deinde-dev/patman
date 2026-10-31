@@ -2072,7 +2072,7 @@ async function viewReviewForm() {
           'A series ID, or the URL of a series or patch'),
     field('Or search by cover-letter title', title),
     field('Version (with a title)', version),
-    field('Patches to review', index, 'e.g. 1,3-5'),
+    field('Patches to review', index, 'e.g. 1,3-5 or 4-'),
     upstreams.length > 1 && field('Upstream', ups),
     field('Context for the agent (optional)', context),
     draftsRow, wholeRow, forceRow,

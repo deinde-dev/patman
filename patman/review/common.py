@@ -42,6 +42,10 @@ LOCAL_BIN = '~/.local/bin'
 # Set once it is reported that only the copy bundled with the SDK is present
 _BUNDLED_WARNED = False
 
+# One part of a patch selection: a patch, or a range which may leave out its
+# start or its end, e.g. '3', '2-7', '-3' or '4-'
+RE_SEL_PART = re.compile(r'^(\d+(-\d*)?|-\d+)$')
+
 
 def run(coro):
     """Run a coroutine on the event loop and wait for it to finish
@@ -270,28 +274,64 @@ def read_context(spec):
     return spec
 
 
-def parse_patch_selection(spec):
+def parse_patch_selection(spec, last=None):
     """Parse a patch selection string into a set of patch numbers
 
     Supports comma-separated numbers and ranges, e.g. '1,3,5' or '2-7'
-    or '1,3-5,8'.
+    or '1,3-5,8'. A range may leave out its start, which is then patch 1,
+    so '-3' is '1-3', or its end, which is then the last patch, so '4-'
+    is the fourth patch onwards.
 
     Args:
         spec (str or None): Selection string, or None for all patches
+        last (int or None): Number of the last patch, which a range with
+            no end goes up to, or None if not known
 
     Returns:
         set of int or None: Selected patch numbers, or None for all
+
+    Raises:
+        ValueError: The selection cannot be parsed, has a range which is
+            back to front, or has a range with no end when the last patch
+            is not known
     """
     if not spec:
         return None
     result = set()
-    for part in spec.split(','):
-        if '-' in part:
-            start, end = part.split('-', 1)
-            result.update(range(int(start), int(end) + 1))
-        else:
-            result.add(int(part))
+    for part in spec.replace(' ', '').split(','):
+        first, dash, end = part.partition('-')
+        if not RE_SEL_PART.match(part):
+            raise ValueError(f"Cannot parse patch selection '{spec}': use "
+                             "e.g. '1,3-5' or '4-'")
+        if not dash:
+            result.add(int(first))
+            continue
+        if not end:
+            if last is None:
+                raise ValueError(f"Cannot tell where '{part}' ends, since "
+                                 'the number of patches is not known')
+            end = last
+        start, end = int(first or 1), int(end)
+        if start > end:
+            raise ValueError(f"The range '{part}' in the patch selection is "
+                             'back to front')
+        result.update(range(start, end + 1))
     return result
+
+
+def last_seq(reviews):
+    """Get the number of the last patch with a review
+
+    This is where a patch selection with no end stops, when choosing among
+    stored reviews.
+
+    Args:
+        reviews (list of Review): Reviews of a series version
+
+    Returns:
+        int: Highest patch number among the reviews, or 0 if there are none
+    """
+    return max((rev.seq for rev in reviews), default=0)
 
 
 def parse_reviewer(args):
