@@ -228,6 +228,37 @@ applied, with no greeting or thanks::
     Series 'readme-meson' v1: 20261028112007.3980089-1-sjg@chromium.org
     Drafted thanks for README: Explain how to build with meson
 
+Finishing with a series
+-----------------------
+
+Once you have sent the thanks, ``patman maint done`` finishes with the
+series. It checks that the whole series is upstream and that the thanks
+were sent. They are looked for on the list, as a reply from the ``signoff``
+address sent after the patches were applied, so they count however you
+sent them, e.g. as a reply you wrote yourself. Since the list may take a
+little while to have them, it then looks in Gmail, where a draft which has
+gone was sent if your reply is in its thread, as for reviews. Any draft of
+the thanks left in Gmail is deleted, so that it is not sent by mistake. It
+lists any issue which a ``Closes:`` trailer names and which is still open;
+GitHub and GitLab close these themselves when the commits reach the
+project's default branch, so there is normally none. Then, for your own
+series, it asks before archiving it, as ``patman series archive`` does,
+which tags its branches and deletes them::
+
+    $ patman maint done
+    Series 'readme-meson' v1: 20261028112007.3980089-1-sjg@chromium.org
+    Found the thanks on the list, sent 2026-10-30
+    Deleted 2 unsent draft(s) of the thanks
+    Archive series 'readme-meson'? [y/N] y
+    Finished with 'README: Explain how to build with meson (v1)'
+
+As with ``maint thanks``, the series may be given by its Message-ID, link or
+name, and is the current branch's by default. On a branch with no series,
+such as the push branch, it goes through each series which is thanked but
+not finished with, which suits series from other people. It says why a
+series is not finished; ``-f`` finishes with it anyway, ``-n`` says what
+would be done and ``-y`` archives without asking.
+
 The rules
 ---------
 

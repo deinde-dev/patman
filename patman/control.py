@@ -34,6 +34,7 @@ from patman import lorelist
 from patman import maint
 from patman import maint_apply
 from patman import maint_ci
+from patman import maint_done
 from patman import maint_thanks
 from patman import patchstream
 from patman import pwcache
@@ -571,6 +572,11 @@ def do_maint(args):
         return maint_thanks.thank(
             rules, maint_list(rules), args.what, _closing(args),
             getattr(args, 'gmail_account', None), args.dry_run, args.redraft)
+    if args.subcmd == 'done':
+        rules = maint.get_rules()
+        return maint_done.do_done(
+            rules, maint_list(rules), args.what, args.force, args.yes,
+            args.dry_run, getattr(args, 'gmail_account', None))
     if args.subcmd == 'apply':
         rules = maint.get_rules()
         return maint_apply.apply_series(rules, maint_list(rules),

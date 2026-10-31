@@ -9,7 +9,6 @@ from unittest import mock
 from u_boot_pylib import terminal
 
 from patman import control
-from patman import cseries
 from patman import maint
 from patman import maint_thanks
 from patman.review import common
@@ -60,6 +59,7 @@ class TestMaintThanks(LoreTestCase):
                                'create_drafts_from_envelopes',
                                side_effect=create), \
                 mock.patch.object(maint_thanks.gmail, 'get_service'), \
+                mock.patch.object(maint_thanks.time, 'time', return_value=100), \
                 mock.patch.object(maint_thanks.gmail, 'delete_draft',
                                   side_effect=delete), \
                 terminal.capture() as (out, _):
@@ -126,7 +126,8 @@ class TestMaintThanks(LoreTestCase):
         self.assertEqual((0, 'No series to thank\n', []), (ret, out, made))
         self.assertEqual(
             {'last': self.git('rev-parse', 'main-push').strip(),
-             'thanked': [root], 'drafts': {root: ['draft0']}},
+             'thanked': [root],
+             'drafts': {root: [{'id': 'draft0', 'time': 100}]}, 'done': []},
             maint_thanks.read_state(self.repo))
 
         # Unless it is redrafted, which replaces the drafts
@@ -134,7 +135,7 @@ class TestMaintThanks(LoreTestCase):
         self.assertEqual((0, 'Drafted thanks for dtc: Tidy\n', 1),
                          (ret, out, len(made)))
         self.assertEqual(['draft0'], self.deleted)
-        self.assertEqual({root: ['draft1']},
+        self.assertEqual({root: [{'id': 'draft1', 'time': 100}]},
                          maint_thanks.read_state(self.repo)['drafts'])
 
         # By default, the commits are those which went upstream since
@@ -154,11 +155,7 @@ class TestMaintThanks(LoreTestCase):
             self.thank(None, series=True)
         self.assertIn('No thanks have been drafted here yet', str(exc.exception))
 
-        cser = cseries.Cseries(self.tmpdir)
-        cser.open_database()
-        cser.db.ser_ver_add(cser.db.series_add(name, 'Tidy'), 1, link=root)
-        cser.db.commit()
-        cser.close_database()
+        self.add_series(root)
         found = f"Series '{name}' v1: {root}\n"
         self.assertEqual((1, found + "'dtc: Tidy (v1)' is not in us/main yet\n",
                           []), self.thank(None, series=True))
@@ -179,7 +176,7 @@ class TestMaintThanks(LoreTestCase):
         self.assertEqual([root],
                          maint_thanks.read_state(self.repo)['thanked'])
 
-        self.assertEqual({root: ['draft0']},
+        self.assertEqual({root: [{'id': 'draft0', 'time': 100}]},
                          maint_thanks.read_state(self.repo)['drafts'])
 
         # It is thanked only once; a Message-ID may be given instead
@@ -193,7 +190,7 @@ class TestMaintThanks(LoreTestCase):
                          (ret, out, len(made)))
         self.assertEqual(['draft0'], self.deleted)
         state = maint_thanks.read_state(self.repo)
-        self.assertEqual(([root], {root: ['draft1']}),
+        self.assertEqual(([root], {root: [{'id': 'draft1', 'time': 100}]}),
                          (state['thanked'], state['drafts']))
 
     def test_each(self):
@@ -232,7 +229,7 @@ class TestMaintThanks(LoreTestCase):
         self.assertIn('To: fred@x.org\nCc: \n'
                       'Subject: Re: [PATCH 0/2] dtc: Tidy\n'
                       'In-Reply-To: <fred-0@x.org>\n\nHi Fred,\n', out)
-        self.assertEqual({'last': None, 'thanked': [], 'drafts': {}},
+        self.assertEqual({'last': None, 'thanked': [], 'drafts': {}, 'done': []},
                          maint_thanks.read_state(self.repo))
 
     def test_skipped(self):
@@ -252,7 +249,7 @@ class TestMaintThanks(LoreTestCase):
         ret, out, made = self.thank(drafted=0)
         self.assertEqual((1, 'Drafted 0 of 1 thanks\n', 1),
                          (ret, out, len(made)))
-        self.assertEqual({'last': None, 'thanked': [], 'drafts': {}},
+        self.assertEqual({'last': None, 'thanked': [], 'drafts': {}, 'done': []},
                          maint_thanks.read_state(self.repo))
 
         with self.assertRaises(ValueError) as exc:
