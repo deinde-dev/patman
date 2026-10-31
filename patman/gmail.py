@@ -340,6 +340,30 @@ def delete_draft(service, draft_id):
             raise
 
 
+def draft_exists(service, draft_id):
+    """Check whether a Gmail draft still exists
+
+    Args:
+        service (googleapiclient.discovery.Resource): Gmail API service
+        draft_id (str): ID of the draft
+
+    Gmail may still give a draft after it is sent, as its message, which
+    is then labelled SENT rather than DRAFT.
+
+    Returns:
+        bool: True if it exists, False if it was sent or deleted
+    """
+    from googleapiclient.errors import HttpError
+    try:
+        draft = service.users().drafts().get(userId='me', id=draft_id,
+                                             format='minimal').execute()
+    except HttpError as exc:
+        if exc.resp.status != 404:
+            raise
+        return False
+    return 'DRAFT' in draft.get('message', {}).get('labelIds', [])
+
+
 class AlreadySent(Exception):
     """A draft was sent already, e.g. from Gmail itself
 

@@ -6,9 +6,11 @@
 
 Once a series is upstream and the thanks for it are sent, 'patman maint
 done' checks that this is so, says if any issue which the commits close is
-still open, and archives the branch of your own series, after asking. It
-notes each series it has finished with, so that 'maint done' with no series
-can go through those which are thanked but not finished with yet.
+still open, and archives the branch of your own series, after asking. The
+thanks are found on the list, however they were sent, and any of their
+drafts left in Gmail are deleted. It notes each series it has finished
+with, so that 'maint done' with no series can go through those which are
+thanked but not finished with yet.
 """
 
 from datetime import datetime, timezone
@@ -18,6 +20,8 @@ from urllib.error import URLError
 from urllib.parse import quote
 import urllib.request
 
+import aiohttp
+
 from u_boot_pylib import command
 
 from patman import cseries
@@ -26,13 +30,14 @@ from patman import maint
 from patman import maint_apply
 from patman import maint_ci
 from patman import maint_thanks
+from patman.review import common
 
 # Seconds in a day: a search of the sent folder starts the day before the
 # draft was made, so that time zones do not matter
 DAY = 24 * 60 * 60
 
-# The states of the thanks for a series, as found in Gmail
-SENT, UNSENT, DELETED, UNKNOWN = 'sent', 'unsent', 'deleted', 'unknown'
+# The states of the thanks for a series
+SENT, UNSENT, DELETED = 'sent', 'unsent', 'deleted'
 
 
 def issue_open(match):
@@ -87,11 +92,93 @@ def open_issues(cmts):
     return found
 
 
-def thanks_state(rules, llist, app, state, account):
+async def _replies(llist, app, idxs):
+    """Read the replies to some messages of a series
+
+    Args:
+        llist (LoreList): List to read them from
+        app (maint_thanks.Applied): Series
+        idxs (list of int): Messages, by their index in the series, with 0
+            for the cover letter
+
+    Return:
+        dict: Replies to each message, directly or not, as from
+            LoreList.get_patch_comments(), by its index
+    """
+    replies = {}
+    async with aiohttp.ClientSession() as client:
+        for idx in idxs:
+            if idx:
+                replies[idx] = await llist.get_patch_comments(
+                    client, app.data['patches'][idx - 1]['id'])
+            else:
+                replies[idx] = await llist.get_cover_comments(
+                    client, app.data['cover_letter']['id'])
+    return replies
+
+
+def _when(date):
+    """Get the time of a reply
+
+    Args:
+        date (str): Date, in ISO format, e.g. '2026-10-30T11:57:23+11:00'
+
+    Return:
+        float: Time in seconds since the epoch, taking a date with no time
+            zone to be UTC, or 0 if there is no date
+    """
+    if not date:
+        return 0
+    when = datetime.fromisoformat(date)
+    if not when.tzinfo:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.timestamp()
+
+
+def thanked_on_list(rules, llist, app, git_dir=None):
+    """Check whether the list has the thanks for a series
+
+    A message is thanked if a reply to it from you, sent after the patches
+    it thanks for were applied, is in its thread. This finds the thanks
+    however they were sent, e.g. as a reply written by hand.
+
+    Args:
+        rules (Rules): Rules to use, whose signoff gives your address
+        llist (LoreList): List to read the series from
+        app (maint_thanks.Applied): Series, with its commits upstream
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+
+    Return:
+        str or None: Date of the latest of the thanks, e.g. '2026-10-30', or
+            None if a message which the thanks reply to is not thanked
+    """
+    me = maint.email_of(rules.signoff or '')
+    targets = maint_thanks.thanks_targets(rules, app)
+    if not me or not targets:
+        return None
+    replies = common.run(_replies(llist, app, [to for to, _ in targets]))
+    out = command.output('git', 'show', '-s', '--format=%H %ct',
+                         *app.commits.values(), cwd=git_dir)
+    applied = dict(line.split() for line in out.splitlines() if line)
+    dates = []
+    for to, idxs in targets:
+        since = max(int(applied[app.commits[idx]]) for idx in idxs)
+        found = [rep['date'] for rep in replies[to]
+                 if maint.email_of(rep['submitter']['email']) == me and
+                 _when(rep['date']) >= since]
+        if not found:
+            return None
+        dates.append(min(found, key=_when))
+    return max(dates, key=_when)[:10]
+
+
+# pylint: disable-next=R0913,R0917
+def thanks_state(rules, llist, app, state, account, git_dir=None):
     """Check whether the thanks for a series were sent
 
-    Each draft is looked for in Gmail. One which has gone was sent if a
-    message from us is found in reply to the same message, as for reviews.
+    They are looked for on the list. Since the list may not have them yet,
+    the drafts are then looked for in Gmail (see _gmail_state()).
 
     Args:
         rules (Rules): Rules to use
@@ -99,13 +186,42 @@ def thanks_state(rules, llist, app, state, account):
         app (maint_thanks.Applied): Series
         state (dict): State of the thanks, from maint_thanks.read_state()
         account (str or None): Gmail account to use
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
 
     Return:
-        str: SENT, UNSENT, DELETED, or UNKNOWN if the drafts are not known
+        tuple:
+            str: SENT, UNSENT or DELETED
+            str or None: Where the thanks were found, if SENT, e.g. 'on
+                the list, sent 2026-10-30'
     """
+    date = thanked_on_list(rules, llist, app, git_dir)
+    if date:
+        return SENT, f'on the list, sent {date}'
     drafts = maint_thanks.drafts_of(state, app.root)
     if not drafts:
-        return UNKNOWN
+        return UNSENT, None
+    sent = _gmail_state(rules, llist, app, drafts, account)
+    return sent, 'in Gmail' if sent == SENT else None
+
+
+def _gmail_state(rules, llist, app, drafts, account):
+    """Check in Gmail whether the thanks for a series were sent
+
+    Each draft is looked for. One which has gone was sent if a message from
+    us is found in reply to the same message, as for reviews.
+
+    Args:
+        rules (Rules): Rules to use
+        llist (LoreList): List to read the series from
+        app (maint_thanks.Applied): Series
+        drafts (list of dict): Drafts of the thanks, from
+            maint_thanks.drafts_of()
+        account (str or None): Gmail account to use
+
+    Return:
+        str: SENT, UNSENT or DELETED
+    """
     emails = maint_thanks.plan_thanks(rules, llist, app, None)
     if len(emails) != len(drafts):
         emails = [({'subject': None}, '')] * len(drafts)
@@ -123,7 +239,8 @@ def thanks_state(rules, llist, app, state, account):
     return DELETED if deleted else UNSENT
 
 
-def _problem(rules, llist, app, state, account):
+# pylint: disable-next=R0913,R0917
+def _problem(rules, llist, app, state, account, git_dir):
     """Check whether a series can be finished with
 
     Args:
@@ -132,6 +249,8 @@ def _problem(rules, llist, app, state, account):
         app (maint_thanks.Applied): Series, with its commits upstream
         state (dict): State of the thanks, from maint_thanks.read_state()
         account (str or None): Gmail account to use
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
 
     Return:
         str or None: What is not finished, or None if all is
@@ -142,9 +261,14 @@ def _problem(rules, llist, app, state, account):
     if missing:
         return (f"'{title}' is only partly in {rules.upstream}, without "
                 f"patch(es) {', '.join(missing)}")
+    # The thanks were checked when it was finished with
+    if app.root in state['done']:
+        return None
     if app.root not in state['thanked']:
         return f"'{title}' is not thanked yet: run 'patman maint thanks'"
-    sent = thanks_state(rules, llist, app, state, account)
+    sent, where = thanks_state(rules, llist, app, state, account, git_dir)
+    if sent == SENT:
+        print(f'Found the thanks {where}')
     if sent == UNSENT:
         return f"The thanks for '{title}' are not sent yet"
     if sent == DELETED:
@@ -180,7 +304,7 @@ def finish(rules, llist, link, name=None, force=False, yes=False,
     app, cmts = maint_thanks.find_upstream(rules, llist, link, git_dir)
     title = maint_apply.series_name(app.data)
     state = maint_thanks.read_state(git_dir)
-    problem = _problem(rules, llist, app, state, account)
+    problem = _problem(rules, llist, app, state, account, git_dir)
     if problem and not force:
         print(f'{problem}; use -f to finish with it anyway')
         return False
@@ -188,6 +312,8 @@ def finish(rules, llist, link, name=None, force=False, yes=False,
         print(problem)
     print(''.join(f'Still open: {issue}\n' for issue in open_issues(cmts)),
           end='')
+    if not problem:
+        _drop_drafts(state, app.root, account, dry_run)
     if dry_run:
         print(f"Would finish with '{title}'" +
               (f", archiving series '{name}'" if name else ''))
@@ -197,9 +323,40 @@ def finish(rules, llist, link, name=None, force=False, yes=False,
         _archive(name, test_db, git_dir)
     if app.root not in state['done']:
         state['done'].append(app.root)
-        maint_thanks.write_state(state, git_dir)
+    maint_thanks.write_state(state, git_dir)
     print(f"Finished with '{title}'")
     return True
+
+
+def _drop_drafts(state, root, account, dry_run=False):
+    """Delete the drafts of the thanks for a series, once they are sent
+
+    A draft is left behind if the thanks were sent another way, e.g. as a
+    reply written by hand, and could then be sent again by mistake.
+
+    Args:
+        state (dict): State of the thanks, from maint_thanks.read_state(),
+            which is updated
+        root (str): Message-ID of the series
+        account (str or None): Gmail account to use
+        dry_run (bool): True to say how many would be deleted, without
+            deleting them
+    """
+    drafts = maint_thanks.drafts_of(state, root)
+    if not drafts:
+        return
+    service = gmail.get_service(account)
+    left = 0
+    for draft in drafts:
+        if gmail.draft_exists(service, draft['id']):
+            if not dry_run:
+                gmail.delete_draft(service, draft['id'])
+            left += 1
+    if left:
+        print(f"{'Would delete' if dry_run else 'Deleted'} {left} unsent "
+              'draft(s) of the thanks')
+    if not dry_run:
+        del state['drafts'][root]
 
 
 def _archive(name, test_db, git_dir):

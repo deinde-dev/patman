@@ -29,7 +29,9 @@ TIM = 'Tim Tester <tim@x.org>'
 RE_FROM = re.compile(r'^From [0-9a-f]{40} .*\n', re.M)
 
 
-def message(msgid, subject, sender, body, reply_to=None):
+# pylint: disable-next=R0913,R0917
+def message(msgid, subject, sender, body, reply_to=None,
+            date='Tue, 27 Oct 2026 10:38:38 +0200'):
     """Make the text of an email, as it appears in an mbox file
 
     Args:
@@ -38,12 +40,13 @@ def message(msgid, subject, sender, body, reply_to=None):
         sender (str): Who sent it
         body (str): Body
         reply_to (str or None): Message-ID it replies to
+        date (str): Date it was sent
 
     Return:
         str: The email, with its 'From ' line
     """
     lines = ['From mboxrd@z Thu Jan  1 00:00:00 1970', f'From: {sender}',
-             f'Subject: {subject}', 'Date: Tue, 27 Oct 2026 10:38:38 +0200',
+             f'Subject: {subject}', f'Date: {date}',
              f'Message-ID: <{msgid}>']
     if reply_to:
         lines += [f'In-Reply-To: <{reply_to}>', f'References: <{reply_to}>']

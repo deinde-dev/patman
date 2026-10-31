@@ -296,6 +296,27 @@ def follow_reply(env, reply):
                                        hdrs.get('Cc', '')]))
 
 
+def thanks_targets(rules, app):
+    """Work out which messages the thanks for a series reply to
+
+    Args:
+        rules (Rules): Rules, whose thanks_to says whether to reply to the
+            cover letter or to each patch
+        app (Applied): Series
+
+    Return:
+        list of tuple: Each reply:
+            int: Index of the message it replies to, with 0 for the cover
+                letter
+            list of int: Index of each patch which it thanks for
+    """
+    applied = sorted(app.commits)
+    if rules.thanks_to == 'each':
+        return [(idx, [idx]) for idx in applied]
+    to = 0 if app.data.get('cover_letter') else 1
+    return [(to, applied)]
+
+
 def plan_thanks(rules, llist, app, closing):
     """Work out the emails which thank a series
 
@@ -312,12 +333,7 @@ def plan_thanks(rules, llist, app, closing):
             str: Text
     """
     branch = rules.upstream.split('/', 1)[1]
-    applied = sorted(app.commits)
-    if rules.thanks_to == 'each':
-        replies = [(idx, [idx]) for idx in applied]
-    else:
-        to = 0 if app.data.get('cover_letter') else 1
-        replies = [(to, applied)]
+    replies = thanks_targets(rules, app)
     msgs, latest = common.run(_messages(llist, app,
                                         [to for to, _ in replies]))
     envs = gmail.review_envelopes(
