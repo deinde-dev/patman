@@ -1601,16 +1601,22 @@ function tryButton(link, ups, branch, name) {
 }
 
 // A button which opens a form to start a review, asking for any context to
-// give the agent, e.g. 'this is an RFC, so ignore style'. 'start(context)'
-// starts it, throwing an error to show if it cannot. Returns the button and
-// the box which holds the form, to go below the row of buttons
-function reviewButton(label, cls, tip, start) {
+// give the agent, e.g. 'this is an RFC, so ignore style', and with 'pick', the
+// patches to review. 'start(context, index)' starts it, where index is e.g.
+// '1,3-5' or '4-', or '' for all, throwing an error to show if it cannot.
+// Returns the button and the box which holds the form, to go below the row of
+// buttons
+function reviewButton(label, cls, tip, start, pick = false) {
   const box = h('div', {});
   const btn = h('button', { class: cls, title: tip, onclick: () => {
     btn.disabled = true;
     const text = h('textarea', { class: 'note', spellcheck: 'true',
                                  placeholder: 'Context for the agent (optional), e.g. ' +
                                               'this is an RFC, so ignore style' });
+    const index = pick && h('input', {
+      type: 'text', inputmode: 'numeric', placeholder: 'Patches to review, e.g. 1,3-5 or 4- (all if empty)',
+      title: 'Review only these patches, by their numbers in the list above, with 0 for ' +
+             'the cover letter; leave it empty to review them all' });
     const msg = h('div', { class: 'msg' });
     const close = () => {
       fill(box);
@@ -1620,14 +1626,14 @@ function reviewButton(label, cls, tip, start) {
       go.disabled = true;
       msg.textContent = '';
       try {
-        await start(text.value.trim());
+        await start(text.value.trim(), index ? index.value.trim() : '');
         close();
       } catch (err) {
         msg.textContent = err.message;
         go.disabled = false;
       }
     } }, 'Start the review');
-    fill(box, h('div', { class: 'form' }, text,
+    fill(box, h('div', { class: 'form' }, text, index,
       h('div', { class: 'actions' }, go,
         h('button', { class: 'btn light small', onclick: close,
                       title: 'Close this without starting a review' }, 'Cancel')),
@@ -2230,15 +2236,15 @@ function inboxDetails(s, ups, jobBox) {
   const [reviewBtn, reviewBox] = reviewButton(
     s.reviewed ? 'Review again' : 'Review', 'btn small',
     'Have the agent review this series, as a job; the inbox stays open',
-    async (context) => {
+    async (context, index) => {
       const job = await api('review', { json: { target: String(s.id), ups, drafts: true,
-                                                force: !!s.reviewed, context,
+                                                force: !!s.reviewed, context, index,
                                                 name: s.name } });
       inboxJobs.set(s.id, job.id);
       refreshJobCount();
       trackInboxJob(jobBox, job.id);
       reviewBtn.replaceWith(busyLink(job.id));
-    });
+    }, s.patches.length > 1);
   const [tryBtn, tryBox] = tryButton(s.id, ups, s.review_branch, s.review_name);
   return h('div', { class: 'comments' },
     h('div', { class: 'list' }, cover, s.patches.map((p, i) => h('div', { class: 'row' },

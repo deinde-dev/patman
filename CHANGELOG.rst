@@ -10,6 +10,8 @@ Unreleased
 
 Added
 ~~~~~
+- Reviewing a series from the inbox of ``patman serve`` can review only some
+  of its patches, given in a box beside the context for the agent.
 - A patch selection, as given to ``patman review -i`` or ``patman maint apply
   -P``, may have a range with no start, so ``-3`` is ``1-3``, or with no end,
   so ``4-`` is the fourth patch onwards.
