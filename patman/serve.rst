@@ -228,6 +228,14 @@ series with a newer version in the inbox has no next move of its own, unless
 it is waiting for you, since the newer version is the one to review. Only your
 own reviews count, so a series is not 'ready' from other people's tags.
 
+Each series is listed once, at its newest version in the pages loaded, with
+'also v1' (for example) when older versions are there too; tapping it lists
+them below its patches. Versions go together when they belong to the same
+review of yours, else when they have the same title, without its '[v2]'-style
+prefix, and the same submitter. Pull requests are listed one by one, since
+they share their titles. A series is under 'Your move' if an older version is
+waiting for you.
+
 The inbox is read from patchwork with one request for the 50 newest series.
 The server keeps what it reads for ten minutes, so going back to the Inbox tab,
 opening it on another device or starting the server again does not read it

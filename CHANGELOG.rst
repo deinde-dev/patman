@@ -100,6 +100,9 @@ Added
 
 Changed
 ~~~~~~~
+- The inbox in ``patman serve`` lists each series once, at its newest
+  version, rather than each version on its own; tapping it lists the older
+  versions.
 - For a series on lore, as for dtc, ``patman series gather`` marks a patch
   'accepted' once the upstream's main branch has it, found by the Message-ID
   in a ``Message-ID:`` or ``Link:`` trailer, so ``series progress`` shows
