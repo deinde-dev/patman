@@ -279,6 +279,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(1, len(data))
         self.assertEqual(
             {'id': ser_id, 'name': 'rev', 'desc': 'Somebody else',
+             'subjects': ['a'],
              'upstream': None, 'version': 2, 'link': '200', 'num_reviews': 2,
              'approved': 1, 'statuses': {'new': 1, 'draft': 1},
              'timestamp': '2026-10-01 10:00:00', 'hidden': False,

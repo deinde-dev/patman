@@ -407,6 +407,11 @@ def get_review_list(cser):
     latest = _latest_versions(cser)
     waiting = cser.db.reply_count_waiting()
     hidden = cser.db.series_get_hidden()
+    # The subjects of the patches in each version, so that the list can be
+    # searched by them
+    subjects = {}
+    for pcm in sorted(cser.db.pcommit_get_list(), key=lambda pcm: pcm.seq):
+        subjects.setdefault(pcm.svid, []).append(pcm.subject)
     out = []
     for ser in cser.db.series_get_dict(reviews_only=True).values():
         svr = latest.get(ser.idnum)
@@ -415,6 +420,7 @@ def get_review_list(cser):
             'id': ser.idnum,
             'name': ser.name,
             'desc': ser.desc,
+            'subjects': subjects.get(svr.idnum, []) if svr else [],
             'upstream': ser.upstream,
             'version': svr.version if svr else None,
             'link': svr.link if svr else None,

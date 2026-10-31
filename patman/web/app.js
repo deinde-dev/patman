@@ -353,12 +353,13 @@ function showError(err, tab) {
 
 // A search box and optional filter chips above a list of cards. Each item
 // is {card, text, groups} where text is searched and groups lists the
-// filters the item belongs to. Each filter is [id, label, tooltip]
-function filteredList(key, items, filters) {
+// filters the item belongs to. Each filter is [id, label, tooltip]. The tip
+// says what the search box looks in
+function filteredList(key, items, filters, tip) {
   let current = filters ? filters[0][0] : null;
   const saved = lsGet(`patman-filter-${key}`);
   if (filters && filters.some(([id]) => id === saved)) current = saved;
-  const search = h('input', { type: 'search', class: 'search',
+  const search = h('input', { type: 'search', class: 'search', title: tip,
                               placeholder: 'Search', 'aria-label': 'Search' });
   const count = h('div', { class: 'section' });
   const empty = h('div', { class: 'empty', hidden: true }, 'Nothing matches');
@@ -430,7 +431,8 @@ async function viewSeriesList() {
     if (s.link && s.count && !final) groups.push('active');
     return { card, text: `${s.name} ${s.desc || ''}`, groups };
   }), [['active', 'Active', 'Sent series with patches still under review'],
-        ['all', 'All', 'All your series']]));
+        ['all', 'All', 'All your series']],
+  'Find series by their branch name or title; each word must match'));
 }
 
 function commentToggle(card, kind, itemId, ups) {
@@ -1109,7 +1111,7 @@ async function viewReviewList() {
   }
   setView('Reviews', 'reviews', false, reviewActions(),
           ...filteredList('reviews', list.map((r) => ({
-    text: `${r.name} ${r.desc || ''}`,
+    text: [r.name, r.desc || '', ...(r.subjects || [])].join(' '),
     groups: ['all', r.hidden ? 'hidden' : 'active',
              ...(r.replies_waiting ? ['replies'] : []),
              ...(TO_SEND.some((st) => r.statuses[st]) ? ['send'] : []),
@@ -1146,7 +1148,9 @@ async function viewReviewList() {
                                   'draft, including hidden ones'],
      ['hidden', 'Hidden', 'Reviews which you have hidden, e.g. once you have ' +
                           'finished with them'],
-     ['all', 'All', 'All your reviews']]));
+     ['all', 'All', 'All your reviews']],
+    'Find reviews by the title of the series or of any of its patches, or by ' +
+    'the branch name; each word must match'));
 }
 
 // Show a job which acts on some reviews, in a strip on each of their cards,
@@ -2570,7 +2574,8 @@ async function viewInbox(more, refresh) {
   setView('Inbox', 'inbox', false, upsTabs, fetched, finder,
     ...(hint ? [hint] : filteredList('inbox',
                                      inboxCombine(inbox.series).map((s) => inboxCard(s, ups)),
-                                     filters)),
+                                     filters, 'Find series by their title or submitter; each ' +
+                                              'word must match')),
     loadMore);
 }
 
