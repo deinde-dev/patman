@@ -217,6 +217,10 @@ To review only specific patches by index within the series::
 
     patman review -s 497923 -i 1,3,5
 
+A range may leave out its start, so ``-i -3`` is the same as ``-i 1-3``,
+or its end, so ``-i 2,4-`` reviews patch 2 and everything from patch 4
+onwards.
+
 The cover letter is reviewed along with the whole series, but only if the
 agent has something to say about the series as a whole. Use ``-i 0`` to ask
 for a review of just the cover letter, e.g. after reviewing the patches::

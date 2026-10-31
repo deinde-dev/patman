@@ -10,6 +10,9 @@ Unreleased
 
 Added
 ~~~~~
+- A patch selection, as given to ``patman review -i`` or ``patman maint apply
+  -P``, may have a range with no start, so ``-3`` is ``1-3``, or with no end,
+  so ``4-`` is the fourth patch onwards.
 - When ``patman review`` makes a Gmail draft beside a draft of yours replying
   to the same email, it says so, and the review's page in ``patman serve``
   marks it 'your draft too', since Gmail may show only one of them in the
@@ -142,6 +145,11 @@ Changed
 
 Fixed
 ~~~~~
+- ``patman review -i`` gives an error for a range which is back to front,
+  such as ``3-1``, rather than reviewing every patch, and for a selection it
+  cannot parse, rather than a Python traceback.
+- ``patman maint apply -P 4-`` applies the fourth patch onwards, rather than
+  only patch 4.
 - ``patman review --scan`` (and Scan for new versions in the web UI) reads the
   series sent in the last 30 days, as the inbox does, rather than searching
   patchwork for each series you have reviewed, which took hundreds of

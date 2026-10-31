@@ -1109,6 +1109,11 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual((['-s', '457'], 'Review series 457'),
                          parse({'target': 'https://pw/series/457/'}, ups))
 
+        # A range may leave out its start or its end
+        for index in ('-3', '2,4-', '0,-2,5-'):
+            self.assertEqual((['-s', '458', '-i', index], 'Review series 458'),
+                             parse({'target': '458', 'index': index}, ups))
+
         # A series on lore is known by its Message-ID
         for target in ('<c@x>', 'https://lore.kernel.org/dtc/c@x/'):
             self.assertEqual((['-s', 'c@x'], 'Review series c@x'),
@@ -1135,6 +1140,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
                 ({'target': 'fred'}, 'Cannot find a series'),
                 ({'target': '1', 'title': 'x'}, 'only one of'),
                 ({'target': '1', 'index': '1;rm'}, 'Invalid patch selection'),
+                ({'target': '1', 'index': '1,-'}, 'Invalid patch selection'),
                 ({'target': '1', 'ups': 'zz'}, "Unknown upstream 'zz'"),
                 ({'patch': 'x'}, "Invalid patch 'x'"),
                 ({'patch': True}, "Invalid patch 'True'"),

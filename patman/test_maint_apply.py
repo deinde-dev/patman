@@ -318,11 +318,18 @@ class TestMaintApply(LoreTestCase):
 
         for spec, msg in (('3', "Patch '3' is not in the series, which has "
                                 '2 patches'),
-                          ('x', "Cannot parse 'x': use e.g. '1-3,5'")):
+                          ('x', "Cannot parse 'x': use e.g. '1-3,5' or "
+                                "'4-'"),
+                          ('-', "Cannot parse '-': use e.g. '1-3,5' or "
+                                "'4-'")):
             with self.assertRaises(ValueError) as exc:
                 maint_apply.parse_patches(spec, 2)
             self.assertEqual(msg, str(exc.exception))
         self.assertEqual([0, 2, 3, 4], maint_apply.parse_patches('1,3-5', 5))
+
+        # A range may leave out its start or its end
+        self.assertEqual([0, 1, 2], maint_apply.parse_patches('-3', 5))
+        self.assertEqual([1, 3, 4], maint_apply.parse_patches('2,4-', 5))
 
     def test_refused(self):
         """A series which is incomplete, or not the latest, is refused"""

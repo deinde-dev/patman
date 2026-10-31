@@ -674,7 +674,8 @@ def add_maint_subparser(subparsers):
              "branch's series)")
     apply.add_argument(
         '-P', '--patches',
-        help="Patches to apply, counting from 1, e.g. '1-3,5' (default: all)")
+        help="Patches to apply, counting from 1, e.g. '1-3,5' or '4-' "
+             '(default: all)')
     apply.add_argument(
         '-f', '--force', action='store_true',
         help='Apply the series even if it is not complete, or there is a '
@@ -838,7 +839,8 @@ def add_review_subparser(subparsers):
     review.add_argument(
         '-i', '--index', type=str, dest='patches',
         help='Review only specific patches by index (e.g. 3 or 1,3,5 '
-        'or 2-7), with 0 for the cover letter')
+        'or 2-7, with -3 for 1-3 and 4- for 4 onwards), with 0 for the cover '
+        'letter')
     review.add_argument(
         '-n', '--dry-run', action='store_true', dest='dry_run',
         default=False,

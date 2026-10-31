@@ -14,8 +14,10 @@ class BadRequest(ValueError):
     """A request is not valid, e.g. a missing field or a bad value"""
 
 
-# Patch selection for 'review -i', e.g. '3' or '1,3-5'
-RE_INDEX = re.compile(r'^\d+(-\d+)?(,\d+(-\d+)?)*$')
+# Patch selection for 'review -i', e.g. '3', '1,3-5' or '2,4-', where a
+# range may leave out its start or its end
+_SEL_PART = r'(\d+(-\d*)?|-\d+)'
+RE_INDEX = re.compile(rf'^{_SEL_PART}(,{_SEL_PART})*$')
 
 # Patchwork series or patch in a URL, e.g. '.../series/123/', '?series=123'
 RE_SERIES_URL = re.compile(r'series[=/](\d+)')
@@ -197,7 +199,7 @@ def parse_review_req(data, upstreams):
         version (int): Version to review, with 'title'
         patch (int): Patchwork patch ID, to review just that patch
         whole (bool): With a patch, review its whole series
-        index (str): Review only these patches, e.g. '1,3-5'
+        index (str): Review only these patches, e.g. '1,3-5' or '4-'
         ups (str): Upstream whose patchwork server to use
         drafts (bool): Create Gmail drafts for the reviews
         force (bool): Review again, even if already reviewed
