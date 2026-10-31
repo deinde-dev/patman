@@ -659,8 +659,13 @@ reviews them::
 
     patman review --scan -U us --reviewer 'Your Name <your@email>'
 
-For each reviewed series it takes the highest version on patchwork
-above the latest one reviewed. A version is reviewed only once it has
+It reads the series sent to patchwork in the last 30 days, a page at a
+time as the inbox does, and matches each to a series you reviewed by its
+title, or by its b4 Message-IDs if the title changed. For each reviewed
+series it takes the highest version above the latest one reviewed. A
+version sent more than 30 days ago is not looked for, though the inbox
+still shows it. The pages are kept for ten minutes, so scanning again
+soon after does not read patchwork again. A version is reviewed only once it has
 fully appeared on patchwork; if the newest version is still arriving,
 the series is left to wait rather than reviewing an older, now
 superseded one. Inactive series (see `Active series only`_) are

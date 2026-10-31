@@ -6,13 +6,15 @@
 
 """Scanning for new versions of reviewed series
 
-The scan looks on patchwork for a newer version of each series which has
-been reviewed, and reviews each one it finds in its own 'patman review'
-process, optionally creating Gmail drafts for the results.
+The scan reads the series sent to patchwork in the last SCAN_DAYS, as the
+inbox does, to find a newer version of each series which has been reviewed,
+and reviews each one it finds in its own 'patman review' process, optionally
+creating Gmail drafts for the results.
 """
 
 from collections import namedtuple
 from concurrent import futures
+from datetime import datetime, timedelta
 import os
 import subprocess
 
@@ -30,18 +32,103 @@ from patman.review import lookup
 
 NewVersion = namedtuple('NewVersion', 'desc,version,link,complete,active')
 
+# Days back to look for new versions; one sent earlier is shown in the inbox
+SCAN_DAYS = 30
+
+# Series in each page read from patchwork, as for the inbox, so that pages
+# which it read can be used
+SCAN_PAGE = 50
+
+# Most pages to read, in case the dates are not as expected
+SCAN_MAX_PAGES = 40
+
+# Oldest copy of a page to use from the cache, in seconds, so that scanning
+# again soon after does not read patchwork again
+SCAN_MAX_AGE = 10 * 60
+
 
 ScanResult = namedtuple('ScanResult', 'desc,version,link,returncode,output')
+
+
+async def _recent_series(client, pwork, since):
+    """Read the series sent to patchwork since a date, newest first
+
+    Args:
+        client (aiohttp.ClientSession): Session to use
+        pwork (Patchwork): Configured patchwork instance
+        since (str): Date, as YYYY-MM-DD
+
+    Returns:
+        list of dict: Series, as from Patchwork.get_recent_series()
+    """
+    found = []
+    for page in range(1, SCAN_MAX_PAGES + 1):
+        series = await pwork.get_recent_series(
+            client, pwork.link_name, page, SCAN_PAGE, max_age=SCAN_MAX_AGE)
+        found += series
+        if (len(series) < SCAN_PAGE or
+                (series[-1].get('date') or '')[:10] < since):
+            break
+    return [pws for pws in found if (pws.get('date') or '')[:10] >= since]
+
+
+def _find_reviewed(cser, pws, by_key):
+    """Find the review series which a series from patchwork is a version of
+
+    This is the one with the same title, else one whose patches share a b4
+    key with it, as when a new version is reviewed (see
+    lookup.find_earlier())
+
+    Args:
+        cser (Cseries): Open cseries instance
+        pws (dict): Series from patchwork
+        by_key (dict): Series ID for each b4 key, from lookup.b4_series()
+
+    Returns:
+        int or None: ID of the review series, or None if there is none
+    """
+    prev = cser.db.series_find_review_by_name(
+        lookup.clean_series_name(pws.get('name') or ''))
+    if prev:
+        return prev[0]
+    for key in sorted(lookup.series_b4_keys(pws)):
+        if key in by_key:
+            return by_key[key]
+    return None
+
+
+async def _is_active(client, pwork, pws):
+    """Check whether any patch in a series is active on patchwork
+
+    The states which the events have shown are used, so that patchwork is
+    read only for a series with a patch whose state is not known
+
+    Args:
+        client (aiohttp.ClientSession): Session to use
+        pwork (Patchwork): Configured patchwork instance
+        pws (dict): Series from patchwork
+
+    Returns:
+        bool: True if any of its patches is active
+    """
+    ids = [pat['id'] for pat in pws.get('patches') or []]
+    states = pwork.get_states(ids)
+    if not ids or len(states) < len(ids):
+        states = await pwork.get_series_patch_states(client, pws['id'])
+    else:
+        states = states.values()
+    return any(state in lookup.ACTIVE_STATES for state in states)
 
 
 def _scan_new_versions(pwork, cser):
     """Find newer patchwork versions of already-reviewed series
 
-    For each reviewed series, search patchwork by its cover-letter title
-    for the highest version present that is newer than the latest reviewed
-    one. The highest version is reported even when it is still incomplete,
-    along with whether it has fully appeared, so the caller can wait for it
-    rather than reviewing an older, now-superseded version.
+    The series sent in the last SCAN_DAYS are read, as for the inbox, and
+    each is matched to a reviewed series by its title or b4 key. For each
+    reviewed series, the highest version newer than the latest one reviewed
+    is reported, even when it is still incomplete, along with whether it has
+    fully appeared, so the caller can wait for it rather than reviewing an
+    older, now-superseded version.
 
     Args:
         pwork (Patchwork): Configured patchwork instance
@@ -57,39 +144,39 @@ def _scan_new_versions(pwork, cser):
     if isinstance(pwork, lorelist.LoreList):
         raise ValueError(f'Cannot scan {pwork.url} for new versions yet; '
                          'review each one with -s')
+    since = (datetime.now() - timedelta(days=SCAN_DAYS)).strftime('%Y-%m-%d')
     series = cser.db.series_get_dict(reviews_only=True)
-    found = []
+    by_id = {ser.idnum: ser for ser in series.values()}
+    by_key = lookup.b4_series(cser.db)
 
     async def _scan():
         async with aiohttp.ClientSession() as client:
-            for ser in series.values():
-                max_ver = cser.db.series_get_max_version(ser.idnum)
+            # The newest version of each reviewed series, if newer than the
+            # latest one reviewed
+            newest = {}
+            for pws in await _recent_series(client, pwork, since):
+                idnum = _find_reviewed(cser, pws, by_key)
+                if idnum not in by_id:
+                    continue
                 # Without a recorded reviewed version there is nothing to
                 # compare against, so skip rather than treat every version
                 # on patchwork as newer
-                if not max_ver:
-                    continue
-                matches = await pwork.query_series(client, ser.desc)
-                # With no cover letter, patchwork names a later version
-                # after its first patch, e.g. '[v2] dm: Tidy up'
-                newer = [pws for pws in matches
-                         if lookup.clean_series_name(pws['name']) == ser.desc
-                         and int(pws['version']) > max_ver]
-                if not newer:
-                    continue
-                latest = max(newer, key=lambda pws: int(pws['version']))
-                data = await pwork.get_series(client, latest['id'])
-                received = data.get('received_total', 0)
-                total = data.get('total', received)
-                states = await pwork.get_series_patch_states(
-                    client, latest['id'])
-                active = any(state in lookup.ACTIVE_STATES for state in states)
-                found.append(NewVersion(ser.desc, int(latest['version']),
-                                        latest['id'], received >= total,
-                                        active))
+                max_ver = cser.db.series_get_max_version(idnum)
+                version = int(pws.get('version') or 1)
+                if (max_ver and version > max_ver and
+                        version > int(newest.get(idnum, {}).get('version')
+                                      or 0)):
+                    newest[idnum] = pws
+            found = []
+            for idnum, pws in newest.items():
+                received = pws.get('received_total', 0)
+                total = pws.get('total', received)
+                found.append(NewVersion(
+                    by_id[idnum].desc, int(pws['version']), pws['id'],
+                    received >= total, await _is_active(client, pwork, pws)))
+            return found
 
-    common.run(_scan())
-    return found
+    return common.run(_scan())
 
 
 def _build_review_command(args, link):

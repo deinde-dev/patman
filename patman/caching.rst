@@ -102,8 +102,8 @@ How long something is used from the cache depends on whether it can change:
 - a series' mbox, used to apply a series for a review: an hour, since
   patchwork adds review tags to it as they arrive
 - the list of projects: a day
-- a page of the inbox in ``patman serve``: ten minutes, since new series
-  arrive all the time
+- a page of the inbox in ``patman serve``, which ``patman review --scan``
+  also reads: ten minutes, since new series arrive all the time
 
 Each series on a page of the inbox is also kept as a series, under its ID, so
 reviewing one from the inbox does not read it again.
@@ -114,12 +114,12 @@ Each entry is kept under the server and the request which read it, e.g.
 These are never cached, so always ask patchwork:
 
 - searches for a series by its name, as used by ``patman series autolink``
-  to find the link of a series you have sent, by ``patman review -S`` and by
-  ``patman review --scan``, so that a new series is found as soon as it is
-  there
+  to find the link of a series you have sent and by ``patman review -S``, so
+  that a new series is found as soon as it is there
 - searches for a patch by its title, as used by ``patman review -P``
 - the states of the patches in a series, which ``patman review --scan`` reads
-  for a newer version of a series you reviewed
+  for a newer version of a series you reviewed, where the events have not
+  shown them
 - the patches and comments which ``patman review --learn-voice`` reads to
   learn how you write reviews
 

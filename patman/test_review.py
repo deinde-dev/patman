@@ -268,6 +268,7 @@ class TestReview(CseriesTester):
         # The default upstream is only in the main database
         self.assertEqual('us', seen['ups'])
 
+    # pylint: disable-next=R0911
     def _fake_patchwork_review(self, subpath):
         """Fake Patchwork server for review tests
 
@@ -281,6 +282,20 @@ class TestReview(CseriesTester):
                 {'id': self.PROJ_ID, 'name': 'U-Boot',
                  'link_name': self.PROJ_LINK_NAME},
             ]
+
+        # The recent series, as read by the inbox and by --scan
+        m_recent = re.match(
+            r'series/\?project=\w+&order=-date&page=(\d+)&per_page=\d+$',
+            subpath)
+        if m_recent:
+            if m_recent.group(1) != '1':
+                return []
+            now = datetime.now()
+            return [{**self._fake_patchwork_review(f'series/{link}/'),
+                     'id': link, 'total': 1,
+                     'date': (now - timedelta(days=age)).isoformat()}
+                    for link, age in ((self.REVIEW_LINK_V2, 1),
+                                      (self.REVIEW_LINK, 4))]
 
         re_search = re.match(r'series/\?project=(\d+)&q=(.*)$', subpath)
         if re_search:
@@ -2325,6 +2340,10 @@ class TestReview(CseriesTester):
         if m_series and int(m_series.group(1)) == self.REVIEW_LINK_V2:
             data['total'] = 2
             data['received_total'] = 1
+        if subpath.startswith('series/?') and 'order=-date' in subpath:
+            for pws in data:
+                if pws['id'] == self.REVIEW_LINK_V2:
+                    pws['total'] = 2
         return data
 
     def _review_v1(self, pwork, link=None):
@@ -2363,12 +2382,44 @@ class TestReview(CseriesTester):
                       output)
         self.assertEqual([(2, self.REVIEW_LINK_V2)], launched)
 
+    def test_review_scan_requests(self):
+        """Test --scan reads the recent series rather than searching for each
+        reviewed one, and only back to SCAN_DAYS"""
+        paths = []
+
+        def fake(subpath):
+            paths.append(subpath)
+            return self._fake_patchwork_review(subpath)
+
+        self.get_cser()
+        pwork = Patchwork.for_testing(fake)
+        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        self._review_v1(pwork)
+
+        del paths[:]
+        with mock.patch(
+                'patman.review.scan._review_one_subprocess') as mock_sub:
+            with terminal.capture() as (out, _):
+                self.run_review('--scan', '-n', pwork=pwork)
+        self.assertIn('Would review v2', out.getvalue())
+        self.assertEqual(
+            ['series/?project=uboot&order=-date&page=1&per_page=50',
+             f'patches/?series={self.REVIEW_LINK_V2}'], paths)
+
+        # A new version sent before SCAN_DAYS is not looked for
+        with mock.patch.object(review.scan, 'SCAN_DAYS', 0):
+            with terminal.capture() as (out, _):
+                self.run_review('--scan', '-n', pwork=pwork)
+        self.assertIn('No new versions found', out.getvalue())
+        mock_sub.assert_not_called()
+
     def test_review_scan_no_cover(self):
         """Test --scan finds a new version which has no cover letter"""
         def fake(subpath):
             data = self._fake_patchwork_review(subpath)
             if subpath.startswith('series/?'):
-                data = [{**pws, 'name': f"[v{pws['version']}] {pws['name']}"}
+                data = [{**pws, 'name': f"[v{pws['version']}] "
+                                        f'{self.REVIEW_NAME}'}
                         if pws['version'] > 1 else pws for pws in data]
             return data
 

@@ -132,6 +132,10 @@ Changed
 
 Fixed
 ~~~~~
+- ``patman review --scan`` (and Scan for new versions in the web UI) reads the
+  series sent in the last 30 days, as the inbox does, rather than searching
+  patchwork for each series you have reviewed, which took hundreds of
+  searches each time.
 - ``patman review --scan`` (and Scan for new versions in the web UI) finds
   a new version of a series which has no cover letter, which patchwork names
   after its first patch, e.g. '[v2] x86: Handle unordered runtime
