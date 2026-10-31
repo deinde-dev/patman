@@ -8,6 +8,7 @@
 
 import asyncio
 import contextlib
+import glob
 import io
 import os
 import pathlib
@@ -474,8 +475,11 @@ Changes in v2:
         finally:
             os.chdir(orig_dir)
 
-    def test_custom_get_maintainer_script(self):
-        """Validate that a custom get_maintainer script gets used."""
+    def _setup_send_repo(self):
+        """Set up a repo with a branch which 'patman send' can send
+
+        This has a dummy get_maintainer script which gives hello@there.com
+        """
         self.make_git_tree()
         with directory_excursion(self.tmpdir):
             # Setup git.
@@ -500,12 +504,30 @@ Changes in v2:
             tools.run('git', 'add', '.')
             tools.run('git', 'commit', '-m', 'new commit')
 
-            # Finally, do the test
-            with terminal.capture():
-                output = tools.run(*self._patman_cmd, '--dry-run')
-                # Assert the email address is part of the dry-run
-                # output.
-                self.assertIn('hello@there.com', output)
+    def test_custom_get_maintainer_script(self):
+        """Validate that a custom get_maintainer script gets used."""
+        self._setup_send_repo()
+        with directory_excursion(self.tmpdir), terminal.capture():
+            output = tools.run(*self._patman_cmd, '--dry-run')
+            # Assert the email address is part of the dry-run output.
+            self.assertIn('hello@there.com', output)
+
+    def test_send_no_database(self):
+        """Sending does not create a database
+
+        This runs patman afresh, since a database which an earlier test
+        opened would not show up as a new file. PATMAN_DB_DIR points to an
+        empty directory, so that any database lands where it can be seen,
+        rather than in the user's own one.
+        """
+        self._setup_send_repo()
+        db_dir = os.path.join(self.tmpdir, 'db')
+        os.mkdir(db_dir)
+        with directory_excursion(self.tmpdir), terminal.capture(), \
+                mock.patch.dict(os.environ, {'PATMAN_DB_DIR': db_dir}):
+            tools.run(*self._patman_cmd, '--dry-run')
+        self.assertEqual([], glob.glob(
+            os.path.join(self.tmpdir, '**', '.patman.db*'), recursive=True))
 
     def test_get_python(self):
         """The Python running patman is found, even behind a wrapper"""
