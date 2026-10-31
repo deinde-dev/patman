@@ -132,6 +132,10 @@ Changed
 
 Fixed
 ~~~~~
+- ``patman review --scan`` (and Scan for new versions in the web UI) finds
+  a new version of a series which has no cover letter, which patchwork names
+  after its first patch, e.g. '[v2] x86: Handle unordered runtime
+  relocations'.
 - ``patman maint apply`` fetches the upstream first, so that the push branch
   is made from the upstream as it is and patches which someone else has
   pushed count as applied already.

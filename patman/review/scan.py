@@ -70,9 +70,11 @@ def _scan_new_versions(pwork, cser):
                 if not max_ver:
                     continue
                 matches = await pwork.query_series(client, ser.desc)
+                # With no cover letter, patchwork names a later version
+                # after its first patch, e.g. '[v2] dm: Tidy up'
                 newer = [pws for pws in matches
-                         if pws['name'] == ser.desc and
-                         int(pws['version']) > max_ver]
+                         if lookup.clean_series_name(pws['name']) == ser.desc
+                         and int(pws['version']) > max_ver]
                 if not newer:
                     continue
                 latest = max(newer, key=lambda pws: int(pws['version']))

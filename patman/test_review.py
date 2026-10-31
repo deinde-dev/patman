@@ -2355,6 +2355,27 @@ class TestReview(CseriesTester):
                       output)
         self.assertEqual([(2, self.REVIEW_LINK_V2)], launched)
 
+    def test_review_scan_no_cover(self):
+        """Test --scan finds a new version which has no cover letter"""
+        def fake(subpath):
+            data = self._fake_patchwork_review(subpath)
+            if subpath.startswith('series/?'):
+                data = [{**pws, 'name': f"[v{pws['version']}] {pws['name']}"}
+                        if pws['version'] > 1 else pws for pws in data]
+            return data
+
+        self.get_cser()
+        pwork = Patchwork.for_testing(fake)
+        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        self._review_v1(pwork)
+
+        with mock.patch(
+                'patman.review.scan._review_one_subprocess') as mock_sub:
+            with terminal.capture() as (out, _):
+                self.run_review('--scan', '-n', pwork=pwork)
+        self.assertIn('Would review v2', out.getvalue())
+        mock_sub.assert_not_called()
+
     def test_review_scan_dry_run(self):
         """Test --scan -n reports what it would do without reviewing"""
         self.get_cser()
