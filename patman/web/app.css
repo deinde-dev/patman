@@ -197,7 +197,7 @@ a.card:active { background: var(--code-bg); }
   overflow: auto; padding: 12px 16px; background: var(--bg);
   border-left: 1px solid var(--border);
 }
-#side .card { position: sticky; top: -12px; z-index: 1; }
+#side .file-head { position: sticky; top: -12px; z-index: 1; }
 @media (min-width: 1100px) {
   body.side-open main { margin: 0 50vw 0 auto; }
 }
@@ -254,6 +254,8 @@ a.card:active { background: var(--code-bg); }
 .form textarea.note { min-height: 6em; font: inherit; }
 
 .review { margin-top: 8px; }
+/* Clear the header when scrolled to, e.g. from the subject of a patch */
+.inline-mail-btn { scroll-margin-top: 64px; }
 .inline-mail:not(:empty) { margin-top: 10px; border-top: 1px solid var(--border);
                            padding-top: 4px; }
 .notes { background: var(--code-bg); border-radius: 8px; padding: 10px 12px; }

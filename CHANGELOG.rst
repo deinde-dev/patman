@@ -109,6 +109,10 @@ Added
 
 Changed
 ~~~~~~~
+- The subject of a patch or cover letter in a review in ``patman serve``
+  shows it in the panel at the right, beside the review, on a wide screen,
+  and below the review on a narrow one, rather than on a page of its own which
+  hides the review and its buttons.
 - The search box on the Reviews tab of ``patman serve`` also finds a series by
   the subjects of its patches, and each search box has a tooltip saying what
   it looks in.
