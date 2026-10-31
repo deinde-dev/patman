@@ -46,7 +46,39 @@ def _draft_location(ctx):
     return f' ({", ".join(parts)})' if parts else ''
 
 
-def create_drafts(ctx, args, review_bodies, review_ids):
+def note_own_drafts(args, cser, drafted):
+    """Note which reviews have a draft of yours beside the one made for them
+
+    You may have started a reply in Gmail before the review was written.
+    Gmail shows only one of the drafts in the thread, so say so, both here
+    and on the review's page. This must be checked once any earlier drafts
+    of the reviews are deleted, so that they are not taken for yours.
+
+    Args:
+        args (Namespace): Command-line arguments (for gmail_account)
+        cser (Cseries): Cseries instance holding the reviews
+        drafted (dict): key (int): Review record ID
+            value (tuple): Patch number, 0 for the cover letter, and the ID
+                of the draft made for the review
+    """
+    if not drafted:
+        return
+    service = gmail.get_service(getattr(args, 'gmail_account', None))
+    for review_id, (seq, draft_id) in sorted(drafted.items()):
+        try:
+            own = gmail.other_drafts(service, draft_id)
+        except Exception as exc:  # pylint: disable=W0718
+            tout.warning(f'Cannot check for drafts of your own: {exc}')
+            break
+        cser.db.review_set_own_draft(review_id, own)
+        if own:
+            what = f'patch {seq}' if seq else 'the cover letter'
+            tout.warning(f'You have a draft of your own replying to {what} '
+                         'in Gmail too')
+    cser.commit()
+
+
+def create_drafts(ctx, args, review_bodies, review_ids, check_own=True):
     """Create Gmail drafts for review emails
 
     If the reviewer's email differs from the Gmail account, a From header is
@@ -57,6 +89,9 @@ def create_drafts(ctx, args, review_bodies, review_ids):
         args (Namespace): Command-line arguments (for gmail_account, dry_run)
         review_bodies (dict): Map of seq to review body text
         review_ids (dict): Map of seq to review record ID
+        check_own (bool): True to note which reviews have a draft of yours
+            beside the new one (see note_own_drafts()); False if the reviews
+            may still have earlier drafts, which would be taken for yours
 
     Returns:
         dict: Map of seq to the ID of the draft created for it, empty for a
@@ -106,6 +141,11 @@ def create_drafts(ctx, args, review_bodies, review_ids):
             ctx.cser.db.review_set_draft_id(review_ids[seq], draft_id)
     ctx.cser.commit()
     tout.notice(f'Created {len(draft_ids)} Gmail draft(s){where}')
+    if check_own:
+        note_own_drafts(args, ctx.cser,
+                        {review_ids[seq]: (seq, draft_id)
+                         for seq, draft_id in draft_ids.items()
+                         if seq in review_ids})
     return draft_ids
 
 
@@ -122,8 +162,12 @@ def replace_drafts(ctx, args, reviews):
             new drafts are made, so with their old draft IDs
     """
     draft_ids = create_drafts(ctx, args, {rev.seq: rev.body for rev in reviews},
-                              {rev.seq: rev.idnum for rev in reviews})
+                              {rev.seq: rev.idnum for rev in reviews},
+                              check_own=False)
     delete_gmail_drafts(args, [rev for rev in reviews if rev.seq in draft_ids])
+    note_own_drafts(args, ctx.cser, {rev.idnum: (rev.seq, draft_ids[rev.seq])
+                                     for rev in reviews
+                                     if rev.seq in draft_ids})
 
 
 def _sender(args, reviewer_name, reviewer_email):
@@ -253,6 +297,8 @@ def redraft_reviews(args, cser, reviews, link):
     cser.commit()
     delete_gmail_drafts(args, [rev for rev in reviews if rev.seq in draft_ids])
     tout.notice(f'Created {len(draft_ids)} Gmail draft(s) (link {link})')
+    note_own_drafts(args, cser, {rev.idnum: (rev.seq, draft_ids[rev.seq])
+                                 for rev in reviews if rev.seq in draft_ids})
 
 
 # Number of drafts to check before saving progress

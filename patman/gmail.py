@@ -322,6 +322,39 @@ def create_draft(service, to, subject, body,
     return draft
 
 
+def other_drafts(service, draft_id):
+    """Count the other drafts which reply to the same message as a draft
+
+    These are drafts which you wrote, e.g. in Gmail before patman made its
+    own, so long as patman's earlier drafts have been deleted.
+
+    Args:
+        service (googleapiclient.discovery.Resource): Gmail API service
+        draft_id (str): ID of the draft
+
+    Returns:
+        int: Number of other drafts in its thread which reply to the same
+            message
+    """
+    def in_reply_to(msg):
+        return {hdr['name'].lower(): hdr['value'] for hdr in
+                msg.get('payload', {}).get('headers', [])}.get('in-reply-to')
+
+    msg = service.users().drafts().get(
+        userId='me', id=draft_id, format='metadata',
+        metadataHeaders=['In-Reply-To']).execute().get('message', {})
+    parent = in_reply_to(msg)
+    if not parent or not msg.get('threadId'):
+        return 0
+    thread = service.users().threads().get(
+        userId='me', id=msg['threadId'], format='metadata',
+        metadataHeaders=['In-Reply-To']).execute()
+    return sum(1 for other in thread.get('messages', [])
+               if other['id'] != msg['id'] and
+               'DRAFT' in other.get('labelIds', []) and
+               in_reply_to(other) == parent)
+
+
 def delete_draft(service, draft_id):
     """Delete a Gmail draft
 

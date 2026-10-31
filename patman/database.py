@@ -24,7 +24,7 @@ from patman.series import Series
 from patman import times
 
 # Schema version (version 0 means there is no database yet)
-LATEST = 21
+LATEST = 22
 
 # Information about a review record
 # Review status values
@@ -404,6 +404,10 @@ class Database:  # pylint:disable=R0904
         self.cur.execute(
             'CREATE TABLE context_text (id INTEGER PRIMARY KEY AUTOINCREMENT, '
             'hash TEXT UNIQUE, text TEXT)')
+
+    def _migrate_to_v22(self):
+        """Note when you had a Gmail draft of your own beside a review's"""
+        self.cur.execute('ALTER TABLE review ADD COLUMN own_draft BIT')
 
     # pylint: disable=R0912
     def migrate_to(self, dest_version):
@@ -1815,6 +1819,31 @@ class Database:  # pylint:disable=R0904
         rec = self.execute('SELECT envelope FROM review WHERE id = ?',
                            (review_id,)).fetchone()
         return json.loads(rec[0]) if rec and rec[0] else None
+
+    def review_set_own_draft(self, review_id, own):
+        """Note whether you had a Gmail draft of your own beside a review's
+
+        Args:
+            review_id (int): Review record ID
+            own (bool): True if, when the review's draft was made, a draft
+                of yours replied to the same message
+        """
+        self.execute('UPDATE review SET own_draft = ? WHERE id = ?',
+                     (1 if own else None, review_id))
+
+    def review_get_own_draft(self, review_id):
+        """Check whether you had a Gmail draft of your own beside a review's
+
+        Args:
+            review_id (int): Review record ID
+
+        Return:
+            bool: True if, when the review's draft was made, a draft of
+                yours replied to the same message
+        """
+        rec = self.execute('SELECT own_draft FROM review WHERE id = ?',
+                           (review_id,)).fetchone()
+        return bool(rec and rec[0])
 
     def review_get_msgids(self):
         """Get the Message-IDs of the patches which each review series has

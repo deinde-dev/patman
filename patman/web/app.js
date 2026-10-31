@@ -1340,6 +1340,12 @@ async function viewReview(id, wantVer) {
                                 title: 'This review gives the patch a Reviewed-by tag' },
         'Reviewed-by'),
       repliesChip(),
+      r.own_draft && r.status === 'draft' && h('span', {
+        class: 'chip st-changes-requested',
+        title: 'When this draft was made, Gmail had a draft of yours replying to the ' +
+               'same message. Gmail may show only one of them in the thread, so look ' +
+               'in Drafts for yours' },
+        'your draft too'),
       h('span', { class: `ver ${REVIEW_STATUS_CLASS[r.status] || ''}`,
                   title: REVIEW_STATUS_TIP[r.status] },
         REVIEW_STATUS[r.status] || r.status || ''));

@@ -132,6 +132,9 @@ A review of one patch, or of the cover letter:
   e.g. ``<20261016072640.772964-4-jan.kehren@emteria.com>``, which locates
   the patch on the list, e.g. on lore when patchwork lacks it; null until the
   review is drafted. Only given by ``GET /api/reviews/<id>``
+- ``own_draft`` (bool): true if, when the review's draft was made, Gmail had
+  a draft of yours replying to the same email. Only given by ``GET
+  /api/reviews/<id>``
 - ``replies`` (list of Reply): replies to the review, oldest first; only given
   by ``GET /api/reviews/<id>``
 - ``job`` (int or null): number of the job which is waiting or running to act

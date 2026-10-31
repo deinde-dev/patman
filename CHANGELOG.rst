@@ -10,6 +10,10 @@ Unreleased
 
 Added
 ~~~~~
+- When ``patman review`` makes a Gmail draft beside a draft of yours replying
+  to the same email, it says so, and the review's page in ``patman serve``
+  marks it 'your draft too', since Gmail may show only one of them in the
+  thread.
 - ``patman maint done`` finishes with a series once the thanks are sent: it
   checks that the series is upstream and that the thanks went out, finding
   them on the list however they were sent, deletes any draft of them left in
