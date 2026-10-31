@@ -100,6 +100,9 @@ Added
 
 Changed
 ~~~~~~~
+- The search box on the Reviews tab of ``patman serve`` also finds a series by
+  the subjects of its patches, and each search box has a tooltip saying what
+  it looks in.
 - The inbox in ``patman serve`` lists each series once, at its newest
   version, rather than each version on its own; tapping it lists the older
   versions.

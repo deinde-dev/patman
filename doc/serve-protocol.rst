@@ -434,6 +434,8 @@ reviewed first. Each is an object with:
 
 - ``id``, ``name``, ``desc``, ``upstream``, ``version``, ``link``: as for ``GET
   /api/series``
+- ``subjects`` (list of str): subject of each patch in the latest version, in
+  order
 - ``num_reviews`` (int): number of reviews of the latest version
 - ``approved`` (int): how many of them approve the patch
 - ``statuses`` (object): number of reviews with each status, using ``new`` for
