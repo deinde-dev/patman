@@ -159,7 +159,9 @@ Gmail drafts, either all of them or one patch's, and to review it again.
 Wherever a review is started, whether by 'Review a series', 'Review' in the
 inbox, 'Review again' or 'Review it' for a cover letter, there is a box for
 context to give the agent, such as 'this is an RFC, so ignore style', which is
-passed with ``-c``.
+passed with ``-c``. In the inbox, a series with more than one patch also has a
+box for the patches to review, e.g. ``1,3-5`` or ``4-``, passed with ``-i``;
+leave it empty to review them all.
 
 'Context' at the top of a series' reviews shows, on each review, what the agent
 was given besides its instructions: the series, the cover letter, the existing
