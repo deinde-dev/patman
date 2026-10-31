@@ -853,7 +853,7 @@ async function fileParts(newOid, oldOid, newLine, oldLine, name, extra) {
   const width = `${String(b.lines.length).length}ch`;
   const rows = b.lines.map((text, i) => h('span', { class: i + 1 === target ? 'target' : null },
     h('i', { class: 'ln', style: `width:${width}` }, i + 1), text));
-  const card = h('div', { class: 'card' },
+  const card = h('div', { class: 'card file-head' },
     h('div', { class: 'row' }, h('div', { class: 'grow name' }, name), extra),
     h('div', { class: 'meta' },
       h('span', {}, b.isNew ? 'with the patch applied' : 'before the patch'),
@@ -887,6 +887,16 @@ function closeSide() {
   document.body.classList.remove('side-open');
 }
 
+// Show the given elements in the panel, until the page changes
+function openSide(...kids) {
+  const head = document.querySelector('header');
+  document.body.style.setProperty('--head-h', `${head.offsetHeight}px`);
+  fill(side, ...kids);
+  sidePage = location.hash;
+  side.hidden = false;
+  document.body.classList.add('side-open');
+}
+
 // Show a file in the panel, at a line, as for viewFile()
 async function sideFile(newOid, oldOid, newLine, oldLine, name) {
   const href = `#/file/${newOid}/${oldOid}/${newLine}/${oldLine}/${encodeURIComponent(name)}`;
@@ -896,12 +906,7 @@ async function sideFile(newOid, oldOid, newLine, oldLine, name) {
         'Full page'),
       h('button', { class: 'btn light small', onclick: closeSide,
                     title: 'Close this panel' }, '✕')]);
-  const head = document.querySelector('header');
-  document.body.style.setProperty('--head-h', `${head.offsetHeight}px`);
-  fill(side, card, src);
-  sidePage = location.hash;
-  side.hidden = false;
-  document.body.classList.add('side-open');
+  openSide(card, src);
   // Scroll just the panel, so that the review stays where it is
   if (at) side.scrollTop = at.offsetTop - side.clientHeight / 2;
 }
@@ -930,9 +935,12 @@ function mailHref(kind, id, ups) {
   return `#/${kind}/${idPath(id)}${ups ? '/' + encodeURIComponent(ups) : ''}`;
 }
 
-// Show a patch or cover letter; 'refresh' reads it from patchwork again rather
-// than using a copy the server read recently
-async function viewMail(kind, id, ups, refresh) {
+// The parts of the page for a patch or cover letter, for viewMail() and
+// sideMail(): its name, the elements to show and a function to read its
+// comments into them. 'refresh' reads it from patchwork again rather than
+// using a copy the server read recently, 'again' shows it again that way and
+// 'extra' holds any buttons to go beside its name
+async function mailParts(kind, id, ups, refresh, again, extra) {
   const q = upsQuery(ups);
   const rq = refresh ? `${q ? '&' : '?'}refresh=1` : '';
   const m = await api(`${kind}/${idPath(id)}${q}${rq}`);
@@ -940,9 +948,17 @@ async function viewMail(kind, id, ups, refresh) {
   const comments = h('div', { class: 'list' },
                      h('div', { class: 'spinner' }, 'Loading comments…'));
   const ser = m.series[0];
-  setView(m.name, null, true,
+  const readComments = async () => {
+    try {
+      fill(comments, ...renderComments(await api(`comments/${kind}/${idPath(id)}${q}${rq}`)));
+    } catch (err) {
+      fill(comments, errorBox(err));
+    }
+  };
+  return { name: m.name, readComments, parts: [
     h('div', { class: 'card' },
-      h('div', { class: 'name' }, m.name),
+      extra ? h('div', { class: 'row' }, h('div', { class: 'grow name' }, m.name), extra)
+        : h('div', { class: 'name' }, m.name),
       h('div', { class: 'meta' },
         m.state && h('span', { class: `chip ${stClass(m.state)}` }, m.state),
         m.submitter && h('span', {}, m.submitter),
@@ -954,7 +970,7 @@ async function viewMail(kind, id, ups, refresh) {
                       title: `Read this from ${site} again, e.g. to see its current state`,
                       onclick: (ev) => {
           ev.target.disabled = true;
-          viewMail(kind, id, ups, true).catch((err) => showError(err));
+          again().catch((err) => showError(err));
         } }, 'Refresh')),
       m.web_url && h('div', { class: 'actions' },
         extLink(m.web_url, site, `Open this on ${site}, in a new tab`, 'btn light small'))),
@@ -962,12 +978,28 @@ async function viewMail(kind, id, ups, refresh) {
     h('div', { class: 'card' }, renderMail(m.content)),
     m.diff && renderDiff(m.diff),
     h('div', { class: 'section' }, 'Comments'),
-    comments);
-  try {
-    fill(comments, ...renderComments(await api(`comments/${kind}/${idPath(id)}${q}${rq}`)));
-  } catch (err) {
-    fill(comments, errorBox(err));
-  }
+    comments] };
+}
+
+// Show a patch or cover letter; 'refresh' reads it from patchwork again
+async function viewMail(kind, id, ups, refresh) {
+  const { name, parts, readComments } = await mailParts(
+    kind, id, ups, refresh, () => viewMail(kind, id, ups, true));
+  setView(name, null, true, ...parts);
+  await readComments();
+}
+
+// Show a patch or cover letter in the panel at the right, as for viewMail(),
+// so that it can be read beside its review without leaving it. It has no link
+// to its own page, which would hide the review
+async function sideMail(kind, id, ups, refresh) {
+  const { parts, readComments } = await mailParts(
+    kind, id, ups, refresh, () => sideMail(kind, id, ups, true), [
+      h('button', { class: 'btn light small', onclick: closeSide,
+                    title: 'Close this panel' }, '✕')]);
+  openSide(...parts);
+  side.scrollTop = 0;
+  await readComments();
 }
 
 // Patches and cover letters read for the reviews, keyed by their path in the
@@ -1000,18 +1032,18 @@ async function showQuoted(id, ups, code) {
 }
 
 // Button which shows a patch or cover letter in the box it returns, so
-// that it can be read next to its review
+// that it can be read next to its review. Also returns a function which does
+// the same as the button, resolving to true once the box shows it, or false
+// if the box is now empty
 function mailToggle(kind, id, ups) {
   const what = kind === 'patch' ? 'patch' : 'cover letter';
   const box = h('div', { class: 'inline-mail' });
   let open = false;
   let mail = null;
-  const btn = h('button', { class: 'btn light small',
-                            title: `Show or hide the ${what} here, next to its review`,
-                            onclick: async () => {
+  const toggle = async () => {
     open = !open;
     btn.textContent = `${open ? 'Hide' : 'Show'} the ${what}`;
-    if (!open) { fill(box); return; }
+    if (!open) { fill(box); return false; }
     fill(box, h('div', { class: 'ver' }, 'Loading…'));
     try {
       mail = mail || await getMail(kind, id, ups);
@@ -1022,8 +1054,12 @@ function mailToggle(kind, id, ups) {
     } catch (err) {
       if (open) fill(box, errorBox(err));
     }
-  } }, `Show the ${what}`);
-  return [btn, box];
+    return open;
+  };
+  const btn = h('button', { class: 'btn light small inline-mail-btn',
+                            title: `Show or hide the ${what} here, next to its review`,
+                            onclick: toggle }, `Show the ${what}`);
+  return [btn, box, toggle];
 }
 
 // --- Reviews ---
@@ -1368,8 +1404,8 @@ async function viewReview(id, wantVer) {
         onclick: () => replyBoxes[0].scrollIntoView({ behavior: 'smooth', block: 'start' }),
       }, nreplies(replyItems.length));
     }
-    const [mailBtn, mailBox] = itemId
-      ? mailToggle(r.seq ? 'patch' : 'cover', itemId, ser.upstream) : [null, null];
+    const [mailBtn, mailBox, mailShow] = itemId
+      ? mailToggle(r.seq ? 'patch' : 'cover', itemId, ser.upstream) : [null, null, null];
     // A patch which patchwork lacks, e.g. taken from lore for the review, can
     // still be read on lore
     const loreLink = !itemId && r.msgid && extLink(
@@ -1381,7 +1417,26 @@ async function viewReview(id, wantVer) {
     const title = h('div', { class: 'row' },
       h('div', { class: 'grow name' }, itemId
         ? h('a', { href: mailHref(r.seq ? 'patch' : 'cover', itemId, ser.upstream),
-                   title: `Read the ${r.seq ? 'patch' : 'cover letter'} and its comments` },
+                   title: wide.matches
+                     ? `Read the ${r.seq ? 'patch' : 'cover letter'} and its comments, ` +
+                       'beside the review'
+                     : `Show or hide the ${r.seq ? 'patch' : 'cover letter'} in the review`,
+                   onclick: (ev) => {
+          // Keep the review, with its buttons, in view: beside it on a wide
+          // screen, else in it, below the review
+          if (ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+          ev.preventDefault();
+          if (wide.matches) {
+            sideMail(r.seq ? 'patch' : 'cover', itemId, ser.upstream)
+              .catch((err) => showError(err));
+            return;
+          }
+          // Once it is there, show it with the button to hide it again, which
+          // is just above it
+          mailShow().then((open) => {
+            if (open) mailBtn.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
+        } },
             label, pat ? h('span', { class: 'desc' }, ` ${pat.subject}`) : null)
         : label),
       chips);
