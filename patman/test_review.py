@@ -1225,7 +1225,11 @@ class TestReview(CseriesTester):
         def get_draft(userId, id, format):  # pylint: disable=W0622,W0613
             req = mock.MagicMock()
             if id.startswith('pending'):
-                req.execute.return_value = {'message': {'threadId': 't1'}}
+                req.execute.return_value = {'message': {
+                    'threadId': 't1', 'labelIds': ['DRAFT']}}
+            elif id.startswith('sent'):
+                req.execute.return_value = {'message': {
+                    'threadId': 't1', 'labelIds': ['SENT']}}
             else:
                 req.execute.side_effect = ValueError('not found')
             return req
@@ -1262,11 +1266,15 @@ class TestReview(CseriesTester):
             item(6, 'gone6', 't1', '[4/4] video: Fourth'),
             # Draft gone; our only reply on the patch came much later
             item(7, 'gone7', 't1', '[3/4] video: Third'),
+            # Draft sent from Gmail, which still gives it, and not checked
+            # for a reply while it is a draft
+            item(8, 'sent8', None, '[1/2] video: Add it', False),
         ])
-        self.assertEqual({1: 't1'}, threads)
+        self.assertEqual({1: 't1', 8: 't1'}, threads)
         self.assertEqual({1: ('My own words', 's2', 't1'),
                           3: ('My own words', 's2', 't1'),
-                          4: ('Edited.\n\n' + review_text, 'f1', 't2')},
+                          4: ('Edited.\n\n' + review_text, 'f1', 't2'),
+                          8: ('My own words', 's2', 't1')},
                          sent)
         self.assertEqual([5, 6, 7], deleted)
         queries = [call.kwargs['q'] for call in
