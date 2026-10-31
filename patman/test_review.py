@@ -1385,6 +1385,7 @@ class TestReview(CseriesTester):
                     review.drafts, 'delete_gmail_drafts') as delete, \
                 mock.patch.object(review.drafts, 'create_drafts',
                                   return_value={1: 'd1b'}) as create, \
+                mock.patch.object(review.drafts, 'note_own_drafts'), \
                 terminal.capture() as (out, _):
             self.assertEqual(
                 0, review.stored._do_revise(args, None, cser, '123'))
@@ -2310,6 +2311,46 @@ class TestReview(CseriesTester):
                 review.drafts.delete_gmail_drafts(args, reviews)
         self.assertEqual(2, mock_del.call_count)
         self.assertIn('Deleted 2 old Gmail draft', out.getvalue())
+
+    def test_review_own_draft(self):
+        """A draft of yours beside the review's is noted"""
+        cser = self.get_cser()
+        pwork = self._review_pwork()
+
+        def msg(msg_id, parent):
+            return {'id': msg_id, 'threadId': 't1', 'labelIds': ['DRAFT'],
+                    'payload': {'headers': [{'name': 'In-Reply-To',
+                                             'value': parent}]}}
+
+        with self._mock_review(), self._mock_gmail() as service:
+            users = service.users.return_value
+            users.drafts.return_value.get.return_value.execute.return_value = {
+                'id': 'draft123', 'message': msg('ours', '<patch1>')}
+            users.threads.return_value.get.return_value.execute \
+                .return_value = {'messages': [
+                    msg('patch2-draft', '<patch2>'), msg('mine', '<patch1>'),
+                    msg('ours', '<patch1>')]}
+            with terminal.capture() as (out, err):
+                self.run_review('-s', str(self.REVIEW_LINK),
+                                '--create-drafts', pwork=pwork)
+        self.assertIn('You have a draft of your own replying to patch 1 in '
+                      'Gmail too', out.getvalue() + err.getvalue())
+        svid = cser.db.series_find_by_link(str(self.REVIEW_LINK))[3]
+        rev = cser.db.review_get_for_version(svid)[0]
+        self.assertTrue(cser.db.review_get_own_draft(rev.idnum))
+
+        # Once your draft has gone, drafting again clears it
+        with self._mock_gmail() as service:
+            users = service.users.return_value
+            users.drafts.return_value.get.return_value.execute.return_value = {
+                'id': 'draft123', 'message': msg('ours', '<patch1>')}
+            users.threads.return_value.get.return_value.execute \
+                .return_value = {'messages': [msg('ours', '<patch1>')]}
+            with terminal.capture():
+                review.drafts.note_own_drafts(
+                    types.SimpleNamespace(gmail_account=None), cser,
+                    {rev.idnum: (1, 'draft123')})
+        self.assertFalse(cser.db.review_get_own_draft(rev.idnum))
 
     def test_review_force_deletes_drafts(self):
         """Test -f re-review removes the old Gmail drafts before recreating"""

@@ -429,7 +429,7 @@ class TestDatabase(CseriesTester):
                 db.execute("INSERT INTO traffic (hour, url, requests, bytes) "
                            "VALUES ('2026-10-18 09', 'https://pw', 5, 100)")
                 db.commit()
-        self.assertEqual(21, database.LATEST)
+        self.assertEqual(22, database.LATEST)
         self.assertEqual({('https://pw', ''): (5, 100)},
                          db.traffic_get_kinds('2026-10-18 00'))
 

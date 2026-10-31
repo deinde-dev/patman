@@ -295,7 +295,8 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(
             {'id': rid, 'seq': 1, 'body': '> code\nLooks good',
              'approved': True, 'timestamp': '2026-10-01 10:00:00',
-             'status': 'draft', 'msgid': None, 'replies': [], 'job': None},
+             'status': 'draft', 'msgid': None, 'own_draft': False,
+             'replies': [], 'job': None},
             latest['reviews'][1])
 
         # Outside a git repo there are no review branches; once there is one,

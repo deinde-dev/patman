@@ -461,6 +461,7 @@ def get_review_detail(cser, idnum):
             # the list, e.g. one which patchwork lacks
             env = cser.db.review_get_envelope(rev.idnum)
             item['msgid'] = (env or {}).get('in_reply_to')
+            item['own_draft'] = cser.db.review_get_own_draft(rev.idnum)
             item['replies'] = [reply_info(reply) for reply in
                                cser.db.reply_get_for_review(rev.idnum)]
             info['reviews'].append(item)

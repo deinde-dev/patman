@@ -167,6 +167,9 @@ context           TEXT      JSON list of the parts of the context
                             review of the patch, where ``id`` is that
                             of its text in ``context_text`` (added
                             v21)
+own_draft         BIT       True if, when the review's draft was
+                            made, Gmail had a draft of yours
+                            replying to the same email (added v22)
 ================  ========  ==========================================
 
 reply

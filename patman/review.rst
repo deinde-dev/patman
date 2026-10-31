@@ -460,6 +460,12 @@ been reviewed and the drafts already exist::
 Any existing draft is deleted first, so it is not left as a duplicate
 in the thread.
 
+You may have started a reply to a patch in Gmail before reviewing it. Gmail
+then has two drafts replying to the same email, and its thread view may show
+only one of them, so patman says when it makes a draft beside one of yours,
+and the review's page in ``patman serve`` marks it 'your draft too'. Yours is
+left as it is, and can be found in Gmail's Drafts.
+
 Each review keeps the headers it needs to be sent as a reply to its patch:
 the subject, the Message-ID it replies to and the To and Cc addresses.
 These are stored when its first draft is created, so ``--redraft`` does not
