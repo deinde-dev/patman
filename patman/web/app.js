@@ -1906,6 +1906,8 @@ function replyBox(rp, seriesId, changed) {
   const strip = h('div', { class: 'jobstrip' });
   // True while a job is acting on the reply
   let busy = false;
+  // True while the response is being edited or revised
+  let editing = false;
   // Run a job on the reply, staying here, and show the reply again when it
   // is done. If 'msg' is given, an error is shown there
   const run = async (path, data, verb, msg) => {
@@ -1934,6 +1936,7 @@ function replyBox(rp, seriesId, changed) {
     show();
   };
   const show = () => {
+    editing = false;
     const [label, cls] = REPLY_STATUS[rp.status] || [rp.status, 'st-other'];
     fill(box,
       h('div', { class: 'who' }, `↩ ${rp.sender.replace(/\s*<.*>/, '') || rp.sender}`,
@@ -1942,6 +1945,11 @@ function replyBox(rp, seriesId, changed) {
       renderMail(rp.body),
       rp.response && h('div', { class: 'section' }, 'Your response'),
       rp.response && h('div', { class: 'notes' }, renderMail(rp.response)),
+      rp.discussion && h('div', { class: 'meta' }, '💬 Talking it through in ',
+        rp.discussion.url
+          ? extLink(rp.discussion.url, rp.discussion.name,
+                    'Open the discussion in Claude, in a new tab')
+          : `'${rp.discussion.name}'`),
       strip,
       rp.status !== 'sent' && !busy && h('div', { class: 'actions' },
         h('button', { class: 'btn light small', onclick: edit,
@@ -1950,6 +1958,17 @@ function replyBox(rp, seriesId, changed) {
         rp.response && h('button', { class: 'btn light small', onclick: revise,
                                      title: 'Ask the agent to change your response' },
                          'Revise'),
+        rp.discussion
+          ? confirmButton('End discussion', 'btn light small',
+                          () => run(`replies/${rp.id}/discuss`, { end: true },
+                                    'Ending the discussion'),
+                          'Close the Claude session talking through this reply')
+          : h('button', { class: 'btn light small',
+                          title: 'Start a Claude session, which you can use from the Claude ' +
+                                 'app, to talk through the response; it stores the response ' +
+                                 'here once you agree on it',
+                          onclick: () => run(`replies/${rp.id}/discuss`, {},
+                                             'Starting a discussion') }, 'Discuss'),
         rp.response && confirmButton('Send', 'btn small',
                                      () => run(`replies/${rp.id}/send`, {}, 'Sending'),
                                      'Send your response'),
@@ -1972,14 +1991,39 @@ function replyBox(rp, seriesId, changed) {
                                              'Dropping the response') },
               'No reply needed'))));
     if (changed) changed();
+    watch();
+  };
+  // While the reply is being discussed, read it now and then, so that the
+  // response appears once it is agreed
+  let watching = null;
+  const watch = () => {
+    if (!rp.discussion || watching) return;
+    watching = setInterval(async () => {
+      if (!document.contains(box) || !rp.discussion) {
+        clearInterval(watching);
+        watching = null;
+        return;
+      }
+      if (busy || editing) return;
+      const fresh = await findReply(seriesId, rp.id).catch(() => null);
+      if (fresh && (fresh.response !== rp.response || fresh.status !== rp.status ||
+                    !fresh.discussion)) {
+        Object.assign(rp, fresh);
+        show();
+      }
+    }, 20000);
   };
   // Ask the agent to change the response, as a note says
-  const revise = () => fill(box, h('div', { class: 'who' }, `Response to ${rp.sender}`),
-    reviseForm(null, rp.status === 'draft', show,
-               (note, draft, msg) => run(`replies/${rp.id}/revise`, { note, draft },
-                                         'Revising the response', msg),
-               'response'));
+  const revise = () => {
+    editing = true;
+    fill(box, h('div', { class: 'who' }, `Response to ${rp.sender}`),
+      reviseForm(null, rp.status === 'draft', show,
+                 (note, draft, msg) => run(`replies/${rp.id}/revise`, { note, draft },
+                                           'Revising the response', msg),
+                 'response'));
+  };
   const edit = () => {
+    editing = true;
     const text = h('textarea', { spellcheck: 'true' });
     text.value = rp.response || quoteReply(rp);
     const draft = h('input', { type: 'checkbox', checked: true });

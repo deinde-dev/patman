@@ -1207,6 +1207,9 @@ def do_review(args, pwork, cser, own_db=None):
             getattr(args, 'suggest_reply', None) or
             getattr(args, 'revise_reply', None) or
             getattr(args, 'skip_reply', None) or
+            getattr(args, 'discuss_reply', None) or
+            getattr(args, 'end_discussion', None) or
+            getattr(args, 'set_response', None) or
             getattr(args, 'draft_reply', None) or
             getattr(args, 'send_reply', None)):
         return replies.do_reply_cmd(args, cser)

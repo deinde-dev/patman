@@ -10,6 +10,12 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman review --discuss-reply ID`` starts a Claude session with Remote
+  Control, to talk through a reply from the Claude app, carrying on from the
+  session which wrote the review where it can. Once a response is agreed, the
+  session stores it with the new ``--set-response ID --file FILE``, and
+  drafts it in Gmail. On the page, each reply has a 'Discuss' button, and
+  links to its discussion.
 - ``patman review --revise-reply ID --revise NOTE`` has the agent change the
   response to a reply as the note says, with ``-d`` to update its Gmail
   draft. On the page, each response has a 'Revise' button, as reviews do.
