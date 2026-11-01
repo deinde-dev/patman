@@ -1206,6 +1206,7 @@ def do_review(args, pwork, cser, own_db=None):
     if (getattr(args, 'list_replies', False) or
             getattr(args, 'suggest_reply', None) or
             getattr(args, 'revise_reply', None) or
+            getattr(args, 'skip_reply', None) or
             getattr(args, 'draft_reply', None) or
             getattr(args, 'send_reply', None)):
         return replies.do_reply_cmd(args, cser)

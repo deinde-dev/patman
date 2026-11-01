@@ -250,6 +250,36 @@ def _send_response(service, ctx, reply_id, account=None):
                  'sent' if already else 'sent the response'))
 
 
+def _skip_reply(service, ctx, reply_id):
+    """Note that a reply needs no response, dropping any response to it
+
+    Any Gmail draft of the response is deleted. Since the draft may have
+    been sent from Gmail, the drafts are checked first.
+
+    Args:
+        service: Gmail API service, or None if the response has no draft
+        ctx (ReviewContext): Review context
+        reply_id (int): ID of the reply
+
+    Raises:
+        ValueError: The response has been sent
+    """
+    db = ctx.cser.db
+    reply = db.reply_get(reply_id)
+    if reply.draft_id and service:
+        _sync_reply_drafts(service, ctx.cser)
+        reply = db.reply_get(reply_id)
+    if reply.status == database.REPLY_SENT:
+        raise ValueError(f'The response to reply {reply_id} has been sent')
+    if reply.draft_id and service:
+        gmail.delete_draft(service, reply.draft_id)
+    db.reply_set_response(reply_id, None, database.REPLY_SKIP)
+    db.reply_set_status(reply_id, database.REPLY_SKIP, None)
+    ctx.cser.commit()
+    tout.notice(f'Reply {reply_id}: no response needed' +
+                (', so deleted the Gmail draft' if reply.draft_id else ''))
+
+
 def _sync_reply_drafts(service, cser):
     """Check whether drafts of our responses have been sent or deleted
 
@@ -317,8 +347,8 @@ def _list_replies(cser):
 
 
 def do_reply_cmd(args, cser):
-    """Handle --replies, --suggest-reply, --revise-reply, --draft-reply and
-    --send-reply
+    """Handle --replies, --suggest-reply, --revise-reply, --skip-reply,
+    --draft-reply and --send-reply
 
     With --revise-reply, --revise gives the note saying what to change and -d
     updates the Gmail draft of the response, if it changes
@@ -344,11 +374,17 @@ def do_reply_cmd(args, cser):
         if (_revise_response(ctx, revise_id, args.revise) and
                 args.create_drafts):
             draft_reply = revise_id
-    if draft_reply or args.send_reply:
+    skip_id = getattr(args, 'skip_reply', None)
+    if skip_id and not cser.db.reply_get(skip_id).draft_id:
+        _skip_reply(None, ctx, skip_id)
+        skip_id = None
+    if skip_id or draft_reply or args.send_reply:
         if not gmail.check_available():
             return 1
         account = getattr(args, 'gmail_account', None)
         service = gmail.get_service(account)
+        if skip_id:
+            _skip_reply(service, ctx, skip_id)
         if draft_reply:
             _draft_response(service, ctx, draft_reply, account)
         if args.send_reply:

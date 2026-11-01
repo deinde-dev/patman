@@ -1346,6 +1346,65 @@ class TestReview(CseriesTester):
             run('--revise', 'Shorter')
         self.assertIn('There is no response to reply', str(exc.exception))
 
+    def test_review_skip_reply(self):
+        """A reply needing no response loses its response and draft"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'Fred series', None)
+        db.series_set_source(sid, 'review')
+        svid = db.ser_ver_add(sid, 1, link='123')
+        rid = db.review_add(svid, 2, 'Please fix this', False,
+                            datetime.now().isoformat())
+        db.review_set_sent(rid, 'Please fix this', 'm1', 't1')
+        reply_id = db.reply_add(
+            rid, 'm2', '<a2@x>', '<p0@x>', 'Fred Bloggs <fred@x.com>',
+            'sjg@chromium.org', '', 'Re: [PATCH 2/5] video: Add a driver',
+            'Mon, 1 Jan 2026 10:00:00 +0000', 'Thanks, will fix',
+            datetime.now().isoformat())
+        db.commit()
+
+        def run(sent=None):
+            args = cmdline.parse_args(
+                ['review', '--skip-reply', str(reply_id)], config_fname=False)
+            with mock.patch.object(gmail, 'check_available',
+                                   return_value=True) as avail, \
+                    mock.patch.object(gmail, 'get_service'), \
+                    mock.patch.object(gmail, 'sync_drafts',
+                                      return_value=(sent or {}, [], {})), \
+                    mock.patch.object(gmail, 'delete_draft') as delete, \
+                    terminal.capture() as (out, _):
+                ret = review.replies.do_reply_cmd(args, cser)
+            return ret, out.getvalue(), avail, delete
+
+        # With no draft, Gmail is not needed
+        db.reply_set_response(reply_id, 'Great', database.REPLY_SUGGESTED)
+        ret, out, avail, delete = run()
+        self.assertEqual(0, ret)
+        self.assertIn(f'Reply {reply_id}: no response needed', out)
+        avail.assert_not_called()
+        reply = db.reply_get(reply_id)
+        self.assertEqual(('skip', None, None),
+                         (reply.status, reply.response, reply.draft_id))
+
+        # A Gmail draft of the response is deleted
+        db.reply_set_response(reply_id, 'Great', database.REPLY_SUGGESTED)
+        db.reply_set_status(reply_id, database.REPLY_DRAFT, 'd1')
+        _, out, _, delete = run()
+        self.assertIn('no response needed, so deleted the Gmail draft', out)
+        self.assertEqual('d1', delete.call_args.args[1])
+        reply = db.reply_get(reply_id)
+        self.assertEqual(('skip', None, None),
+                         (reply.status, reply.response, reply.draft_id))
+
+        # ...unless it has been sent from Gmail, which is recorded
+        db.reply_set_response(reply_id, 'Great', database.REPLY_SUGGESTED)
+        db.reply_set_status(reply_id, database.REPLY_DRAFT, 'd2')
+        with self.assertRaises(ValueError) as exc:
+            run({reply_id: ('Great!', 'm9', 't1')})
+        self.assertIn('has been sent', str(exc.exception))
+        reply = db.reply_get(reply_id)
+        self.assertEqual(('sent', 'Great!'), (reply.status, reply.response))
+
     def test_gmail_sync_drafts(self):
         """Our messages in response to drafts are found reliably"""
         review_text = ('Hi Fred,\n\nOn Mon, Fred wrote:\n> code\n\n'

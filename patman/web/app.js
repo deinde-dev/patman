@@ -1935,7 +1935,6 @@ function replyBox(rp, seriesId, changed) {
   };
   const show = () => {
     const [label, cls] = REPLY_STATUS[rp.status] || [rp.status, 'st-other'];
-    const waiting = REPLY_WAITING.includes(rp.status);
     fill(box,
       h('div', { class: 'who' }, `↩ ${rp.sender.replace(/\s*<.*>/, '') || rp.sender}`,
         h('span', { class: 'when' }, ago(new Date(rp.date))), ' ',
@@ -1962,12 +1961,16 @@ function replyBox(rp, seriesId, changed) {
         confirmButton('Suggest a response', 'btn light small',
                       () => run(`replies/${rp.id}/suggest`, {}, 'Suggesting a response'),
                       'Have the agent suggest a response to this reply'),
-        waiting && h('button', { class: 'btn light small',
-                                 title: 'Mark this reply as needing no response',
-                                 onclick: async () => {
-          Object.assign(rp, await api(`replies/${rp.id}`, { json: { skip: true } }));
-          show();
-        } }, 'No reply needed')));
+        rp.status !== 'skip' && (rp.response
+          ? confirmButton('No reply needed', 'btn light small',
+                          () => run(`replies/${rp.id}`, { skip: true }, 'Dropping the response'),
+                          'Mark this reply as needing no response, dropping your response ' +
+                          'and any Gmail draft of it')
+          : h('button', { class: 'btn light small',
+                          title: 'Mark this reply as needing no response',
+                          onclick: () => run(`replies/${rp.id}`, { skip: true },
+                                             'Dropping the response') },
+              'No reply needed'))));
     if (changed) changed();
   };
   // Ask the agent to change the response, as a note says
