@@ -82,6 +82,7 @@ Subject: [PATCH 1/2] i2c: Add a driver
 
 Add a driver for the thing.
 
+Fixes: 0123456789ab ("i2c: Break it")
 Reviewed-by: Fred <fred@x.org>
 Signed-off-by: Ann Acker <ann@x.org>
 ---
@@ -145,7 +146,48 @@ def make_mbox(*patches):
                     patch.encode('utf-8') + b'\n' for patch in patches)
 
 
-class TestSuggest(CseriesTester):
+class SuggestHelper(CseriesTester):
+    """Helpers for the tests which find suggestions"""
+    # pylint: disable-next=R0913
+    def suggester(self, values, series, mboxes, limit=10, repo=None,
+                  earlier=None):
+        """Find suggestions with some rules, reading made-up patches
+
+        Args:
+            values (dict): Settings, as in [suggest]
+            series (list of dict): Recent series
+            mboxes (dict): key (str): Series link
+                value (bytes or Exception): Its mbox, or what reading it
+                    raises
+            limit (int): Most series to suggest
+            repo (str or None): Repo for the tests which need the history,
+                with the history to use at HEAD
+            earlier (AsyncMock or None): Mock of earlier_series()
+
+        Returns:
+            tuple:
+                Suggester: The suggester, after finding
+                list of Suggestion: What it found
+                AsyncMock: The mock of get_series_mbox()
+        """
+        cser = self.cser or self.get_database()
+        pwork = patchwork.Patchwork.for_testing(None)
+        def read(_client, link):
+            if isinstance(mboxes[link], Exception):
+                raise mboxes[link]
+            return mboxes[link]
+        get = mock.AsyncMock(side_effect=read)
+        sug = suggest.Suggester(suggest_rules.get_rules(values), pwork, cser,
+                                {ME}, cser.db, NOW, limit, 'HEAD')
+        sug._top = repo  # pylint: disable=W0212
+        with mock.patch.object(pwork, 'get_series_mbox', get), \
+                mock.patch.object(pwork, 'earlier_series',
+                                  earlier or mock.AsyncMock(return_value=[])):
+            found = sug.find(series)
+        return sug, found, get
+
+
+class TestSuggest(SuggestHelper):
     """Tests for the rules which suggest series to review"""
 
     def test_parse(self):
@@ -463,7 +505,7 @@ class TestSuggest(CseriesTester):
         series = [make_series(100, 'boot: Fix it'),
                   make_series(101, 'video: Other')]
         recent = mock.AsyncMock(return_value=series)
-        values = {'boot': 'prefix boot: +2', 'mine': 'blame +3'}
+        values = {'boot': 'prefix boot: +2', 'mine': 'checks pass +3'}
         with mock.patch.dict(suggest.settings.suggest, values, clear=True), \
                 mock.patch.object(scan, 'recent_series', recent), \
                 terminal.capture() as (out, err):
@@ -476,7 +518,7 @@ class TestSuggest(CseriesTester):
              '       boot +2',
              '1 of 2 recent series suggested'],
             out.getvalue().splitlines())
-        self.assertIn("Suggest rule 'mine' uses 'blame', which --suggest "
+        self.assertIn("Suggest rule 'mine' uses 'checks', which --suggest "
                       'does not run yet, so it is left out', err.getvalue())
         since = recent.call_args.args[2]
         self.assertEqual(
@@ -568,17 +610,29 @@ class TestSuggest(CseriesTester):
 
     def test_parse_patch(self):
         """The files, changed lines and tags of a patch are found"""
-        files, changed, tags = patchdata.parse_patch(
-            PATCH.split('\n\n', 1)[1])
-        self.assertEqual(['drivers/i2c/x.c', 'MAINTAINERS'], files)
+        patch = patchdata.parse_patch(PATCH.split('\n\n', 1)[1])
+        self.assertEqual(['drivers/i2c/x.c', 'MAINTAINERS'], patch.files)
         self.assertEqual(['int x;', 'struct udevice *dev;', 'int y;',
-                          'F:\told', 'F:\tnew'], changed)
-        self.assertEqual({'reviewed-by', 'signed-off-by'}, tags)
+                          'F:\told', 'F:\tnew'], patch.changed)
+        self.assertEqual({'reviewed-by', 'signed-off-by', 'fixes'},
+                         patch.tags)
+        self.assertEqual(['0123456789ab'], patch.fixes)
+
+        # The lines removed are given by their number before the patch
+        self.assertEqual({'drivers/i2c/x.c': [2], 'MAINTAINERS': [5]},
+                         patch.removed)
 
         # A patch which only renames a file has both names
-        files, changed, _ = patchdata.parse_patch(
+        patch = patchdata.parse_patch(
             'Rename it\n---\ndiff --git a/a.c b/b.c\nsimilarity index 100%\n')
-        self.assertEqual((['a.c', 'b.c'], []), (files, changed))
+        self.assertEqual((['a.c', 'b.c'], [], {}),
+                         (patch.files, patch.changed, patch.removed))
+
+        # A series based on a commit says so
+        info = patchdata.patch_info(make_mbox(PATCH + '\nbase-commit: '
+                                              'abcdef0123456\n'), set(), None)
+        self.assertEqual('abcdef0123456', info.base)
+        self.assertEqual(['0123456789ab'], info.fixes)
 
     def test_maintainers(self):
         """MAINTAINERS files are parsed and matched as get_maintainer does"""
@@ -651,42 +705,11 @@ class TestSuggest(CseriesTester):
                     suggest.score_series([rule], info,
                                          suggest.PATCH_TESTS)[0])
 
-        # Every test which needs only the patches has code to run it, apart
-        # from 'fixes', which needs the history too
+        # Every test which needs only the patches has code to run it
         self.assertEqual(
             sorted(name for name, test in suggest_rules.TESTS.items()
-                   if test.cost == suggest_rules.PATCH and name != 'fixes'),
+                   if test.cost == suggest_rules.PATCH),
             sorted(suggest.PATCH_TESTS))
-
-    def suggester(self, values, series, mboxes, limit=10):
-        """Find suggestions with some rules, reading made-up patches
-
-        Args:
-            values (dict): Settings, as in [suggest]
-            series (list of dict): Recent series
-            mboxes (dict): key (str): Series link
-                value (bytes or Exception): Its mbox, or what reading it
-                    raises
-            limit (int): Most series to suggest
-
-        Returns:
-            tuple:
-                Suggester: The suggester, after finding
-                list of Suggestion: What it found
-                AsyncMock: The mock of get_series_mbox()
-        """
-        cser = self.cser or self.get_database()
-        pwork = patchwork.Patchwork.for_testing(None)
-        def read(_client, link):
-            if isinstance(mboxes[link], Exception):
-                raise mboxes[link]
-            return mboxes[link]
-        get = mock.AsyncMock(side_effect=read)
-        sug = suggest.Suggester(suggest_rules.get_rules(values), pwork, cser, {ME},
-                                cser.db, NOW, limit)
-        with mock.patch.object(pwork, 'get_series_mbox', get):
-            found = sug.find(series)
-        return sug, found, get
 
     def test_prune(self):
         """Patches are read only for the series which could be suggested"""

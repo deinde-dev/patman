@@ -332,6 +332,32 @@ def _show_args(rule):
     return shlex.join(rule.args)
 
 
+def rule_text(rule):
+    """Show the test of a rule, with its arguments, as it would be written
+
+    Args:
+        rule (Rule): Rule to show
+
+    Returns:
+        str: The test, e.g. 'not path drivers/i2c/**'
+    """
+    args = _show_args(rule)
+    return (f"{'not ' if rule.negate else ''}{rule.test}"
+            f"{' ' if args else ''}{args}")
+
+
+def score_text(rule):
+    """Show the score of a rule, as it would be written
+
+    Args:
+        rule (Rule): Rule to show
+
+    Returns:
+        str: The score, e.g. '+3' or 'skip'
+    """
+    return f'{rule.score:+d}' if isinstance(rule.score, int) else rule.score
+
+
 def show_rules(rules, project):
     """Show the rules, as understood from the settings
 
@@ -352,12 +378,8 @@ def show_rules(rules, project):
         if TESTS[rule.test].cost != cost:
             cost = TESTS[rule.test].cost
             lines.append(f'  {COST_NAMES[cost]}:')
-        test = f"{'not ' if rule.negate else ''}{rule.test}"
-        args = _show_args(rule)
-        score = (f'{rule.score:+d}' if isinstance(rule.score, int)
-                 else rule.score)
-        lines.append(f"    {rule.name:{width}}  {test}{' ' if args else ''}"
-                     f'{args}  {score}')
+        lines.append(f'    {rule.name:{width}}  {rule_text(rule)}  '
+                     f'{score_text(rule)}')
     lines.append(f'Suggest at most {rules.limit}, with a score of at least '
                  f'{rules.min_score}, sent in the last {rules.days} days')
     return lines

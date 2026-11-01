@@ -224,8 +224,9 @@ it, so a reload does not run the costly tests again.
    series list, making no requests
 3. The per-patch tests (from the mbox), the pruning and max_reads, with
    tests counting the mboxes read
-4. fixes, blame, newcomer, no-replies, delegate and checks, and --explain
-5. The 'Suggested' group in the inbox, with its reasons on each card
+4. fixes, blame and newcomer, and --explain
+5. no-replies, delegate and checks
+6. The 'Suggested' group in the inbox, with its reasons on each card
 
 ## Decisions
 

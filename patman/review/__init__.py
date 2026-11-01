@@ -22,8 +22,10 @@ modules are:
   scan: scanning for and reviewing new versions of a series
   suggest: suggesting series to review, by your rules
   suggest_rules: the rules for suggesting series, from the settings
+  explain: how the rules score one series, for --explain
   maintainers: who looks after a file, from the MAINTAINERS files
   patchdata: what the patches of a series say, for the suggest rules
+  history: what the git history says of a series, for the suggest rules
   voice: learning the reviewer's writing voice
 
 Each module is imported here, so code outside the package can use, for
@@ -36,6 +38,8 @@ from patman.review import common
 from patman.review import core
 from patman.review import drafts
 from patman.review import emails
+from patman.review import explain
+from patman.review import history
 from patman.review import lookup
 from patman.review import maintainers
 from patman.review import patchdata

@@ -10,6 +10,11 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman review --suggest`` runs the ``fixes``, ``blame`` and
+  ``newcomer`` tests, which use the history of your git repo, with
+  ``newcomer`` asking patchwork or lore only when the recent series and the
+  history do not settle it. ``patman review --explain SERIES`` shows how the
+  rules score one series, with what each test saw.
 - patman logs each try at each request it sends to patchwork or lore, with
   its status or error, size and time, in ``~/.cache/patman/requests.log``, to
   help find out why a command could not read a server. ``PATMAN_REQLOG``

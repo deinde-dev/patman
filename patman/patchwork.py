@@ -87,6 +87,15 @@ SEARCH_MAX_AGE = 10 * 60
 # Number of series and of patches to read for a search
 SEARCH_COUNT = 30
 
+# A search for the series which someone sent before a date finds them all
+# once there is one, since none goes away, so is kept for good then; until
+# then it is read again after this many seconds, in case one arrives
+EARLIER_MAX_AGE = 24 * 60 * 60
+
+# Number of a person's earlier series to read, which is enough to find one
+# which is not an earlier version of the series in question
+EARLIER_COUNT = 10
+
 # Events which say that a patch has changed, so that a copy of it in the
 # cache is out of date
 PATCH_EVENTS = ('patch-state-changed', 'patch-delegated')
@@ -124,6 +133,7 @@ REQUEST_KINDS = [
     ('series', re.compile(r'series/\d+/')),
     ('patch-states', re.compile(r'patches/\?series=')),
     ('series-search', re.compile(r'series/\?.*\bq=')),
+    ('submitter-series', re.compile(r'series/\?.*\bsubmitter=')),
     ('recent-series', re.compile(r'series/\?')),
     ('patch-search', re.compile(r'patches/\?.*\bq=')),
     ('patch-list', re.compile(r'patches/\?')),
@@ -935,6 +945,25 @@ class Patchwork(SeriesFinder):
                     'submitter': pat.get('submitter'), 'total': None})
         return sorted(found.values(), key=lambda ser: ser.get('date') or '',
                       reverse=True)
+
+    async def earlier_series(self, client, project, addr, before):
+        """Find the series which someone sent before a date
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            project (str): Project link name, e.g. 'uboot'
+            addr (str): Address of the submitter
+            before (str): Date, in ISO format
+
+        Returns:
+            list of dict: Up to EARLIER_COUNT of the series, newest first, as
+                for get_series()
+        """
+        query = (f'project={project}&submitter={quote_plus(addr)}'
+                 f'&before={quote_plus(before)}&order=-date'
+                 f'&per_page={EARLIER_COUNT}')
+        return await self._cached_request(client, f'series/?{query}',
+                                          EARLIER_MAX_AGE, keep=bool)
 
     async def get_series(self, client, link, max_age=SERIES_MAX_AGE):
         """Read information about a series
