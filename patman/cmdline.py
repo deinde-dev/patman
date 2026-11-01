@@ -802,6 +802,29 @@ def add_workflow_subparser(subparsers):
     return workflow
 
 
+def comment_id(text):
+    """Parse the ID of a comment to respond to
+
+    Args:
+        text (str): ID on patchwork, or 'lore:<msgid>' for a list on lore
+
+    Returns:
+        int or str: The ID
+
+    Raises:
+        argparse.ArgumentTypeError: The ID is not valid
+
+    >>> comment_id('123'), comment_id('lore:a@b')
+    (123, 'lore:a@b')
+    """
+    if text.isdigit() and int(text):
+        return int(text)
+    if text.startswith('lore:') and len(text) > len('lore:'):
+        return text
+    raise argparse.ArgumentTypeError(
+        f"invalid comment ID '{text}': give a number or 'lore:<msgid>'")
+
+
 def _add_reply_args(review):
     """Add the arguments for handling replies to reviews
 
@@ -840,10 +863,11 @@ def _add_reply_args(review):
         help='Create a Gmail draft of the response to a reply, threaded as a '
              'reply to it')
     review.add_argument(
-        '--respond-comment', type=int, metavar='ID',
-        help='Ask the agent to suggest a response to a comment on patchwork '
-             'about a reviewed series, given by the comment ID; use -i to '
-             'say which patch it is about, with 0 for the cover letter')
+        '--respond-comment', type=comment_id, metavar='ID',
+        help='Ask the agent to suggest a response to a comment about a '
+             'reviewed series, given by its ID on patchwork, or as '
+             "'lore:<msgid>' for a list on lore; use -i to say which patch "
+             'it is about, with 0 for the cover letter')
     review.add_argument(
         '--send-reply', type=int, metavar='ID',
         help='Send the response to a reply, creating its Gmail draft first if '

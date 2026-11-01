@@ -357,8 +357,9 @@ claude.ai/code. The reply then links to the session, and shows the response
 once the session stores it, along with a Gmail draft of it, so it is ready to
 send. 'End discussion' closes the session.
 
-To respond to other comments on patchwork, tap 'Comments' under a review, or on
-the cover-letter card, to list the comments on that patch or cover letter.
+To respond to other comments, on patchwork or on a list on lore, tap 'Comments'
+under a review, or on the cover-letter card, to list the comments on that patch
+or cover letter.
 Your own comments, such as the review itself, are left out, since they need no
 response.
 'Respond' on a comment asks the agent to suggest a response, optionally saying

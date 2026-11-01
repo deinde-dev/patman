@@ -352,14 +352,45 @@ class TestWebServer(unittest.TestCase, TestCommon):
         """A review whose upstream is on lore gives the list there"""
         self.cser.db.upstream_add('dtc', 'https://dtc.git',
                                   lore_url='https://lore/dtc')
-        ser_id, _ = self.add_series('rev', 'Somebody else',
-                                    {1: [('a', 'new', 5, 0)]}, source='review',
-                                    ups='dtc')
+        ser_id, svids = self.add_series(
+            'rev', 'Somebody else', {1: [('a', 'new', None, 0),
+                                         ('b', 'new', None, 0)]},
+            source='review', ups='dtc')
         srv = server.Server(self.cser, pw_url='https://pw.default')
-        _, data = self.call(srv, 'GET', f'/api/reviews/{ser_id}')
+
+        # A review made before patman recorded the IDs on lore has them
+        # looked up, once
+        found = {'cover_letter': {'id': 'lore:c@x', 'name': '[0/2] x'},
+                 'patches': [{'id': 'lore:p1@x'}, {'id': 'lore:p2@x'}]}
+        with mock.patch.object(lorelist.LoreList, 'get_series',
+                               mock.AsyncMock(return_value=found)) as get:
+            _, data = self.call(srv, 'GET', f'/api/reviews/{ser_id}')
+            self.call(srv, 'GET', f'/api/reviews/{ser_id}')
+        get.assert_called_once()
+        self.assertEqual('100', get.call_args.args[1])
         self.assertEqual(('dtc', None, 'https://lore/dtc'),
                          (data['upstream'], data['patchwork_url'],
                           data['lore_url']))
+        ver = data['versions'][0]
+        self.assertEqual(('lore:c@x', ['lore:p1@x', 'lore:p2@x']),
+                         (ver['cover_id'],
+                          [pat['patch_id'] for pat in ver['patches']]))
+        db = self.cser.db
+        self.assertEqual('lore:c@x', db.ser_ver_get_by_id(svids[1]).cover_id)
+        self.assertEqual(['lore:p1@x', 'lore:p2@x'],
+                         [pcm.patch_id for pcm in db.pcommit_get_list(svids[1])])
+
+        # A comment on lore can be responded to, by its Message-ID
+        srv.get_patman_cmd = lambda *args: ['echo', *args]
+        res = self.run_jobs(srv, [
+            ('POST', f'/api/reviews/{ser_id}/respond',
+             {'seq': 1, 'comment': 'lore:r@x'}),
+            ('POST', f'/api/reviews/{ser_id}/respond',
+             {'seq': 1, 'comment': 'lore:'}),
+        ])
+        self.assertEqual([202, 400], [status for status, _ in res])
+        self.assertIn('--respond-comment lore:r@x -i 1',
+                      srv.get_jobs()[0].state['results'][0]['output'])
 
     def test_review_no_cover(self):
         """A version without a cover letter is only looked up once"""

@@ -1083,6 +1083,21 @@ class TestReview(CseriesTester):
             review.replies._suggest_response(ctx, rep.idnum)
         self.assertIn('use --respond-comment 77', str(exc.exception))
 
+        # A comment on a list on lore is given by its Message-ID
+        async def get_lore_comments(_client, _patch_id):
+            return [dict(comment, id='lore:c9@x', msgid='<c9@x>',
+                         content='From lore')]
+
+        pwork.get_patch_comments = get_lore_comments
+        self.assertEqual(0, run('--respond-comment', 'lore:c9@x', '-i',
+                                '1')[0])
+        self.assertIn((1, 'lore:c9@x'), [(r.seq, r.comment_id)
+                                         for r in db.reply_get_comments(svid)])
+        with terminal.capture() as (_, err), self.assertRaises(SystemExit):
+            cmdline.parse_args(['review', '--respond-comment', 'abc'],
+                               config_fname=False)
+        self.assertIn("invalid comment ID 'abc'", err.getvalue())
+
     def test_review_replies(self):
         """Replies to a sent review are recorded and can be responded to"""
         cser = self.get_database()
@@ -2938,6 +2953,19 @@ class TestReview(CseriesTester):
         self.assertEqual([(0, 1), (1, None)],
                          [(pcm.seq, pcm.patch_id)
                           for pcm in cser.db.pcommit_get_list(svid)])
+
+        # A series from a list on lore is known there by its Message-IDs
+        series_data = {
+            'patches': [{'id': 'lore:p1@x', 'name': '[1/1] foo'}],
+            'cover_letter': {'id': 'lore:c@x', 'name': '[0/1] foo'},
+        }
+        review.core._register_series(cser, 'baz', 1, 'c@x', series_data,
+                                     on_lore=True)
+        cser.commit()
+        svid = cser.db.series_find_by_link('c@x')[3]
+        self.assertEqual('lore:c@x', cser.db.ser_ver_get_by_id(svid).cover_id)
+        self.assertEqual(['lore:p1@x'], [pcm.patch_id for pcm in
+                                         cser.db.pcommit_get_list(svid)])
 
     def test_review_get_previous_skips_gap(self):
         """Test prior-review lookup skips versions that have no reviews"""

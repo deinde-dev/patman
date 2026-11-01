@@ -104,9 +104,10 @@ using ``unknown`` for patches with no state.
 Comment
 ~~~~~~~
 
-A comment on patchwork; any field may be null:
+A comment on patchwork, or on a list on lore; any field may be null:
 
-- ``id`` (int): ID of the comment on patchwork
+- ``id`` (int or str): ID of the comment on patchwork, or ``lore:<msgid>`` for
+  one on lore
 - ``date`` (str): when it was sent
 - ``name`` (str): name of the sender
 - ``email`` (str): email address of the sender
@@ -159,7 +160,8 @@ responding to (see ``POST /api/reviews/<id>/respond``):
 - ``timestamp`` (str): when the reply was found
 - ``seq`` (int or null): for a comment, the patch it is about, 0 for the cover
   letter
-- ``comment_id`` (int or null): for a comment, its ID on patchwork
+- ``comment_id`` (int, str or null): for a comment, its ID on patchwork, or
+  ``lore:<msgid>``
 - ``discussion`` (object or null): the Claude session talking through the
   reply, if there is one, with its ``name`` and its ``url`` (null until it
   gives one); only given by ``GET /api/reviews/<id>``
@@ -470,7 +472,9 @@ A reviewed series with all its versions:
 Series added for review before cover letters were recorded have no
 ``cover_id``. For versions with a review of the cover letter, the server looks
 up the series on patchwork and records its cover letter, so this only happens
-once.
+once. For a list on lore, the patches and cover letter are known by their
+Message-IDs, as ``lore:<msgid>``; for a version reviewed before these were
+recorded, the server reads the thread from lore and records them, once.
 
 ``GET /api/reviews/<id>/context``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -556,7 +560,8 @@ patches, 0 for the cover letter), which must not be empty, and may give the
 
 Have the agent suggest a response to a comment on patchwork about a reviewed
 series, running ``patman review --respond-comment``. The body gives the
-``comment`` (int; its ID on patchwork) and ``seq`` (int; the patch it is about,
+``comment`` (int, its ID on patchwork, or str, ``lore:<msgid>`` for a list on
+lore) and ``seq`` (int; the patch it is about,
 0 for the cover letter), and may give the ``version`` (int; default the latest)
 and a ``note`` (str) saying what the reviewer would like to say. The comment
 then appears in the version's ``comments``, with the response.

@@ -728,13 +728,14 @@ def handle_comment_sync(ctx, item, comment, others):
 
 
 def _find_comment(pwork, link, seq, comment_id):
-    """Read a comment on a patch or cover letter from patchwork
+    """Read a comment on a patch or cover letter from patchwork or lore
 
     Args:
-        pwork (Patchwork): Patchwork instance
-        link (str): Patchwork series link/ID
+        pwork (Patchwork or LoreList): Where the series comes from
+        link (str): Patchwork series link/ID, or Message-ID on lore
         seq (int): Patch which the comment is about, 0 for the cover letter
-        comment_id (int): ID of the comment on patchwork
+        comment_id (int or str): ID of the comment on patchwork, or
+            'lore:<msgid>' for a list on lore
 
     Return:
         tuple:

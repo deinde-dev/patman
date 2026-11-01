@@ -45,6 +45,28 @@ def get_int(data, key):
     return int(val)
 
 
+def get_comment(data, key):
+    """Get the ID of a comment from a request
+
+    Args:
+        data (dict): Request data
+        key (str): Key to read
+
+    Return:
+        int or str or None: ID on patchwork, or 'lore:<msgid>' for a comment
+            on lore, or None if missing
+
+    Raises:
+        BadRequest: The value is not a valid ID
+    """
+    val = data.get(key)
+    if val in (None, ''):
+        return None
+    if isinstance(val, str) and val.startswith('lore:') and val[5:].strip():
+        return val
+    return get_int(data, key)
+
+
 def get_str(data, key, required=None):
     """Get an optional string from a request
 

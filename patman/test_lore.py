@@ -641,8 +641,9 @@ class TestLore(unittest.TestCase):
             {'name': 'my-list', 'link_name': 'my-list',
              'list_id': 'my-list.vger.kernel.org',
              'list_email': 'My-List@vger.kernel.org'}, data['project'])
-        self.assertEqual(['<re@x>'], [c['msgid'] for c in run(
-            llist.get_patch_comments(None, 'lore:one@x'))])
+        self.assertEqual([('lore:re@x', '<re@x>')],
+                         [(c['id'], c['msgid']) for c in run(
+                             llist.get_patch_comments(None, 'lore:one@x'))])
 
         llist, _ = self.lore_list()
         for msgid, msg in (

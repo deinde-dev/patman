@@ -589,6 +589,55 @@ class Server(jobs.JobRunner):
         """
         return web.json_response(info.get_review_list(self.rcser))
 
+    async def _find_lore_ids(self, data):
+        """Look up the IDs which reviewed versions on a lore list lack
+
+        Reviews of a series on a lore list made before patman recorded them
+        have no IDs for their patches and cover letter, so the page cannot
+        show these or the comments on them. Read each such version's thread
+        and record the IDs, so this only happens once.
+
+        Args:
+            data (dict): Review detail, as from info.get_review_detail(); the
+                versions' cover_id and cover_name, and their patches'
+                patch_id, are filled in
+        """
+        if not self.get_lore_url(data['upstream']):
+            return
+        todo = [ver for ver in data['versions']
+                if ver['link'] and ver['svid'] not in self._no_cover and
+                (not ver['cover_id'] or
+                 any(not pat['patch_id'] for pat in ver['patches']))]
+        if not todo:
+            return
+        pwork = self.get_pwork(data['upstream'])
+        async with aiohttp.ClientSession() as client:
+            results = await asyncio.gather(
+                *[pwork.get_series(client, ver['link']) for ver in todo],
+                return_exceptions=True)
+        db = self.rcser.db
+        for ver, result in zip(todo, results):
+            if isinstance(result, Exception) or not result:
+                tout.warning(f"Cannot read series {ver['link']}: {result}")
+                self._no_cover.add(ver['svid'])
+                continue
+            cover = result.get('cover_letter')
+            if cover and not ver['cover_id']:
+                ver['cover_id'] = cover['id']
+                ver['cover_name'] = cover.get('name')
+                db.ser_ver_set_info(database.SerVer(
+                    ver['svid'], None, None, None, cover['id'], 0,
+                    cover.get('name'), None, None, None))
+            by_seq = {pcm.seq: pcm for pcm in db.pcommit_get_list(ver['svid'])}
+            for pat, found in zip(ver['patches'], result.get('patches') or []):
+                pcm = by_seq.get(pat['seq'] - 1)
+                if pat['patch_id'] or not pcm:
+                    continue
+                pat['patch_id'] = found['id']
+                db.pcommit_update(pcm._replace(patch_id=found['id']))
+            self._no_cover.add(ver['svid'])
+        self.rcser.commit()
+
     async def _find_covers(self, data):
         """Look up the cover letters which reviewed versions lack
 
@@ -664,6 +713,7 @@ class Server(jobs.JobRunner):
         await self._set_review_branches(data['versions'], data['upstream'],
                                         'link')
         await self._find_covers(data)
+        await self._find_lore_ids(data)
         data['patchwork_url'] = self.get_pw_url(data['upstream'])
         data['lore_url'] = self.get_lore_url(data['upstream'])
         # Show where each reply being talked through is being discussed
@@ -1601,7 +1651,8 @@ class Server(jobs.JobRunner):
             version (int or None): Version, or None for the latest
             seq (int): Patch which the comment is about, 0 for the cover
                 letter
-            comment_id (int): ID of the comment on patchwork
+            comment_id (int or str): ID of the comment on patchwork, or
+                'lore:<msgid>'
             note (str or None): What the reviewer would like to say, for the
                 agent
 
@@ -1623,10 +1674,10 @@ class Server(jobs.JobRunner):
     async def _respond(self, request):
         """Handle 'POST /api/reviews/<id>/respond': respond to a comment
 
-        This has the agent suggest a response to a comment on patchwork
-        about the cover letter or a patch, as a job. The body gives the
-        patchwork 'comment' ID and the 'seq' of the patch it is about (0 for
-        the cover letter), and may give a 'version', which defaults to the
+        This has the agent suggest a response to a comment about the cover
+        letter or a patch, as a job. The body gives the 'comment' ID, on
+        patchwork or as 'lore:<msgid>', and the 'seq' of the patch it is
+        about (0 for the cover letter), and may give a 'version', which defaults to the
         latest, and a 'note' saying what the reviewer would like to say.
 
         Args:
@@ -1642,7 +1693,7 @@ class Server(jobs.JobRunner):
         idnum = _idnum(request)
         data = await self._read_json(request)
         seq = params.get_seq(data)
-        comment = params.get_int(data, 'comment')
+        comment = params.get_comment(data, 'comment')
         if not comment:
             raise params.BadRequest('Please give the comment to respond to')
         return self._respond_job(idnum, params.get_int(data, 'version'), seq,

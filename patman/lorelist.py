@@ -1116,14 +1116,17 @@ class LoreList(patchwork.SeriesFinder):  # pylint: disable=R0902,R0904
             item_id (str): ID of the patch or cover letter, 'lore:<msgid>'
 
         Returns:
-            list of dict: Replies, as lore.to_comment() gives them
+            list of dict: Replies, as lore.to_comment() gives them, each with
+                its 'id' as 'lore:<msgid>'
         """
         msgid = str(item_id).removeprefix(ID_PREFIX)
         messages = await self._thread(client, msgid)
         items = [msgid_of(msg) for msg in messages
                  if subject_info(msg) and
                  not str(msg.get('Subject', '')).lower().startswith('re:')]
-        return lore.comments_for(messages, items + [msgid])[msgid]
+        # Give each reply an ID, from its Message-ID, as for the patches
+        return [dict(cmt, id=f"{ID_PREFIX}{lore.bare_msgid(cmt['msgid'])}")
+                for cmt in lore.comments_for(messages, items + [msgid])[msgid]]
 
     async def get_patch_comments(self, client, patch_id, max_age=None):
         """Read the replies to a patch
