@@ -20,6 +20,7 @@ from patman.review import explain
 from patman.review import history
 from patman.review import suggest
 from patman.review import suggest_rules
+from patman.review import suggest_tests
 from patman.test_common import Namespace
 from patman.test_lore import feed_entry
 from patman.test_suggest import (ME, NOW, PATCH, SuggestHelper, make_mbox,
@@ -240,12 +241,12 @@ class TestSuggestExtra(SuggestHelper):
                             'https://pw/1')[-1])
 
         # Only the prefixes of the subjects are shown, each once
-        info = suggest.series_info(make_series(1, 'i2c: x: New'), NOW, False,
-                                   [])
-        self.assertEqual(suggest.Result(True, 'i2c: x:'),
-                         suggest.FREE_TESTS['prefix'](('i2c:',), info))
-        self.assertEqual(suggest.Result(False, 'i2c: x:'),
-                         suggest.FREE_TESTS['prefix'](('dm:',), info))
+        info = suggest_tests.series_info(make_series(1, 'i2c: x: New'),
+                                         NOW, False, [])
+        self.assertEqual(suggest_tests.Result(True, 'i2c: x:'),
+                         suggest_tests.FREE_TESTS['prefix'](('i2c:',), info))
+        self.assertEqual(suggest_tests.Result(False, 'i2c: x:'),
+                         suggest_tests.FREE_TESTS['prefix'](('dm:',), info))
 
         # A series which cannot be read shows what is known
         sug.pwork.get_series_mbox.side_effect = ValueError('No mbox')

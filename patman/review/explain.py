@@ -21,6 +21,7 @@ from patman.review import common
 from patman.review import lookup
 from patman.review import suggest
 from patman.review import suggest_rules
+from patman.review import suggest_tests
 
 
 def _verdict(sug, rules, results, score):
@@ -62,7 +63,7 @@ async def _facts(sug, pws):
         tuple:
             bool: True if you have reviewed this version
             list of tuple: What each kind of test knows:
-                dict: The tests, e.g. suggest.FREE_TESTS
+                dict: The tests, e.g. suggest_tests.FREE_TESTS
                 Info, PatchInfo, Extra or None: What they know, or None if
                     it could not be found out
             list of str: Problems found, e.g. the patches cannot be read
@@ -80,8 +81,9 @@ async def _facts(sug, pws):
             extra = await sug.extra(client, pws, patches)
         except suggest.PW_ERRORS as exc:
             problems.append(f'Cannot check it: {exc}')
-    return done, [(suggest.FREE_TESTS, info), (suggest.PATCH_TESTS, patches),
-                  (suggest.EXTRA_TESTS, extra)], problems
+    return done, [(suggest_tests.FREE_TESTS, info),
+                  (suggest_tests.PATCH_TESTS, patches),
+                  (suggest_tests.EXTRA_TESTS, extra)], problems
 
 
 def _run(rule, facts):
@@ -146,12 +148,13 @@ def explain(sug, pws, url):
     """
     lines = [suggest.series_title(pws), f'  {url}']
     done, facts, problems = common.run(_facts(sug, pws))
-    rules = [rule for rule in sug.rules.rules if rule.test in suggest.ALL_TESTS]
+    rules = [rule for rule in sug.rules.rules
+             if rule.test in suggest_tests.ALL_TESTS]
     results = [_run(rule, facts) for rule in rules]
     table, score = _table(rules, results)
     lines += table + problems
     for rule in sug.rules.rules:
-        if rule.test not in suggest.ALL_TESTS:
+        if rule.test not in suggest_tests.ALL_TESTS:
             lines.append(f"Rule '{rule.name}' uses '{rule.test}', which is "
                          'not run yet')
     if lookup.is_own_series(pws, sug.emails, sug.own_db):
