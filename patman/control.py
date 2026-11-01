@@ -38,6 +38,7 @@ from patman import maint_done
 from patman import maint_thanks
 from patman import patchstream
 from patman import pwcache
+from patman import reqlog
 from patman import review as review_mod
 from patman import send
 from patman import server
@@ -918,6 +919,8 @@ def do_patman(args, test_db=None, pwork=None, cser=None):
     lore.set_mode(getattr(args, 'lore', None) or 'hint')
     if getattr(args, 'no_cache', False):
         pwcache.disable()
+    reqlog.set_command(' '.join(filter(None, [getattr(args, 'cmd', None),
+                                              getattr(args, 'subcmd', None)])))
     if args.full_help:
         # The pager takes a single file, so put the parts of the manual
         # together in one

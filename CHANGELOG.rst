@@ -10,6 +10,10 @@ Unreleased
 
 Added
 ~~~~~
+- patman logs each try at each request it sends to patchwork or lore, with
+  its status or error, size and time, in ``~/.cache/patman/requests.log``, to
+  help find out why a command could not read a server. ``PATMAN_REQLOG``
+  turns it off or puts it elsewhere.
 - Rules for suggesting series to review, in a new ``[suggest]`` section of
   the settings, with tests such as the files a series touches, who sent it
   and whether it has been reviewed, each adding to a score. ``patman review

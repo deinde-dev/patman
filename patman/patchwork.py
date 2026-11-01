@@ -21,6 +21,7 @@ from u_boot_pylib import tout
 
 from patman import lore
 from patman import pwcache
+from patman import reqlog
 from patman import traffic
 
 # Information passed to series_get_states()
@@ -462,25 +463,24 @@ class Patchwork(SeriesFinder):
             for i in range(RETRIES + 1):
                 try:
                     traffic.add(self.url, requests=1, kind=kind)
-                    async with client.get(
-                            full_url, proxy=get_proxy(full_url),
-                            timeout=aiohttp.ClientTimeout(
-                                total=REQUEST_TIMEOUT)) as response:
-                        traffic.add(self.url,
-                                    nbytes=len(await response.read()),
-                                    kind=kind)
-                        if response.status in RETRY_STATUS and i < RETRIES:
-                            # The server is overloaded, so try again later
-                            await asyncio.sleep(i + 1)
-                            continue
-                        if response.status != 200:
-                            raise ValueError(
-                                f"Could not read URL '{full_url}' "
-                                f'(status {response.status})')
-                        result = await response.json()
-                        # print('- done', full_url)
-                        return result
-                    break
+                    with reqlog.attempt(full_url, i + 1) as tried:
+                        async with client.get(
+                                full_url, proxy=get_proxy(full_url),
+                                timeout=aiohttp.ClientTimeout(
+                                    total=REQUEST_TIMEOUT)) as response:
+                            nbytes = len(await response.read())
+                            tried.done(response.status, nbytes)
+                    traffic.add(self.url, nbytes=nbytes, kind=kind)
+                    if response.status in RETRY_STATUS and i < RETRIES:
+                        # The server is overloaded, so try again later
+                        await asyncio.sleep(i + 1)
+                        continue
+                    if response.status != 200:
+                        raise ValueError(
+                            f"Could not read URL '{full_url}' "
+                            f'(status {response.status})')
+                    # The body is kept once read, so this needs no request
+                    return await response.json()
                 except aiohttp.ClientConnectorError as exc:
                     # A name which does not resolve will not start working,
                     # but a busy server may fail to accept a connection
@@ -1036,13 +1036,15 @@ class Patchwork(SeriesFinder):
         full_url = f'{self.url}/{subpath}'
         async with self.semaphore:
             traffic.add(self.url, requests=1, kind='mbox')
-            async with client.get(
-                    full_url, proxy=get_proxy(full_url)) as response:
-                content = await response.read()
-                traffic.add(self.url, nbytes=len(content), kind='mbox')
-                if response.status != 200:
-                    raise ValueError(
-                        f'Failed to download mbox: HTTP {response.status}')
+            with reqlog.attempt(full_url, 1) as tried:
+                async with client.get(
+                        full_url, proxy=get_proxy(full_url)) as response:
+                    content = await response.read()
+                    tried.done(response.status, len(content))
+            traffic.add(self.url, nbytes=len(content), kind='mbox')
+            if response.status != 200:
+                raise ValueError(
+                    f'Failed to download mbox: HTTP {response.status}')
         self._to_cache(subpath, base64.b64encode(content).decode('ascii'))
         return content
 
