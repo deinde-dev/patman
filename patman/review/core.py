@@ -48,6 +48,7 @@ from patman.review import scan
 from patman.review import stats
 from patman.review import stored
 from patman.review import suggest
+from patman.review import suggest_rules
 from patman.review import voice
 
 
@@ -1218,7 +1219,7 @@ def do_review(args, pwork, cser, own_db=None):
         return scan.do_scan(args, pwork, cser)
 
     if getattr(args, 'suggest_rules', False):
-        return suggest.do_rules(pwork)
+        return suggest_rules.do_rules(pwork)
 
     if getattr(args, 'suggest', False):
         return suggest.do_suggest(args, pwork, cser, _own_emails(args),

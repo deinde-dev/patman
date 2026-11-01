@@ -20,7 +20,8 @@ modules are:
   replies: replies to reviews, and responding to them
   stored: sending and revising reviews which are already stored
   scan: scanning for and reviewing new versions of a series
-  suggest: rules for suggesting series to review
+  suggest: suggesting series to review, by your rules
+  suggest_rules: the rules for suggesting series, from the settings
   maintainers: who looks after a file, from the MAINTAINERS files
   patchdata: what the patches of a series say, for the suggest rules
   voice: learning the reviewer's writing voice
@@ -43,5 +44,6 @@ from patman.review import replies
 from patman.review import scan
 from patman.review import stored
 from patman.review import suggest
+from patman.review import suggest_rules
 from patman.review import voice
 from patman.review.core import do_review, review_series
