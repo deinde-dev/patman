@@ -1535,9 +1535,12 @@ async function viewReview(id, wantVer) {
   const [tryBtn, tryBox] = sv.link ? tryButton(sv.link, ser.upstream, sv.review_branch,
                                                sv.review_name)
                                    : [null, null];
+  // Once its reviews are deleted, a version has nothing to review again
+  const again = sv.reviews.length > 0;
   const [againBtn, againBox] = reviewButton(
-    'Review again', 'btn light small',
-    'Have the agent review this version of the series again, replacing its reviews',
+    again ? 'Review again' : 'Review', 'btn light small',
+    again ? 'Have the agent review this version of the series again, replacing its reviews'
+          : 'Have the agent review this version of the series',
     reviewAgain);
   // The buttons which act on all the reviews, drawn again when a job starts or
   // finishes, since they depend on which reviews are unsent and not busy
