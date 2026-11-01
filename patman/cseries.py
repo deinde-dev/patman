@@ -460,6 +460,9 @@ class Cseries(cser_helper.CseriesHelper):
                 link
             wait_s (int): Number of seconds to wait for the autolink to succeed
         """
+        # Find the series now, since the branch may change while waiting
+        ser, version = self._parse_series_and_version(series, version)
+        series = ser.name
         start = self.get_time()
         stop = start + wait_s
         sleep_time = 5
@@ -1472,7 +1475,8 @@ class Cseries(cser_helper.CseriesHelper):
         if likely_sent and autolink:
             tout.notice(f'Autolinking with {pwork.url} (waiting up to '
                         f'{autolink_wait} seconds)')
-            self.link_auto(pwork, name, version, True, wait_s=autolink_wait)
+            self.link_auto(pwork, ser.name, version, True,
+                           wait_s=autolink_wait)
 
     def archive(self, series):
         """Archive a series

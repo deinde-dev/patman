@@ -170,6 +170,9 @@ Changed
 
 Fixed
 ~~~~~
+- ``patman series send`` and ``patman series autolink`` keep to the series
+  they start with while waiting for it to appear, rather than failing with
+  'Unknown series' when another branch is checked out meanwhile.
 - Mail header names are matched ignoring their case, as RFC 5322 requires,
   so a review is copied to the people in a ``CC:`` header of the patch, not
   only in a ``Cc:`` header.

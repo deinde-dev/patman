@@ -2507,6 +2507,32 @@ class TestCseries(CseriesTester):
         self.assertEqual(
             "Setting link for series 'second' v3 to 500", next(itr))
 
+    def test_series_autolink_branch_change(self):
+        """Autolink keeps to its series when the branch changes meanwhile"""
+        def h_sleep(time_s):
+            # Someone checks out another branch while autolink waits
+            gitutil.checkout('first', self.gitdir, work_tree=self.tmpdir,
+                             force=True)
+            if cser.get_time() > 5:
+                self.autolink_extra = {'id': 500,
+                                       'name': 'Series for my board',
+                                       'version': 3}
+            cser.inc_fake_time(time_s)
+
+        cser, pwork = self.setup_second()
+        with terminal.capture():
+            cser.increment('second')
+        gitutil.checkout('second3', self.gitdir, work_tree=self.tmpdir,
+                         force=True)
+
+        cser.set_fake_time(h_sleep)
+        with terminal.capture() as (out, _):
+            cser.link_auto(pwork, None, None, False, 50)
+        self.assertEqual('first', gitutil.get_branch(self.gitdir))
+        self.assertIn("Setting link for series 'second' v3 to 500",
+                      out.getvalue())
+        self.assertEqual('500', cser.link_get('second', 3))
+
     def test_series_no_subcmd(self):
         """Test handling of things without a subcommand"""
         parsers = cmdline.setup_parser()
