@@ -288,12 +288,12 @@ def follow_reply(env, reply):
     if not reply:
         return env
     hdrs = reply.get('headers', {})
-    refs = hdrs.get('References') or env['references'] or ''
+    refs = gmail.get_header(hdrs, 'References') or env['references'] or ''
     return dict(env, in_reply_to=reply['msgid'],
                 references=f"{refs} {reply['msgid']}".strip(),
-                cc=gmail.format_addrs([env['cc'], hdrs.get('From', ''),
-                                       hdrs.get('To', ''),
-                                       hdrs.get('Cc', '')]))
+                cc=gmail.format_addrs([env['cc']] + [
+                    gmail.get_header(hdrs, name, '')
+                    for name in ('From', 'To', 'Cc')]))
 
 
 def thanks_targets(rules, app):

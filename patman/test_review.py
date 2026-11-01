@@ -828,6 +828,30 @@ class TestReview(CseriesTester):
         self.assertEqual('a@b.org, c@d.org',
                          gmail.format_addrs([['a@b.org', 'c@d.org']]))
 
+    def test_review_header_case(self):
+        """Test that header names are matched ignoring their case"""
+        # RFC 5322 names the header 'Cc', but the case of a name is not
+        # significant, so a mail server may send 'CC'
+        hdrs = {
+            'From': 'Sender <sender@example.com>',
+            'To': '<list@example.com>',
+            'CC': 'Fred <fred@example.com>, "Joe\n Bloggs" <joe@example.com>',
+            'SUBJECT': '[PATCH 0/2] Add a feature',
+            'message-id': '<x@example.com>',
+        }
+        env = gmail.review_envelopes(
+            {'cover_letter': {'name': 'x'}, 'patches': [],
+             'submitter': {'email': 'sender@example.com'},
+             'project': {'list_email': 'list@example.com'}},
+            {0: hdrs}, [0])[0]
+        self.assertEqual(
+            'list@example.com, Fred <fred@example.com>, '
+            'Joe Bloggs <joe@example.com>', env['cc'])
+        self.assertEqual('Re: [PATCH 0/2] Add a feature', env['subject'])
+        self.assertEqual('<x@example.com>', env['in_reply_to'])
+        self.assertEqual('fallback', gmail.get_header(hdrs, 'Date',
+                                                      'fallback'))
+
     @staticmethod
     def gmail_msg(msg_id, hdrs, body, sent=False):
         """Make a message as returned by the Gmail API
