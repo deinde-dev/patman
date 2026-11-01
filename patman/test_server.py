@@ -347,6 +347,19 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(('us', 'https://pw.us'),
                          (data['upstream'], data['patchwork_url']))
 
+    def test_review_lore_upstream(self):
+        """A review whose upstream is on lore gives the list there"""
+        self.cser.db.upstream_add('dtc', 'https://dtc.git',
+                                  lore_url='https://lore/dtc')
+        ser_id, _ = self.add_series('rev', 'Somebody else',
+                                    {1: [('a', 'new', 5, 0)]}, source='review',
+                                    ups='dtc')
+        srv = server.Server(self.cser, pw_url='https://pw.default')
+        _, data = self.call(srv, 'GET', f'/api/reviews/{ser_id}')
+        self.assertEqual(('dtc', None, 'https://lore/dtc'),
+                         (data['upstream'], data['patchwork_url'],
+                          data['lore_url']))
+
     def test_review_no_cover(self):
         """A version without a cover letter is only looked up once"""
         ser_id, svids = self.add_series(

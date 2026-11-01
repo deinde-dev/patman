@@ -457,6 +457,8 @@ A reviewed series with all its versions:
   if it has none, since ``patman review`` uses that
 - ``patchwork_url`` (str or null): as for ``GET /api/series/<id>``
 - ``project`` (str or null): patchwork project of the upstream
+- ``lore_url`` (str or null): URL of the upstream's list on lore, if it has
+  no patchwork server
 - ``versions`` (list of Version): newest first, each with ``notes`` (str or
   null; notes from handling reviews of the series), ``reviews`` (list of
   Review, in order), ``patches`` (list of Patch, in order) and ``comments``

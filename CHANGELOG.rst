@@ -175,6 +175,8 @@ Changed
 
 Fixed
 ~~~~~
+- The page for a review whose upstream is on lore, e.g. for dtc, links to
+  the series there, as it does to patchwork for other upstreams.
 - ``patman series send`` and ``patman series autolink`` keep to the series
   they start with while waiting for it to appear, rather than failing with
   'Unknown series' when another branch is checked out meanwhile.
