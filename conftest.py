@@ -7,9 +7,10 @@ from patman import lore
 from patman import test_common
 
 # As 'patman test' does: keep the tests away from the user's patchwork cache,
-# and lore
+# request log and lore
 test_common.clear_git_env()
 os.environ['PATMAN_PWCACHE'] = 'off'
+os.environ['PATMAN_REQLOG'] = 'off'
 lore.set_mode('off')
 
 # The demo scripts need Playwright, which the tests do not, so do not

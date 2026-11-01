@@ -37,6 +37,7 @@ import aiohttp
 
 from patman import gmail
 from patman import pwcache
+from patman import reqlog
 from patman import traffic
 
 # The archive of all the lists which lore carries
@@ -189,16 +190,17 @@ class Lore:  # pylint: disable=R0903
                 self.request_count += 1
                 traffic.add(self.url, requests=1, kind=kind)
                 try:
-                    async with client.get(
-                            full_url, timeout=aiohttp.ClientTimeout(
-                                total=REQUEST_TIMEOUT)) as response:
-                        content = await response.read()
-                        traffic.add(self.url, nbytes=len(content),
-                                    kind=kind)
-                        if response.status == 200:
-                            return content
-                        if response.status == 404:
-                            return False
+                    with reqlog.attempt(full_url, i + 1) as tried:
+                        async with client.get(
+                                full_url, timeout=aiohttp.ClientTimeout(
+                                    total=REQUEST_TIMEOUT)) as response:
+                            content = await response.read()
+                            tried.done(response.status, len(content))
+                    traffic.add(self.url, nbytes=len(content), kind=kind)
+                    if response.status == 200:
+                        return content
+                    if response.status == 404:
+                        return False
                 except (aiohttp.ClientError, asyncio.TimeoutError):
                     pass
                 if i < RETRIES:

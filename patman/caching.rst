@@ -225,6 +225,32 @@ saved. A table below breaks the requests down by kind, such as
 This counts every patman command using the same database, not just the
 server.
 
+The request log
+---------------
+
+When a command fails because patchwork or lore does not respond, or responds
+with an error, the message says only how it ended. To see what led up to it,
+patman logs each try at each request it sends, in
+``~/.cache/patman/requests.log`` (or under ``$XDG_CACHE_HOME``), beside the
+cache. Every patman command writes to it, as does ``patman serve`` and the
+jobs it starts, so it also shows what else was reading the server at the
+time. Each line gives the time, the process, the command, the number of the
+try, the HTTP status or the error, the bytes received, how long the try took
+and the URL::
+
+    2026-11-01T10:14:05+00:00 pid=1234 review try=1 TimeoutError 0B 30.01s https://patchwork.ozlabs.org/api/1.2/patches/?series=529790
+    2026-11-01T10:14:36+00:00 pid=1234 review try=2 502 166B 0.84s https://patchwork.ozlabs.org/api/1.2/patches/?series=529790
+    2026-11-01T10:14:39+00:00 pid=1234 review try=3 200 2210B 0.41s https://patchwork.ozlabs.org/api/1.2/patches/?series=529790
+
+Only the name of the command is logged, not its arguments, so that a token
+given to ``patman serve`` does not end up in the log; the process ID links a
+line to a job of the server. Reads which the cache answers are not logged,
+since no request is sent.
+
+When the log grows past 10 MB it is renamed to ``requests.log.1``, replacing
+the one before, and started again. Setting ``PATMAN_REQLOG`` to ``off`` stops
+the logging, or set it to the path of another file to log there instead.
+
 Patchwork versions
 ------------------
 

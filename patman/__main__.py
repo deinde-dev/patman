@@ -44,6 +44,7 @@ def run_patman():
         from patman import test_common
         from patman import test_cseries
         from patman import test_pwcache
+        from patman import test_reqlog
         from patman import test_database
         from patman import test_lore
         from patman import test_maint
@@ -61,8 +62,10 @@ def run_patman():
         from u_boot_pylib import test_command
 
         test_common.clear_git_env()
-        # Keep the tests away from the user's patchwork cache, and lore
+        # Keep the tests away from the user's patchwork cache, request log and
+        # lore
         os.environ['PATMAN_PWCACHE'] = 'off'
+        os.environ['PATMAN_REQLOG'] = 'off'
         lore.set_mode('off')
         to_run = args.testname if args.testname not in [None, 'test'] else None
         result = test_util.run_test_suites(
@@ -74,7 +77,7 @@ def run_patman():
              test_upstream.TestUpstream, test_workflow.TestWorkflow,
              test_database.TestDatabase, test_review.TestReview,
              test_send.TestSend, test_settings.TestSettings,
-             test_pwcache.TestPwCache, test_lore.TestLore,
+             test_pwcache.TestPwCache, test_reqlog.TestReqLog, test_lore.TestLore,
              test_maint.TestMaint, test_maint_apply.TestMaintApply,
              test_maint_ci.TestMaintCi, test_maint_thanks.TestMaintThanks,
              test_server.TestWebServer, test_suggest.TestSuggest,

@@ -32,6 +32,7 @@ from patman.database import Pcommit
 from patman import patchwork
 from patman.patchwork import Patchwork
 from patman import pwcache
+from patman import reqlog
 from patman import server
 from patman import settings
 from patman import times
@@ -2442,15 +2443,28 @@ class TestWebServer(unittest.TestCase, TestCommon):
                     return await pwork._request(client, 'patches/1/')
 
         traffic.take()
+        log = os.path.join(self.tmpdir, 'requests.log')
         loop = asyncio.new_event_loop()
         try:
             with mock.patch.object(patchwork, 'REQUEST_TIMEOUT', 0.2), \
                     mock.patch.object(asyncio, 'sleep',
-                                      side_effect=self._no_sleep(asyncio.sleep)):
+                                      side_effect=self._no_sleep(asyncio.sleep)), \
+                    mock.patch.dict(os.environ, {'PATMAN_REQLOG': log}):
+                reqlog.reset()
                 self.assertEqual({'ok': 3}, loop.run_until_complete(_go()))
         finally:
             loop.close()
+            reqlog.reset()
         self.assertEqual(3, len(calls))
+
+        # Each try is logged, with what came back
+        with open(log, encoding='utf-8') as inf:
+            lines = inf.read().splitlines()
+        url = f'{urls[0]}/api/1.2/patches/1/'
+        self.assertEqual(3, len(lines))
+        self.assertRegex(lines[0], f' try=1 TimeoutError 0B [0-9.]+s {url}$')
+        self.assertRegex(lines[1], f' try=2 502 [0-9]+B [0-9.]+s {url}$')
+        self.assertRegex(lines[2], f' try=3 200 9B [0-9.]+s {url}$')
 
         # Each try is counted, along with what came back
         self.assertEqual({(urls[0], 'patch'): (3, len('{"ok": 3}'))},
