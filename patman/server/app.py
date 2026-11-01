@@ -641,7 +641,8 @@ class Server(jobs.JobRunner):
 
         Return:
             web.Response: Reviewed series with its versions and their reviews,
-                along with its upstream, patchwork URL and project
+                along with its upstream, patchwork URL and project, or the
+                URL of its list on lore
 
         Raises:
             ValueError: The series does not exist
@@ -663,6 +664,7 @@ class Server(jobs.JobRunner):
                                         'link')
         await self._find_covers(data)
         data['patchwork_url'] = self.get_pw_url(data['upstream'])
+        data['lore_url'] = self.get_lore_url(data['upstream'])
         proj = self.cser.project_get(data['upstream'])
         data['project'] = proj[2] if proj else None
         return web.json_response(data)

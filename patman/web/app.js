@@ -917,6 +917,12 @@ function renderComments(comments) {
     : [h('div', { class: 'empty' }, 'No comments')];
 }
 
+// Link to a message on a list on lore, from its Message-ID
+function loreHref(list, msgid) {
+  const id = encodeURIComponent(msgid.replace(/^<|>$/g, '')).replace(/%40/g, '@');
+  return `${list}/${id}/`;
+}
+
 // The ID of a patch or cover letter, for a URL path: a patchwork ID, or
 // 'lore:<msgid>' for one on lore, whose Message-ID may hold characters which
 // need escaping
@@ -1409,7 +1415,7 @@ async function viewReview(id, wantVer) {
     // A patch which patchwork lacks, e.g. taken from lore for the review, can
     // still be read on lore
     const loreLink = !itemId && r.msgid && extLink(
-      `https://lore.kernel.org/all/${encodeURIComponent(r.msgid.replace(/^<|>$/g, '')).replace(/%40/g, '@')}/`,
+      loreHref('https://lore.kernel.org/all', r.msgid),
       'lore', `Show the ${r.seq ? 'patch' : 'cover letter'} on lore.kernel.org, in a ` +
               'new tab, since patchwork does not have it', 'btn light small');
     const [commentsBtn, commentsBox] = itemId && sv.link
@@ -1562,7 +1568,10 @@ async function viewReview(id, wantVer) {
       ser.patchwork_url && extLink(
         ser.project ? `${ser.patchwork_url}/project/${ser.project}/list/?series=${sv.link}`
                     : ser.patchwork_url,
-        'patchwork', 'Open the series on patchwork, in a new tab', 'btn light small'));
+        'patchwork', 'Open the series on patchwork, in a new tab', 'btn light small'),
+      ser.lore_url && sv.link && extLink(loreHref(ser.lore_url, sv.link), 'lore',
+                                         'Open the series on lore, in a new tab',
+                                         'btn light small'));
   }
   drawActions();
   setView(ser.desc || ser.name, 'reviews', true,
