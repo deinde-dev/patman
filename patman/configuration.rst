@@ -88,7 +88,8 @@ patman.py.  For reference, the useful ones (at the moment) shown below
 ``patchwork_timeout`` is the number of seconds to wait for each request to
 patchwork before trying again (default 30). A busy server can stall a
 request, so patman retries a request which times out, has its connection
-reset or refused, or gets a 502, 503 or 504 status, up to three times.
+reset or refused, or gets a 502, 503 or 504 status, up to three times. This
+applies to reading a series' mbox too.
 
 Requests to patchwork go through a proxy when the environment gives one, in
 the usual ``HTTPS_PROXY`` and ``HTTP_PROXY`` variables, and hosts listed in

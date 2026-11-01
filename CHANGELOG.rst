@@ -184,6 +184,10 @@ Changed
 
 Fixed
 ~~~~~
+- Reading a series' mbox from patchwork, e.g. for ``patman review
+  --suggest``, has a timeout and is tried again when the server is busy, as
+  other requests are, rather than failing on the first 502 or dropped
+  connection.
 - 'No reply needed' on a reply drops the response and deletes its Gmail
   draft, rather than leaving them to be drafted or sent by mistake, and is
   offered until the response is sent. ``patman review --skip-reply ID`` does
