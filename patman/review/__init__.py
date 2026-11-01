@@ -20,6 +20,7 @@ modules are:
   replies: replies to reviews, and responding to them
   stored: sending and revising reviews which are already stored
   scan: scanning for and reviewing new versions of a series
+  suggest: rules for suggesting series to review
   voice: learning the reviewer's writing voice
 
 Each module is imported here, so code outside the package can use, for
@@ -37,5 +38,6 @@ from patman.review import prompts
 from patman.review import replies
 from patman.review import scan
 from patman.review import stored
+from patman.review import suggest
 from patman.review import voice
 from patman.review.core import do_review, review_series

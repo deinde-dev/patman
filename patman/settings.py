@@ -490,6 +490,7 @@ def Setup(parser, project_name, argv, config_fname=None):
 
     _read_review(config, top_level)
     _read_maint(config)
+    _read_suggest(config)
 
     return _UpdateDefaults(parser, config, argv)
 
@@ -528,6 +529,24 @@ def _read_maint(config):
             print(f'WARNING: Unknown maint setting {name}', file=sys.stderr)
             continue
         maint[name] = value
+
+
+def _read_suggest(config):
+    """Read the [suggest] section, which holds your rules for suggesting
+    series to review (see patman.review.suggest)
+
+    The values are read raw, so that a pattern in a rule can hold a '%'. The
+    names are checked when the rules are parsed, since most are the names
+    of rules, which can be anything
+
+    Args:
+        config (_ProjectConfigParser): Config to read
+    """
+    suggest.clear()
+    try:
+        suggest.update(config.items('suggest', raw=True))
+    except ConfigParser.NoSectionError:
+        pass
 
 
 def review_project():
@@ -584,6 +603,10 @@ MAINT_KEYS = ('upstream', 'push_branch', 'signoff', 'history',
               'trailers_end', 'pr_trailers_end', 'signoff_own', 'require',
               'issue_trailers', 'github', 'gitlab', 'test', 'ci_push',
               'publish', 'thanks_to')
+
+# Your rules for suggesting series to review, from the [suggest] section,
+# keyed by name: the name of each rule, or a fixed setting, e.g. 'limit'
+suggest = {}
 
 if __name__ == "__main__":
     import doctest
