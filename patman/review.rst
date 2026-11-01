@@ -329,8 +329,11 @@ which gave the score::
            boot +2, again +3
     1 of 112 recent series suggested, reading the patches of 6
 
-The series are those sent in the last ``days``, read as for the inbox, so
-that pages it read recently come from the cache. Your own series are left
+The series are those sent in the last ``days``, read as for the inbox, and
+from the pages it read where it can: the first page if it was read in the
+last hour, and each later page if it was read with the first or since, so
+that no series falls between pages read at different times. Suggestions can
+therefore leave out a series sent in the last hour. Your own series are left
 out, as are those you have reviewed at that version and older versions of a
 series. Use ``--limit N`` to see more or fewer than the ``limit`` setting.
 

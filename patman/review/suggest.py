@@ -106,6 +106,11 @@ TESTS = {
 # The settings in [suggest] which are not rules, with their defaults
 FIXED = {'limit': 10, 'min_score': 1, 'days': 30, 'max_reads': 30}
 
+# Oldest copy of the first page of recent series to use from the cache, in
+# seconds; suggestions need not be up to the minute, so the pages which the
+# inbox read in the last hour do, along with any later pages read with them
+SUGGEST_MAX_AGE = 60 * 60
+
 # A score which adds to the series' score, e.g. '+3' or '-2'
 RE_SCORE = re.compile(r'^[+-]\d+$')
 
@@ -808,8 +813,9 @@ def _read_recent(pwork, since):
     """
     async def _read():
         async with aiohttp.ClientSession() as client:
-            return await scan.recent_series(client, pwork, since,
-                                            partial=True)
+            return await scan.recent_series(
+                client, pwork, since, partial=True, max_age=SUGGEST_MAX_AGE,
+                consistent=True)
 
     return common.run(_read())
 
