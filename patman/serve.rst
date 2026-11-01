@@ -160,7 +160,8 @@ On the Reviews tab, 'Review a series' takes a patchwork series ID, the URL of a
 series or patch, or words from a cover-letter title, and runs ``patman review``
 (with ``-d`` to create Gmail drafts, if selected). 'Scan for new versions' runs
 ``patman review --scan``. Each reviewed series has buttons to recreate its
-Gmail drafts, either all of them or one patch's, and to review it again.
+Gmail drafts, either all of them or one patch's, and to review it again. That
+button says 'Review' if every review of the version has been deleted.
 
 Wherever a review is started, whether by 'Review a series', 'Review' in the
 inbox, 'Review again' or 'Review it' for a cover letter, there is a box for

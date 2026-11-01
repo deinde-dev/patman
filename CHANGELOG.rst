@@ -175,6 +175,8 @@ Changed
 
 Fixed
 ~~~~~
+- The page for a series whose reviews have all been deleted offers 'Review'
+  rather than 'Review again', since there is nothing to review again.
 - The page for a review whose upstream is on lore, e.g. for dtc, links to
   the series there, as it does to patchwork for other upstreams.
 - ``patman series send`` and ``patman series autolink`` keep to the series
