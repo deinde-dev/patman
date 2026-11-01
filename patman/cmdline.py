@@ -965,6 +965,10 @@ def add_review_subparser(subparsers):
              'received, in all and for each of the last WEEKS weeks '
              '(default: 8)')
     review.add_argument(
+        '--suggest-rules', action='store_true',
+        help='Check your rules for suggesting series to review, from the '
+             '[suggest] settings, and show them as understood')
+    review.add_argument(
         '-j', '--jobs', type=int, default=4,
         help='Number of series to review in parallel with --scan '
              '(default: 4)')

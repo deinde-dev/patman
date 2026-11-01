@@ -55,6 +55,7 @@ def run_patman():
         from patman import test_server
         from patman import test_settings
         from patman import test_status
+        from patman import test_suggest
         from patman import test_upstream
         from patman import test_workflow
         from u_boot_pylib import test_command
@@ -76,7 +77,8 @@ def run_patman():
              test_pwcache.TestPwCache, test_lore.TestLore,
              test_maint.TestMaint, test_maint_apply.TestMaintApply,
              test_maint_ci.TestMaintCi, test_maint_thanks.TestMaintThanks,
-             test_server.TestWebServer, test_command.TestRunInteractive])
+             test_server.TestWebServer, test_suggest.TestSuggest,
+             test_command.TestRunInteractive])
         sys.exit(0 if result.wasSuccessful() else 1)
 
     # Process commits, produce patches files, check them, email them

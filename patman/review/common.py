@@ -274,6 +274,33 @@ def read_context(spec):
     return spec
 
 
+def split_range(text):
+    """Split a number, or a range of numbers, into its two ends
+
+    A range may leave out its start or its end, e.g. '-3' or '4-'.
+
+    Args:
+        text (str): Number or range, e.g. '3', '2-7', '-3' or '4-'
+
+    Returns:
+        tuple or None: None if the text is not a number or a range, else:
+            int or None: Start of the range, or None if it has none
+            int or None: End of the range, or None if it has none
+
+    >>> split_range('3'), split_range('2-7'), split_range('-3')
+    ((3, 3), (2, 7), (None, 3))
+    >>> split_range('4-'), split_range('-'), split_range('x')
+    ((4, None), None, None)
+    """
+    if not RE_SEL_PART.match(text):
+        return None
+    first, dash, end = text.partition('-')
+    start = int(first) if first else None
+    if not dash:
+        return start, start
+    return start, int(end) if end else None
+
+
 def parse_patch_selection(spec, last=None):
     """Parse a patch selection string into a set of patch numbers
 
@@ -299,19 +326,17 @@ def parse_patch_selection(spec, last=None):
         return None
     result = set()
     for part in spec.replace(' ', '').split(','):
-        first, dash, end = part.partition('-')
-        if not RE_SEL_PART.match(part):
+        ends = split_range(part)
+        if not ends:
             raise ValueError(f"Cannot parse patch selection '{spec}': use "
                              "e.g. '1,3-5' or '4-'")
-        if not dash:
-            result.add(int(first))
-            continue
-        if not end:
+        start, end = ends
+        if end is None:
             if last is None:
                 raise ValueError(f"Cannot tell where '{part}' ends, since "
                                  'the number of patches is not known')
             end = last
-        start, end = int(first or 1), int(end)
+        start = 1 if start is None else start
         if start > end:
             raise ValueError(f"The range '{part}' in the patch selection is "
                              'back to front')

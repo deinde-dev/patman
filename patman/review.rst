@@ -227,6 +227,86 @@ for a review of just the cover letter, e.g. after reviewing the patches::
 
     patman review -s 497923 -i 0
 
+Rules for suggesting series
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Which series to review is a personal choice: you may want anything which
+touches your part of the tree, series from newcomers, or those which nobody
+has reviewed yet. Write the rules for this in the ``[suggest]`` section of
+the settings, one to a line, each under a name of your choosing::
+
+    [suggest]
+    i2c:      path drivers/i2c/** arch/arm/mach-bcm283x/**  +3
+    listed:   maintainer R M  +3
+    boot:     prefix boot: bootstd: pxe:  +2
+    friends:  from *@chromium.org alice@example.com  +2
+    newcomer: newcomer  +2
+    reviewed: has reviewed-by acked-by  -3
+    bots:     from *bot*@*  skip
+    huge:     patches 25-  skip
+    stable:   not rfc  +1
+    limit:    8
+    min_score: 2
+
+    [linux_suggest]
+    i2c:      path drivers/i2c/busses/i2c-bcm2835.c  +3
+    boot:     off
+
+A rule is an optional ``not``, a test, the test's arguments and then a
+score: ``+N`` or ``-N`` adds to the series' score when the rule matches,
+``skip`` leaves the series out, and ``need`` leaves it out unless the rule
+matches. Arguments are split as in the shell, so quote one with spaces in
+it. Names are in lower case, as for all settings.
+
+A project's section, such as ``[linux_suggest]``, adds to ``[suggest]``: a
+rule there replaces the one of the same name, and ``off`` turns it off for
+that project. A repo's ``.patman`` can add or replace rules in the same way.
+
+The tests are, from the cheapest to the costliest to run:
+
+========================  ====================================================
+Test                      Matches when
+========================  ====================================================
+``prefix P...``           a patch subject starts with one of these
+``from GLOB...``          the submitter's address or name matches
+``patches RANGE``         the number of patches is in the range
+``version RANGE``         the version of the series is in the range
+``age RANGE``             the days since the series was sent are in the range
+``rfc``                   the series is an RFC
+``reviewed-before``       you reviewed an earlier version
+``state S...``            a patch is in one of these patchwork states
+``path GLOB...``          a patch touches a matching file
+``only-path GLOB...``     every file touched matches
+``lines RANGE``           the number of lines added and removed is in the range
+``maintainer [M] [R]``    you are listed in MAINTAINERS for a file touched, as
+                          M:, R: or (with neither) either
+``word REGEX...``         the diff adds or removes a line which matches
+``has TAG...``            a patch has one of these tags, e.g. ``reviewed-by``
+``to-me``                 you are in To: or Cc: of a patch
+``no-replies RANGE``      the days since it was sent, with no replies, are in
+                          the range
+``fixes``                 a Fixes: tag names one of your commits
+``delegate me|none``      the patchwork delegate is you, or nobody
+``checks pass|fail``      patchwork's CI result
+``blame``                 the series changes lines you wrote
+``newcomer``              the submitter has no earlier series
+========================  ====================================================
+
+A range is as for ``-i``: ``5``, ``3-10``, ``-3`` (3 or fewer) or ``25-``
+(25 or more). A list on lore has no states, delegates or checks, so rules
+using those never match there.
+
+The other settings are ``limit``, the most series to suggest (default 10),
+``min_score``, the lowest score to suggest (default 1), and ``days``, how
+far back to look (default 30).
+
+To check the rules, and see them as patman understands them, after merging
+the project's section and the repo's settings::
+
+    patman review --suggest-rules
+
+This fails if a rule is not valid, or can never match.
+
 Choosing the model
 ~~~~~~~~~~~~~~~~~~
 

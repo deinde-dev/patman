@@ -215,6 +215,45 @@ class TestSettings(unittest.TestCase):
                 settings.Setup(parser, 'unknown', [], False)
                 self.assertEqual({}, settings.maint)
 
+    def test_suggest_section(self):
+        """The [suggest] section is layered, and a project's section adds to
+        it, replacing or turning off rules of the same name"""
+        with cleared_command_line_args():
+            with empty_git_repository():
+                with tempfile.NamedTemporaryFile() as global_config:
+                    global_config.write(
+                        b'[suggest]\n'
+                        b'dm: path drivers/core/** +3\n'
+                        b'fresh: newcomer +2\n'
+                        b'pct: word 100% +1\n'
+                        b'limit: 5\n'
+                        b'[linux_suggest]\n'
+                        b'dm: off\n'
+                        b'i2c: path drivers/i2c/** +3\n')
+                    global_config.flush()
+                    with open('.patman', 'w', buffering=1,
+                              encoding='utf-8') as outf:
+                        outf.write('[suggest]\n'
+                                   'fresh: newcomer +4\n')
+                    parser, _ = _make_parser()
+                    settings.Setup(parser, 'unknown', [], global_config.name)
+                    self.assertEqual(
+                        {'dm': 'path drivers/core/** +3',
+                         'fresh': 'newcomer +4', 'pct': 'word 100% +1',
+                         'limit': '5'}, settings.suggest)
+
+                    parser, _ = _make_parser()
+                    settings.Setup(parser, 'linux', [], global_config.name)
+                    self.assertEqual(
+                        {'dm': 'off', 'fresh': 'newcomer +4',
+                         'pct': 'word 100% +1', 'i2c': 'path drivers/i2c/** +3',
+                         'limit': '5'}, settings.suggest)
+
+                # Without a [suggest] section, there are no rules
+                parser, _ = _make_parser()
+                settings.Setup(parser, 'unknown', [], False)
+                self.assertEqual({}, settings.suggest)
+
     def test_nested_subcommand(self):
         # A setting reaches a subcommand of a subcommand, such as
         # 'series send', as well as 'send'
