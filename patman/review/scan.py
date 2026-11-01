@@ -50,29 +50,34 @@ SCAN_MAX_AGE = 10 * 60
 ScanResult = namedtuple('ScanResult', 'desc,version,link,returncode,output')
 
 
-async def _recent_series(client, pwork, since):
+async def recent_series(client, pwork, since):
     """Read the series sent to patchwork since a date, newest first
+
+    Pages which the inbox read recently are used from the cache. A page of
+    lore's feed holds a set number of messages, however many series they
+    make, so a short page does not mean that it is the last
 
     Args:
         client (aiohttp.ClientSession): Session to use
-        pwork (Patchwork): Configured patchwork instance
+        pwork (Patchwork or LoreList): Where the series come from
         since (str): Date, as YYYY-MM-DD
 
     Returns:
         list of dict: Series, as from Patchwork.get_recent_series()
     """
     found = []
+    lore = isinstance(pwork, lorelist.LoreList)
     for page in range(1, SCAN_MAX_PAGES + 1):
         series = await pwork.get_recent_series(
             client, pwork.link_name, page, SCAN_PAGE, max_age=SCAN_MAX_AGE)
         found += series
-        if (len(series) < SCAN_PAGE or
-                (series[-1].get('date') or '')[:10] < since):
+        last = not series if lore else len(series) < SCAN_PAGE
+        if last or (series[-1].get('date') or '')[:10] < since:
             break
     return [pws for pws in found if (pws.get('date') or '')[:10] >= since]
 
 
-def _find_reviewed(cser, pws, by_key):
+def find_reviewed(cser, pws, by_key):
     """Find the review series which a series from patchwork is a version of
 
     This is the one with the same title, else one whose patches share a b4
@@ -154,8 +159,8 @@ def _scan_new_versions(pwork, cser):
             # The newest version of each reviewed series, if newer than the
             # latest one reviewed
             newest = {}
-            for pws in await _recent_series(client, pwork, since):
-                idnum = _find_reviewed(cser, pws, by_key)
+            for pws in await recent_series(client, pwork, since):
+                idnum = find_reviewed(cser, pws, by_key)
                 if idnum not in by_id:
                     continue
                 # Without a recorded reviewed version there is nothing to

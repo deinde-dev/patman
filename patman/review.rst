@@ -307,6 +307,27 @@ the project's section and the repo's settings::
 
 This fails if a rule is not valid, or can never match.
 
+To see the suggestions, best first::
+
+    patman review --suggest
+
+Each series has its score, its link on patchwork or lore, and the rules
+which gave the score::
+
+      5  boot: Fix the order of bootflows (v3, 4 patches)
+           https://patchwork.ozlabs.org/project/uboot/list/?series=530512&state=*&archive=both
+           boot +2, again +3
+    1 of 112 recent series suggested
+
+The series are those sent in the last ``days``, read as for the inbox, so
+that pages it read recently come from the cache. Your own series are left
+out, as are those you have reviewed at that version and older versions of a
+series. Use ``--limit N`` to see more or fewer than the ``limit`` setting.
+
+So far ``--suggest`` runs only the tests which need just the list of series,
+from ``prefix`` to ``state`` in the table above. It warns about a rule which
+uses any other test, and leaves it out.
+
 Choosing the model
 ~~~~~~~~~~~~~~~~~~
 
