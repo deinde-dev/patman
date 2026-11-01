@@ -754,6 +754,14 @@ To see the replies which still need a response, and act on them::
     patman review --draft-reply 12      # create a Gmail draft of it
     patman review --send-reply 12       # send it
 
+To have the agent change a response, say what to change with ``--revise``,
+adding ``-d`` to update its Gmail draft too::
+
+    patman review --revise-reply 12 --revise 'Mention the spec PR' -d
+
+The agent sees your review, the reply and the response, and changes only what
+the note asks for. This works for a response to a comment, too.
+
 The draft is threaded as a reply to the reply, with a 'Re:' subject, and is
 copied to everyone the reply went to. ``--send-reply`` sends the draft as it
 is in Gmail, so any changes made there are kept, and records the text which

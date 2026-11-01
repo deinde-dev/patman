@@ -708,6 +708,7 @@ def do_review(args, test_db=None, pwork=None, cser=None):
                 and not getattr(args, 'stats', 0) \
                 and not getattr(args, 'list_replies', False) \
                 and not getattr(args, 'suggest_reply', None) \
+                and not getattr(args, 'revise_reply', None) \
                 and not getattr(args, 'draft_reply', None) \
                 and not getattr(args, 'send_reply', None):
             ups = args.upstream

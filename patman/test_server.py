@@ -1551,17 +1551,25 @@ class TestWebServer(unittest.TestCase, TestCommon):
              {'response': 'Because of this', 'draft': True}),
             ('POST', f'/api/replies/{first}/suggest', None),
             ('POST', f'/api/replies/{first}/send', None),
+            ('POST', f'/api/replies/{first}/revise', {'note': ' Shorter '}),
+            ('POST', f'/api/replies/{first}/revise',
+             {'note': 'Link it', 'draft': True}),
+            ('POST', f'/api/replies/{first}/revise', {}),
             ('POST', f'/api/replies/{second}', {'response': 'x'}),
             ('POST', f'/api/replies/{second}/send', None),
+            ('POST', f'/api/replies/{second}/revise', {'note': 'x'}),
             ('POST', '/api/replies/999', {'skip': True}),
         ])
-        self.assertEqual([200, 202, 202, 202, 409, 409, 404],
-                         [status for status, _ in res])
+        self.assertEqual([200, 202, 202, 202, 202, 202, 400, 409, 409, 409,
+                          404], [status for status, _ in res])
         self.assertEqual(('suggested', 'Because'),
                          (res[0][1]['status'], res[0][1]['response']))
+        self.assertEqual('Please say what to change', res[6][1]['error'])
         self.assertEqual(
             [f'review --draft-reply {first}', f'review --suggest-reply {first}',
-             f'review --send-reply {first}'],
+             f'review --send-reply {first}',
+             f'review --revise-reply {first} --revise Shorter',
+             f'review --revise-reply {first} --revise Link it -d'],
             [job.state['results'][0]['output'].strip()
              for job in reversed(srv.get_jobs())])
         self.assertEqual('Because of this', db.reply_get(first).response)
@@ -1571,6 +1579,14 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual('skip', data['status'])
         _, data = self.call(srv, 'GET', '/api/reviews')
         self.assertEqual(0, data[0]['replies_waiting'])
+
+        # A reply with no response has nothing to revise
+        db.reply_set_response(first, None, database.REPLY_NEW)
+        db.commit()
+        status, data = self.call(srv, 'POST', f'/api/replies/{first}/revise',
+                                 json={'note': 'x'})
+        self.assertEqual((400, 'There is no response to revise'),
+                         (status, data['error']))
 
     def test_parallel_reviews(self):
         """Reviews of series run alongside each other, a few at once"""

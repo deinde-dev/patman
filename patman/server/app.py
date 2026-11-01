@@ -1965,6 +1965,37 @@ class Server(jobs.JobRunner):
         return self._review_job(f'Suggest a response to reply {reply.idnum}',
                                 '--suggest-reply', str(reply.idnum))
 
+    async def _reply_revise(self, request):
+        """Handle 'POST /api/replies/<id>/revise': revise the response
+
+        This has the agent change the response to a reply, as a job. The body
+        gives a 'note' saying what to change, and may give 'draft' to update
+        the Gmail draft of the response too.
+
+        Args:
+            request (web.Request): Request, with the reply ID as 'idnum'
+
+        Return:
+            web.Response: Job state, with status 202, or status 409 if the
+                response has been sent
+
+        Raises:
+            BadRequest: The note is invalid, or there is no response to revise
+            ValueError: The reply does not exist
+        """
+        reply = self.rcser.db.reply_get(_idnum(request))
+        data = await self._read_json(request)
+        note = params.get_str(data, 'note', 'Please say what to change')
+        if reply.status == database.REPLY_SENT:
+            return _already_sent('The response')
+        if not (reply.response or '').strip():
+            raise params.BadRequest('There is no response to revise')
+        args = ['--revise-reply', str(reply.idnum), '--revise', note]
+        if data.get('draft'):
+            args.append('-d')
+        return self._review_job(f'Revise the response to reply {reply.idnum}',
+                                *args)
+
     async def _reply_send(self, request):
         """Handle 'POST /api/replies/<id>/send': send the response to a reply
 
@@ -2106,6 +2137,8 @@ class Server(jobs.JobRunner):
                             self._reply_send)
         app.router.add_post(r'/api/replies/{idnum:\d+}/suggest',
                             self._reply_suggest)
+        app.router.add_post(r'/api/replies/{idnum:\d+}/revise',
+                            self._reply_revise)
         app.router.add_get('/', self._index)
         app.router.add_get('/static/{name}', self._static)
         app.on_startup.append(self._start_background)

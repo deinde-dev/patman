@@ -1244,6 +1244,108 @@ class TestReview(CseriesTester):
         db.review_delete_for_version(svid)
         self.assertEqual([], db.reply_get_by_status(['skip']))
 
+    def test_review_revise_reply(self):
+        """The agent changes a response to a reply, as a note says"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'Fred series', None)
+        db.series_set_source(sid, 'review')
+        svid = db.ser_ver_add(sid, 1, link='123')
+        rid = db.review_add(svid, 2, 'Please fix this', False,
+                            datetime.now().isoformat())
+        db.review_set_sent(rid, 'Please fix this', 'm1', 't1')
+        reply_id = db.reply_add(
+            rid, 'm2', '<a2@x>', '<p0@x>', 'Fred Bloggs <fred@x.com>',
+            'sjg@chromium.org', '', 'Re: [PATCH 2/5] video: Add a driver',
+            'Mon, 1 Jan 2026 10:00:00 +0000', 'Is there a spec?',
+            datetime.now().isoformat())
+        db.reply_set_response(reply_id, 'Hi Fred,\n\nNot yet.\n\nRegards,\n'
+                              'Simon', database.REPLY_SUGGESTED)
+        db.reply_set_status(reply_id, database.REPLY_DRAFT, 'd1')
+        db.commit()
+        seen = {}
+
+        async def mock_agent(prompt, _options):
+            seen['prompt'] = prompt
+            for name in ('review', 'reply', 'response'):
+                found = re.search(rf'(\S+/patman_rr_{name}_\S+\.txt)', prompt)
+                if found:
+                    seen[name] = tools.read_file(found.group(1), binary=False)
+            return True, seen.get('output', '')
+
+        def run(*argv):
+            args = cmdline.parse_args(
+                ['review', '--reviewer', 'Simon Glass <sjg@chromium.org>',
+                 '--revise-reply', str(reply_id), *argv], config_fname=False)
+            with mock.patch.object(review.replies.claude_mod,
+                                   'run_agent_collect',
+                                   side_effect=mock_agent), \
+                    mock.patch.object(review.replies.claude_mod,
+                                      'check_available', return_value=True), \
+                    mock.patch.object(review.common, 'ClaudeAgentOptions',
+                                      mock.MagicMock()), \
+                    mock.patch.object(gmail, 'check_available',
+                                      return_value=True), \
+                    mock.patch.object(gmail, 'get_service'), \
+                    mock.patch.object(gmail, 'delete_draft'), \
+                    mock.patch.object(gmail, 'create_draft',
+                                      return_value={'id': 'd2'}) as create, \
+                    terminal.capture() as (out, err):
+                ret = review.replies.do_reply_cmd(args, cser)
+            return ret, out.getvalue() + err.getvalue(), create
+
+        # A note is needed
+        with self.assertRaises(ValueError) as exc:
+            run()
+        self.assertIn('--revise-reply needs --revise NOTE', str(exc.exception))
+
+        # The agent sees the note, our review, the reply and the response,
+        # and the new response, with its dashes fixed, is waiting to be
+        # drafted again
+        seen['output'] = ('Done.\n---RESPONSE---\nHi Fred,\n\nYes, see '
+                          'https://x/pr/1 \u2014 please take a look.\n\n'
+                          'Regards,\nSimon\n')
+        ret, out, create = run('--revise', 'Link the spec PR https://x/pr/1')
+        self.assertEqual(0, ret)
+        self.assertIn('Link the spec PR https://x/pr/1', seen['prompt'])
+        self.assertEqual(('Please fix this', 'Is there a spec?'),
+                         (seen['review'], seen['reply']))
+        self.assertIn('Not yet.', seen['response'])
+        self.assertIn('response revised', out)
+        new = 'Hi Fred,\n\nYes, see https://x/pr/1 - please take a look.\n'
+        reply = db.reply_get(reply_id)
+        self.assertEqual(('suggested', new + '\nRegards,\nSimon', 'd1'),
+                         (reply.status, reply.response, reply.draft_id))
+        create.assert_not_called()
+
+        # With -d the Gmail draft is updated too, but only if it changes
+        seen['output'] = '---RESPONSE---\nHi Fred,\n\nYes.\n\nRegards,\nSimon'
+        _, _, create = run('--revise', 'Shorter', '-d')
+        self.assertEqual('Hi Fred,\n\nYes.\n\nRegards,\nSimon',
+                         create.call_args.args[3])
+        self.assertEqual(('draft', 'd2'),
+                         (db.reply_get(reply_id).status,
+                          db.reply_get(reply_id).draft_id))
+        _, out, create = run('--revise', 'Shorter', '-d')
+        self.assertIn('the response is unchanged', out)
+        create.assert_not_called()
+
+        # An agent which gives no response changes nothing
+        seen['output'] = 'Sorry'
+        _, out, _ = run('--revise', 'Shorter')
+        self.assertIn('the response could not be revised', out)
+        self.assertEqual('draft', db.reply_get(reply_id).status)
+
+        # A response which has been sent cannot be revised
+        db.reply_set_response(reply_id, 'Sent', database.REPLY_SENT)
+        with self.assertRaises(ValueError) as exc:
+            run('--revise', 'Shorter')
+        self.assertIn('has been sent', str(exc.exception))
+        db.reply_set_response(reply_id, None, database.REPLY_NEW)
+        with self.assertRaises(ValueError) as exc:
+            run('--revise', 'Shorter')
+        self.assertIn('There is no response to reply', str(exc.exception))
+
     def test_gmail_sync_drafts(self):
         """Our messages in response to drafts are found reliably"""
         review_text = ('Hi Fred,\n\nOn Mon, Fred wrote:\n> code\n\n'

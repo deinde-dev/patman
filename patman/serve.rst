@@ -345,7 +345,8 @@ When someone replies to one of your reviews (found by ``review --sync``, so use
 agent suggests. The Reviews tab has a 'Needs reply' filter. You can edit the
 response, or write one, then create a Gmail draft which is threaded as a reply,
 or send it. You can also tap 'Suggest a response' to have the agent suggest one
-(again), or note that no reply is needed. These run as jobs, but the page stays
+(again), 'Revise' to have it change the response as you say, as for a review,
+or note that no reply is needed. These run as jobs, but the page stays
 where it is, showing how each is getting on below the reply, then the reply
 again.
 

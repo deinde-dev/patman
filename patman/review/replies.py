@@ -317,7 +317,11 @@ def _list_replies(cser):
 
 
 def do_reply_cmd(args, cser):
-    """Handle --replies, --suggest-reply, --draft-reply and --send-reply
+    """Handle --replies, --suggest-reply, --revise-reply, --draft-reply and
+    --send-reply
+
+    With --revise-reply, --revise gives the note saying what to change and -d
+    updates the Gmail draft of the response, if it changes
 
     Args:
         args (Namespace): Command-line arguments
@@ -331,13 +335,22 @@ def do_reply_cmd(args, cser):
     ctx = _make_reply_ctx(args, cser)
     if args.suggest_reply:
         _suggest_response(ctx, args.suggest_reply)
-    if args.draft_reply or args.send_reply:
+    draft_reply = args.draft_reply
+    revise_id = getattr(args, 'revise_reply', None)
+    if revise_id:
+        if not args.revise:
+            raise ValueError('--revise-reply needs --revise NOTE to say what '
+                             'to change')
+        if (_revise_response(ctx, revise_id, args.revise) and
+                args.create_drafts):
+            draft_reply = revise_id
+    if draft_reply or args.send_reply:
         if not gmail.check_available():
             return 1
         account = getattr(args, 'gmail_account', None)
         service = gmail.get_service(account)
-        if args.draft_reply:
-            _draft_response(service, ctx, args.draft_reply, account)
+        if draft_reply:
+            _draft_response(service, ctx, draft_reply, account)
         if args.send_reply:
             _send_response(service, ctx, args.send_reply, account)
     return 0
@@ -435,6 +448,103 @@ async def handle_reply(ctx, review_body, reply_from, reply_body):
 def handle_reply_sync(ctx, review_body, reply_from, reply_body):
     """Synchronous wrapper for handle_reply()"""
     return common.run(handle_reply(ctx, review_body, reply_from, reply_body))
+
+
+# Line which starts the agent's revised response
+RESPONSE_MARKER = '---RESPONSE---'
+
+
+async def revise_response(ctx, review_body, reply, note):
+    """Ask the agent to change our response to a reply, as a note says
+
+    Args:
+        ctx (ReviewContext): Review context (uses repo_path, spelling and
+            em_dash)
+        review_body (str or None): Our review which the reply is about, or
+            None if there is none, e.g. for a comment on patchwork
+        reply (Reply): Reply, with the response to change
+        note (str): What the reviewer wants changed
+
+    Returns:
+        str or None: New text of the response, or None if the agent is not
+            available or failed
+    """
+    if not claude_mod.check_available():
+        return None
+    paths = []
+    def _write(prefix, text):
+        with tempfile.NamedTemporaryFile('w', prefix=prefix, suffix='.txt',
+                                         delete=False) as outf:
+            outf.write(text)
+        paths.append(outf.name)
+        return outf.name
+
+    try:
+        review_section = ''
+        if review_body:
+            review_section = ('\nYOUR ORIGINAL REVIEW:\n(see file: '
+                              f"{_write('patman_rr_review_', review_body)})\n")
+        prompt = prompts.REVISE_REPLY_PROMPT.format(
+            project=settings.review_project(), note=note,
+            review_section=review_section, reply_from=reply.sender,
+            reply_path=_write('patman_rr_reply_', reply.body or ''),
+            response_path=_write('patman_rr_response_', reply.response),
+            spelling=ctx.spelling, voice=prompts.voice_section())
+        options = common.agent_options(
+            allowed_tools=['Bash', 'Read', 'Grep'], cwd=ctx.repo_path,
+            max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
+        success, log = await claude_mod.run_agent_collect(prompt, options)
+    finally:
+        for path in paths:
+            os.unlink(path)
+    if not success or RESPONSE_MARKER not in (log or ''):
+        return None
+    text = log.rsplit(RESPONSE_MARKER, 1)[1].strip('\n').rstrip()
+    return emails.fix_dashes(text, ctx.em_dash) if text.strip() else None
+
+
+def revise_response_sync(ctx, review_body, reply, note):
+    """Synchronous wrapper for revise_response()"""
+    return common.run(revise_response(ctx, review_body, reply, note))
+
+
+def _revise_response(ctx, reply_id, note):
+    """Have the agent change our response to a reply, and record it
+
+    The response is then waiting to be drafted or sent again, since any
+    Gmail draft of it is out of date.
+
+    Args:
+        ctx (ReviewContext): Review context
+        reply_id (int): ID of the reply
+        note (str): What the reviewer wants changed
+
+    Returns:
+        bool: True if the response changed
+
+    Raises:
+        ValueError: There is no response, or it has been sent
+    """
+    db = ctx.cser.db
+    reply = db.reply_get(reply_id)
+    if reply.status == database.REPLY_SENT:
+        raise ValueError(f'The response to reply {reply_id} has been sent')
+    if not (reply.response or '').strip():
+        raise ValueError(f'There is no response to reply {reply_id} to revise')
+    rev = db.review_get(reply.review_id) if reply.review_id else None
+    response = revise_response_sync(ctx, rev.body if rev else None, reply,
+                                    note)
+    if response is None:
+        tout.warning(f'Reply {reply_id}: the response could not be revised')
+        return False
+    if response == reply.response.strip():
+        tout.notice(f'Reply {reply_id}: the response is unchanged')
+        return False
+    db.reply_set_response(reply_id, response, database.REPLY_SUGGESTED)
+    ctx.cser.commit()
+    tout.notice(f'Reply {reply_id}: response revised')
+    print(response)
+    return True
 
 
 def _unfold(value):
