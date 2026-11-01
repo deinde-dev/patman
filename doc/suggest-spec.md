@@ -94,6 +94,7 @@ and its score is at least min_score.
 | limit | 10 | Most series to suggest |
 | min_score | 1 | Lowest score to suggest |
 | days | 30 | How far back to look, as the inbox does |
+| max_reads | 30 | Most series whose patches are read in one run, so that rules which rarely match cannot read every series |
 
 These cannot be used as rule names.
 
@@ -133,9 +134,9 @@ Each test has a cost, which sets the order they run in (see section 3).
 | `word REGEX...` | the diff adds or removes a matching line | diff | per patch |
 | `has TAG...` | some patch has one of these tags, e.g. reviewed-by | patch content and comments | per patch |
 | `to-me` | you are in To: or Cc: of some patch | patch headers | per patch |
-| `no-replies RANGE` | days since it was sent, with no comments from anyone but the submitter | comments | per patch |
+| `no-replies RANGE` | days since it was sent, with no comments from anyone but the submitter | comments of each patch | extra request |
 | `fixes` | a Fixes: tag names one of your commits | patch content, git log in your repo | per patch |
-| `delegate me\|none` | the patches' patchwork delegate | patch detail | per patch |
+| `delegate me\|none` | the patches' patchwork delegate | detail of each patch | extra request |
 | `checks pass\|fail` | patchwork's CI result | checks for each patch | per patch, extra request |
 | `blame` | it changes lines you wrote | diff, git blame in your repo | per patch, slow locally |
 | `newcomer` | the submitter has no earlier series | a search by submitter | extra request |
@@ -145,9 +146,14 @@ Notes:
 - 'You' is your own addresses, as for lookup.is_own_series(), plus the
   git user's email
 - Globs use fnmatch, with '**' matching across '/'
-- 'path', 'only-path', 'lines', 'maintainer' and 'word' all need only the
-  patch itself, which never changes, so it is cached for good in pwcache
-  by patch ID
+- The tests marked 'per patch' read the series' mbox, which holds all its
+  patches, with the tags patchwork collected from replies, so they cost one
+  request per series. Patchwork has no events for comments, so 'no-replies'
+  needs the comments of each patch, and 'delegate' and 'checks' the detail
+  of each patch, which makes them extra requests
+- On patchwork, an mbox read in the last hour is used again
+  (MBOX_MAX_AGE); it is not kept for good, since its tags change as
+  reviews come in
 - 'blame' runs git blame on just the lines each hunk removes or changes,
   against the series' base if the repo has it, else upstream
 - 'newcomer' could first look for the submitter in the series lists
@@ -216,9 +222,9 @@ it, so a reload does not run the costly tests again.
    --suggest-rules and tests for the parsing, merging and warnings
 2. The free tests, scoring and --suggest, with fixtures from a saved
    series list, making no requests
-3. The per-patch tests, the pruning and the pwcache caching of patches,
-   with a test counting the requests made
-4. blame, fixes and newcomer, and --explain
+3. The per-patch tests (from the mbox), the pruning and max_reads, with
+   tests counting the mboxes read
+4. fixes, blame, newcomer, no-replies, delegate and checks, and --explain
 5. The 'Suggested' group in the inbox, with its reasons on each card
 
 ## Decisions

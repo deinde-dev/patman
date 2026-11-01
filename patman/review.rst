@@ -283,22 +283,32 @@ Test                      Matches when
 ``word REGEX...``         the diff adds or removes a line which matches
 ``has TAG...``            a patch has one of these tags, e.g. ``reviewed-by``
 ``to-me``                 you are in To: or Cc: of a patch
+``fixes``                 a Fixes: tag names one of your commits
 ``no-replies RANGE``      the days since it was sent, with no replies, are in
                           the range
-``fixes``                 a Fixes: tag names one of your commits
 ``delegate me|none``      the patchwork delegate is you, or nobody
 ``checks pass|fail``      patchwork's CI result
 ``blame``                 the series changes lines you wrote
 ``newcomer``              the submitter has no earlier series
 ========================  ====================================================
 
+The tests from ``prefix`` to ``state`` need only the list of series. Those
+from ``path`` to ``fixes`` need the patches, which are read in one request
+for each series, as an mbox, and the rest need a request for each patch, or
+work in your git repo.
+
 A range is as for ``-i``: ``5``, ``3-10``, ``-3`` (3 or fewer) or ``25-``
-(25 or more). A list on lore has no states, delegates or checks, so rules
-using those never match there.
+(25 or more). In a file pattern, ``**`` matches anything, ``*`` and ``?``
+match anything but ``/``, and a pattern ending in ``/`` matches everything
+below it, so ``drivers/i2c/`` and ``drivers/i2c/**`` are the same. The
+MAINTAINERS files are all those in the repo, including those for each board,
+with your address taken from ``--reviewer``, else git. A list on lore has
+no states, delegates or checks, so rules using those never match there.
 
 The other settings are ``limit``, the most series to suggest (default 10),
-``min_score``, the lowest score to suggest (default 1), and ``days``, how
-far back to look (default 30).
+``min_score``, the lowest score to suggest (default 1), ``days``, how far
+back to look (default 30), and ``max_reads``, the most series whose patches
+are read in one run (default 30).
 
 To check the rules, and see them as patman understands them, after merging
 the project's section and the repo's settings::
@@ -317,16 +327,24 @@ which gave the score::
       5  boot: Fix the order of bootflows (v3, 4 patches)
            https://patchwork.ozlabs.org/project/uboot/list/?series=530512&state=*&archive=both
            boot +2, again +3
-    1 of 112 recent series suggested
+    1 of 112 recent series suggested, reading the patches of 6
 
 The series are those sent in the last ``days``, read as for the inbox, so
 that pages it read recently come from the cache. Your own series are left
 out, as are those you have reviewed at that version and older versions of a
 series. Use ``--limit N`` to see more or fewer than the ``limit`` setting.
 
-So far ``--suggest`` runs only the tests which need just the list of series,
-from ``prefix`` to ``state`` in the table above. It warns about a rule which
-uses any other test, and leaves it out.
+To keep the requests down, the tests which need only the list of series are
+run first, on every series. The patches are then read only for the series
+which could still reach ``min_score``, taking those which could reach the
+highest score first, and stopping once none left could get into the top
+``limit``, or ``max_reads`` series have been read. On patchwork, an mbox read
+in the last hour is used again. A rule which says ``need`` with a cheap test is
+the best way to narrow the series down before any patches are read.
+
+So far ``--suggest`` runs the tests from ``prefix`` to ``to-me`` in the
+table above. It warns about a rule which uses any other test, and leaves it
+out.
 
 Choosing the model
 ~~~~~~~~~~~~~~~~~~

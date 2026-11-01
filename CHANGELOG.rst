@@ -17,6 +17,11 @@ Added
   --suggest`` lists the recent series which the rules suggest, best first,
   with the link and the reasons for each, using the tests which need only the
   list of series.
+- ``patman review --suggest`` runs the tests which need the patches of a
+  series: ``path``, ``only-path``, ``lines``, ``maintainer`` (from all the
+  MAINTAINERS files in the repo), ``word``, ``has`` and ``to-me``. It reads
+  the patches, as one mbox for each series, only for the series which could
+  still be suggested, up to the new ``max_reads`` setting.
 - Reviewing a series from the inbox of ``patman serve`` can review only some
   of its patches, given in a box beside the context for the agent.
 - A patch selection, as given to ``patman review -i`` or ``patman maint apply

@@ -21,6 +21,8 @@ modules are:
   stored: sending and revising reviews which are already stored
   scan: scanning for and reviewing new versions of a series
   suggest: rules for suggesting series to review
+  maintainers: who looks after a file, from the MAINTAINERS files
+  patchdata: what the patches of a series say, for the suggest rules
   voice: learning the reviewer's writing voice
 
 Each module is imported here, so code outside the package can use, for
@@ -34,6 +36,8 @@ from patman.review import core
 from patman.review import drafts
 from patman.review import emails
 from patman.review import lookup
+from patman.review import maintainers
+from patman.review import patchdata
 from patman.review import prompts
 from patman.review import replies
 from patman.review import scan
