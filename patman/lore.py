@@ -35,6 +35,7 @@ from datetime import timezone
 
 import aiohttp
 
+from patman import gmail
 from patman import pwcache
 from patman import traffic
 
@@ -92,7 +93,7 @@ def on_list(comment, list_id):
         bool: True if the reply was sent to the list, or there is no way to
             tell
     """
-    lid = comment.get('headers', {}).get('List-Id', '')
+    lid = gmail.get_header(comment.get('headers', {}), 'List-Id', '')
     return not lid or not list_id or list_id in lid
 
 

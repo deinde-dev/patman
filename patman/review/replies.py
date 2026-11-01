@@ -638,11 +638,12 @@ def respond_to_comment(args, pwork, cser, link):
     sub = comment.get('submitter') or {}
     reply_id = cser.db.reply_add_comment(
         svid, seq, comment['id'], comment.get('msgid'),
-        _unfold(hdrs.get('References')),
+        _unfold(gmail.get_header(hdrs, 'References')),
         formataddr((sub.get('name') or '', sub.get('email') or '')),
-        _unfold(hdrs.get('To')), _unfold(hdrs.get('Cc')),
+        _unfold(gmail.get_header(hdrs, 'To')),
+        _unfold(gmail.get_header(hdrs, 'Cc')),
         _unfold(comment.get('subject')),
-        _unfold(hdrs.get('Date')) or comment.get('date'),
+        _unfold(gmail.get_header(hdrs, 'Date')) or comment.get('date'),
         comment.get('content'), datetime.now().isoformat())
     cser.commit()
 

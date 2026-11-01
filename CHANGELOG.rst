@@ -166,6 +166,9 @@ Changed
 
 Fixed
 ~~~~~
+- Mail header names are matched ignoring their case, as RFC 5322 requires,
+  so a review is copied to the people in a ``CC:`` header of the patch, not
+  only in a ``Cc:`` header.
 - ``patman review --suggest`` suggests from the series it has read when
   patchwork fails part way through the list, e.g. with a 502 when busy, rather
   than giving up, and says how far back it got.

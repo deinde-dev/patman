@@ -477,6 +477,28 @@ def _sent_message(service, draft, exc):
     return msg if 'SENT' in msg.get('labelIds', []) else None
 
 
+def get_header(hdrs, name, default=None):
+    """Get a header from a dict of headers, ignoring the case of its name
+
+    Header names are not case-sensitive, so a message may have 'CC' or 'cc'
+    rather than 'Cc', and the dict of its headers from patchwork or lore
+    keeps the name as sent
+
+    Args:
+        hdrs (dict): Headers, keyed by name
+        name (str): Name of the header, e.g. 'Cc'
+        default (any): Value to return if the header is missing
+
+    Returns:
+        str or list of str: Value of the header, or default if missing
+    """
+    if name in hdrs:
+        return hdrs[name]
+    lower = name.lower()
+    return next((val for key, val in hdrs.items() if key.lower() == lower),
+                default)
+
+
 def _decode_hdr(val):
     """Decode and unfold an email header value
 
@@ -539,7 +561,7 @@ def _build_cc(headers, list_email):
     Returns:
         str: Comma-separated CC addresses
     """
-    vals = [headers.get(field, '') for field in ('To', 'Cc')]
+    vals = [get_header(headers, field, '') for field in ('To', 'Cc')]
     if list_email:
         vals.append(list_email)
     return format_addrs(vals)
@@ -555,9 +577,7 @@ def _get_msgid(patch_data, hdrs):
     Returns:
         str or None: Message-ID
     """
-    return (patch_data.get('msgid') or
-            hdrs.get('Message-Id') or
-            hdrs.get('Message-ID'))
+    return patch_data.get('msgid') or get_header(hdrs, 'Message-Id')
 
 
 def _envelope(patch_data, hdrs, fallback_addr, list_email, refs=None):
@@ -579,7 +599,8 @@ def _envelope(patch_data, hdrs, fallback_addr, list_email, refs=None):
             to (str): To addresses
             cc (str): Cc addresses
     """
-    subject = _decode_hdr(hdrs.get('Subject', patch_data.get('name', '')))
+    subject = _decode_hdr(get_header(hdrs, 'Subject',
+                                     patch_data.get('name', '')))
     if not subject.startswith('Re: '):
         subject = f"Re: {subject}"
     msgid = _get_msgid(patch_data, hdrs)
@@ -587,7 +608,7 @@ def _envelope(patch_data, hdrs, fallback_addr, list_email, refs=None):
         'subject': subject,
         'in_reply_to': msgid,
         'references': msgid if refs is None else refs,
-        'to': format_addrs([hdrs.get('Reply-To') or fallback_addr]),
+        'to': format_addrs([get_header(hdrs, 'Reply-To') or fallback_addr]),
         'cc': _build_cc(hdrs, list_email),
     }
 
