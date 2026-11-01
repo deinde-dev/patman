@@ -116,6 +116,9 @@ Added
 
 Changed
 ~~~~~~~
+- ``patman review --suggest`` uses the pages of recent series which the inbox
+  read in the last hour, rather than the last ten minutes, along with any
+  later pages read with them, so that it seldom asks patchwork for them.
 - The subject of a patch or cover letter in a review in ``patman serve``
   shows it in the panel at the right, beside the review, on a wide screen,
   and below the review on a narrow one, rather than on a page of its own which

@@ -402,6 +402,9 @@ class TestSuggest(CseriesTester):
                       'not run yet, so it is left out', err.getvalue())
         since = recent.call_args.args[2]
         self.assertEqual(
+            {'partial': True, 'max_age': suggest.SUGGEST_MAX_AGE,
+             'consistent': True}, recent.call_args.kwargs)
+        self.assertEqual(
             (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
                 '%Y-%m-%d'), since)
 
@@ -448,6 +451,27 @@ class TestSuggest(CseriesTester):
                     self.assertRaises(ValueError):
                 common.run(scan.recent_series(None, pwork, since,
                                               partial=partial))
+
+        # With 'consistent', a later page is used from the cache only if it
+        # was read at or after the first page, here 20 minutes ago
+        get = mock.AsyncMock(side_effect=pages)
+        with mock.patch.object(pwork, 'get_recent_series', get), \
+                mock.patch.object(pwork, 'read_age', return_value=1200):
+            common.run(scan.recent_series(None, pwork, since, max_age=3600,
+                                          consistent=True))
+        self.assertEqual([3600, 1200, 1200],
+                         [call.kwargs['max_age'] for call in get.call_args_list])
+
+        # Without it, or with no copy of the first page, the ages are as given
+        for consistent, age, ages in ((False, 1200, [600, 600, 600]),
+                                      (True, None, [600, 0, 0])):
+            get = mock.AsyncMock(side_effect=pages)
+            with mock.patch.object(pwork, 'get_recent_series', get), \
+                    mock.patch.object(pwork, 'read_age', return_value=age):
+                common.run(scan.recent_series(None, pwork, since,
+                                              consistent=consistent))
+            self.assertEqual(ages, [call.kwargs['max_age']
+                                    for call in get.call_args_list])
 
         # A short page from patchwork is the last
         get = mock.AsyncMock(side_effect=[page_of(1, 3)])

@@ -50,7 +50,9 @@ SCAN_MAX_AGE = 10 * 60
 ScanResult = namedtuple('ScanResult', 'desc,version,link,returncode,output')
 
 
-async def recent_series(client, pwork, since, partial=False):
+# pylint: disable-next=R0913
+async def recent_series(client, pwork, since, partial=False,
+                        max_age=SCAN_MAX_AGE, consistent=False):
     """Read the series sent to patchwork since a date, newest first
 
     Pages which the inbox read recently are used from the cache. A page of
@@ -64,6 +66,12 @@ async def recent_series(client, pwork, since, partial=False):
         partial (bool): True to give the series read so far, with a warning,
             if a page after the first cannot be read, e.g. since the server
             is busy, rather than failing
+        max_age (float): Oldest copy of a page to use from the cache, in
+            seconds
+        consistent (bool): True to use a copy of a later page only if it
+            was read at or after the first page, as the inbox does, so that
+            no series is missed between pages read at different times; each
+            new series moves the others down by one
 
     Returns:
         list of dict: Series, as from Patchwork.get_recent_series()
@@ -74,11 +82,14 @@ async def recent_series(client, pwork, since, partial=False):
     """
     found = []
     lore = isinstance(pwork, lorelist.LoreList)
+    first = pwork.recent_series_path(pwork.link_name, 1, SCAN_PAGE)
     for page in range(1, SCAN_MAX_PAGES + 1):
+        age = max_age
+        if consistent and page > 1:
+            age = min(max_age, pwork.read_age(first) or 0)
         try:
             series = await pwork.get_recent_series(
-                client, pwork.link_name, page, SCAN_PAGE,
-                max_age=SCAN_MAX_AGE)
+                client, pwork.link_name, page, SCAN_PAGE, max_age=age)
         except ValueError as exc:
             if not partial or page == 1:
                 raise
