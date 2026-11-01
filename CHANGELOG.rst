@@ -158,6 +158,9 @@ Changed
 
 Fixed
 ~~~~~
+- ``patman review --suggest`` suggests from the series it has read when
+  patchwork fails part way through the list, e.g. with a 502 when busy, rather
+  than giving up, and says how far back it got.
 - ``patman review -i`` gives an error for a range which is back to front,
   such as ``3-1``, rather than reviewing every patch, and for a selection it
   cannot parse, rather than a Python traceback.
