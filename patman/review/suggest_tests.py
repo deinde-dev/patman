@@ -75,7 +75,7 @@ def _found(found, others):
     return Result(bool(found), _seen(found or others))
 
 
-def _in_range(value, ends):
+def in_range(value, ends):
     """Check whether a number is in a range from a rule
 
     Args:
@@ -125,6 +125,21 @@ def _prefixes(subjects):
     return out
 
 
+def _days(count):
+    """Say how many days old a series is
+
+    Args:
+        count (int): Whole days
+
+    Returns:
+        str: e.g. '1 day' or '3 days'
+
+    >>> _days(1), _days(3)
+    ('1 day', '3 days')
+    """
+    return f"{count} day{'s' if count != 1 else ''}"
+
+
 def _yes_no(value):
     """Show whether something is so
 
@@ -146,13 +161,12 @@ FREE_TESTS = {
                           for word in args)]), _prefixes(info.subjects)),
     'from': lambda args, info: Result(_matches_from(args, info),
                                       info.email or info.who or 'none'),
-    'patches': lambda args, info: Result(_in_range(info.patches, args),
+    'patches': lambda args, info: Result(in_range(info.patches, args),
                                          str(info.patches)),
-    'version': lambda args, info: Result(_in_range(info.version, args),
+    'version': lambda args, info: Result(in_range(info.version, args),
                                          f'v{info.version}'),
-    'age': lambda args, info: Result(
-        _in_range(info.age, args),
-        f"{info.age} day{'s' if info.age != 1 else ''}"),
+    'age': lambda args, info: Result(in_range(info.age, args),
+                                     _days(info.age)),
     'rfc': lambda args, info: Result(info.rfc, _yes_no(info.rfc)),
     'reviewed-before': lambda args, info: Result(
         info.reviewed_before, _yes_no(info.reviewed_before)),
@@ -162,7 +176,7 @@ FREE_TESTS = {
 }
 
 
-def _age_days(date, now):
+def age_days(date, now):
     """Get the whole days since a series was sent
 
     Args:
@@ -206,7 +220,7 @@ def series_info(pws, now, reviewed_before, states):
         [RE_TAGS.sub('', pws.get('name') or '').strip()],
         (sub.get('email') or '').lower(), (sub.get('name') or '').lower(),
         pws.get('total') or len(patches), int(pws.get('version') or 1),
-        _age_days(pws.get('date'), now),
+        age_days(pws.get('date'), now),
         bool(re.search(r'\bRFC\b', tags, re.I)), reviewed_before, states)
 
 
@@ -274,7 +288,7 @@ def _only_paths(pats, info):
 PATCH_TESTS = {
     'path': lambda args, info: _found(_paths(args, info), info.files),
     'only-path': _only_paths,
-    'lines': lambda args, info: Result(_in_range(len(info.changed), args),
+    'lines': lambda args, info: Result(in_range(len(info.changed), args),
                                        f'{len(info.changed)} lines'),
     'maintainer': lambda args, info: Result(bool(set(args) & info.roles),
                                             _seen(sorted(info.roles))),
@@ -294,7 +308,75 @@ PATCH_TESTS = {
 #       history.blame_mine())
 #   newcomer (bool): True if its submitter has sent no earlier series
 #   how (str): How that was decided, e.g. 'has commits in the tree'
-Extra = namedtuple('Extra', 'blame,newcomer,how')
+#   age (int): Whole days since it was sent
+#   replier (str or None): Name of the first person other than the submitter
+#       to reply to it, '' if nobody has, or None if not looked at, since
+#       the series is not of an age which a rule wants
+#   delegates (list of str or None): Patchwork delegate of each patch which
+#       has one, or None if patchwork does not say, e.g. on lore
+#   delegate_me (bool): True if a patch is delegated to you
+#   checks (list of str or None): Patchwork's CI result for each patch, e.g.
+#       'success' or 'pending', or None if patchwork does not say
+Extra = namedtuple('Extra', 'blame,newcomer,how,age,replier,delegates,'
+                   'delegate_me,checks', defaults=(0, None, None, False, None))
+
+
+def _no_replies(args, extra):
+    """Check whether nobody but the submitter has replied to a series
+
+    Args:
+        args (tuple): Range of days since the series was sent
+        extra (Extra): What is known
+
+    Returns:
+        Result: What was found
+    """
+    if extra.replier:
+        return Result(False, f'reply from {extra.replier}')
+    if extra.replier is None:
+        return Result(False, _days(extra.age))
+    return Result(in_range(extra.age, args),
+                  f'no replies, {_days(extra.age)}')
+
+
+def _delegate(args, extra):
+    """Check who the patchwork delegate of a series is
+
+    Args:
+        args (tuple): 'me' or 'none'
+        extra (Extra): What is known
+
+    Returns:
+        Result: What was found
+    """
+    if extra.delegates is None:
+        return Result(False, 'not known')
+    matched = extra.delegate_me if args[0] == 'me' else not extra.delegates
+    return Result(matched, _seen(sorted(set(extra.delegates))) or 'none')
+
+
+def _checks(args, extra):
+    """Check patchwork's CI result for a series
+
+    It passes if every patch passes and fails if any patch fails
+
+    Args:
+        args (tuple): 'pass' or 'fail'
+        extra (Extra): What is known
+
+    Returns:
+        Result: What was found
+    """
+    if not extra.checks:
+        return Result(False, 'not known')
+    if args[0] == 'pass':
+        matched = all(state == 'success' for state in extra.checks)
+    else:
+        matched = 'fail' in extra.checks
+    counts = {state: extra.checks.count(state)
+              for state in sorted(set(extra.checks))}
+    return Result(matched, ', '.join(f'{count} {state}'
+                                     for state, count in counts.items()))
 
 
 # The tests which need extra requests or git, each taking the rule's
@@ -303,6 +385,9 @@ EXTRA_TESTS = {
     'blame': lambda args, extra: Result(bool(extra.blame), _seen(
         f'{count} in {fname}' for fname, count in extra.blame.items())),
     'newcomer': lambda args, extra: Result(extra.newcomer, extra.how),
+    'no-replies': _no_replies,
+    'delegate': _delegate,
+    'checks': _checks,
 }
 
 

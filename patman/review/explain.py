@@ -148,15 +148,10 @@ def explain(sug, pws, url):
     """
     lines = [suggest.series_title(pws), f'  {url}']
     done, facts, problems = common.run(_facts(sug, pws))
-    rules = [rule for rule in sug.rules.rules
-             if rule.test in suggest_tests.ALL_TESTS]
+    rules = sug.rules.rules
     results = [_run(rule, facts) for rule in rules]
     table, score = _table(rules, results)
     lines += table + problems
-    for rule in sug.rules.rules:
-        if rule.test not in suggest_tests.ALL_TESTS:
-            lines.append(f"Rule '{rule.name}' uses '{rule.test}', which is "
-                         'not run yet')
     if lookup.is_own_series(pws, sug.emails, sug.own_db):
         lines.append('Not suggested: it is your own series')
     elif done:

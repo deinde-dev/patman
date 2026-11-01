@@ -508,21 +508,22 @@ class TestSuggest(SuggestHelper):
         series = [make_series(100, 'boot: Fix it'),
                   make_series(101, 'video: Other')]
         recent = mock.AsyncMock(return_value=series)
-        values = {'boot': 'prefix boot: +2', 'mine': 'checks pass +3'}
+        checks = {'100': 'success', '101': 'fail'}
+        pwork.get_series_patches = mock.AsyncMock(
+            side_effect=lambda _client, link: [{'check': checks[link]}])
+        values = {'boot': 'prefix boot: +2', 'ci': 'checks pass +3'}
         with mock.patch.dict(suggest.settings.suggest, values, clear=True), \
                 mock.patch.object(scan, 'recent_series', recent), \
-                terminal.capture() as (out, err):
+                terminal.capture() as (out, _):
             self.assertEqual(0, suggest.do_suggest(Namespace(limit=None),
                                                    pwork, cser, {ME}, cser.db))
         self.assertEqual(
-            ['  2  boot: Fix it (v1, 2 patches)',
+            ['  5  boot: Fix it (v1, 2 patches)',
              '       https://my-fake-url/project/uboot/list/?series=100'
              '&state=*&archive=both',
-             '       boot +2',
+             '       boot +2, ci +3',
              '1 of 2 recent series suggested'],
             out.getvalue().splitlines())
-        self.assertIn("Suggest rule 'mine' uses 'checks', which --suggest "
-                      'does not run yet, so it is left out', err.getvalue())
         since = recent.call_args.args[2]
         self.assertEqual(
             {'partial': True, 'max_age': suggest.SUGGEST_MAX_AGE,

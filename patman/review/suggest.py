@@ -321,6 +321,70 @@ class Suggester:  # pylint: disable=R0902
             return False, f"sent '{earlier[0].get('name')}'"
         return True, 'no earlier series'
 
+    async def _replier(self, client, pws, age):
+        """Find who, other than the submitter, has replied to a series
+
+        The cover letter is looked at first, then each patch in turn,
+        stopping at the first reply found. Nothing is read if no
+        'no-replies' rule wants a series of this age
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            pws (dict): Series, as from patchwork or lore
+            age (int): Whole days since it was sent
+
+        Returns:
+            str or None: Name of the first person found, '' if nobody, or
+                None if not looked at
+
+        Raises:
+            ValueError: The replies cannot be read
+        """
+        if not any(suggest_tests.in_range(age, rule.args)
+                   for rule in self.rules.rules if rule.test == 'no-replies'):
+            return None
+        addr = ((pws.get('submitter') or {}).get('email') or '').lower()
+        reads = []
+        cover = (pws.get('cover_letter') or {}).get('id')
+        if cover:
+            reads.append((self.pwork.get_cover_comments, cover))
+        reads += [(self.pwork.get_patch_comments, pat['id'])
+                  for pat in pws.get('patches') or []]
+        for read, item in reads:
+            for comment in await read(client, item):
+                who = comment.get('submitter') or {}
+                if (who.get('email') or '').lower() != addr:
+                    return who.get('name') or who.get('email') or 'someone'
+        return ''
+
+    async def _patch_list(self, client, pws):
+        """Find the delegates and CI results of the patches of a series
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            pws (dict): Series, as from patchwork or lore
+
+        Returns:
+            tuple:
+                list of str or None: Delegate of each patch which has one,
+                    or None if patchwork does not say, e.g. on lore
+                bool: True if a patch is delegated to you
+                list of str or None: CI result of each patch, or None
+
+        Raises:
+            ValueError: The patches cannot be read
+        """
+        read = getattr(self.pwork, 'get_series_patches', None)
+        if not read:
+            return None, False, None
+        patches = await read(client, str(pws['id']))
+        people = [pat['delegate'] for pat in patches if pat.get('delegate')]
+        mine = any((who.get('email') or '').lower() in self.emails
+                   for who in people)
+        return ([who.get('username') or who.get('email') or '?'
+                 for who in people], mine,
+                [pat.get('check') or 'pending' for pat in patches])
+
     async def extra(self, client, pws, info):
         """Find what the tests which need extra requests or git need
 
@@ -346,7 +410,15 @@ class Suggester:  # pylint: disable=R0902
         newcomer, how = False, ''
         if self._uses('newcomer'):
             newcomer, how = await self._newcomer(client, pws)
-        return suggest_tests.Extra(blame, newcomer, how)
+        age = suggest_tests.age_days(pws.get('date'), self.now)
+        replier = None
+        if self._uses('no-replies'):
+            replier = await self._replier(client, pws, age)
+        delegates, mine, checks = None, False, None
+        if self._uses('delegate') or self._uses('checks'):
+            delegates, mine, checks = await self._patch_list(client, pws)
+        return suggest_tests.Extra(blame, newcomer, how, age, replier,
+                                   delegates, mine, checks)
 
     def _could_place(self, found, best):
         """Check whether a series could get into the top 'limit'
@@ -609,10 +681,6 @@ def do_suggest(args, pwork, cser, own_emails, own_db):
         return 1
     for warning in suggest_rules.check_rules(rules, isinstance(pwork, lorelist.LoreList)):
         tout.warning(warning)
-    for rule in rules.rules:
-        if rule.test not in suggest_tests.ALL_TESTS:
-            tout.warning(f"Suggest rule '{rule.name}' uses '{rule.test}', "
-                         'which --suggest does not run yet, so it is left out')
     now = datetime.now(timezone.utc)
     series = _read_recent(pwork, (now - timedelta(days=rules.days)).strftime(
         '%Y-%m-%d'))

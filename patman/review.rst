@@ -294,8 +294,17 @@ Test                      Matches when
 
 The tests from ``prefix`` to ``state`` need only the list of series. Those
 from ``path`` to ``fixes`` need the patches, which are read in one request
-for each series, as an mbox, and the rest need a request for each patch, or
-work in your git repo.
+for each series, as an mbox, and the rest need more requests, or work in your
+git repo:
+
+- ``no-replies`` reads the comments on the cover letter and then on each
+  patch, stopping at the first from someone other than the submitter. It
+  reads nothing for a series whose age is outside the range, so ``3-``
+  costs nothing for the newest series
+- ``delegate`` and ``checks`` read the patchwork list of the series'
+  patches, in one request, which gives each patch's delegate and CI result.
+  ``checks pass`` matches if every patch passes, ``checks fail`` if any
+  fails
 
 The tests which use your git repo look at the history of the tree you run
 patman in:
@@ -366,9 +375,6 @@ which says ``need`` with a cheap test is the best way to narrow the series
 down before any patches are read. A costly test with a high score does the
 opposite: until it has run, any series could gain that score, so the patches
 of more series are read.
-
-So far ``--suggest`` runs every test but ``no-replies``, ``delegate`` and
-``checks``. It warns about a rule which uses one of those, and leaves it out.
 
 To see how the rules score one series, and why it is or is not suggested,
 give it as for ``-s``::
