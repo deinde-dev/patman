@@ -19,6 +19,7 @@ from patman.review import maintainers
 from patman.review import patchdata
 from patman.review import scan
 from patman.review import suggest
+from patman.review import suggest_rules
 from patman.test_common import CseriesTester, Namespace
 
 # Rules of each kind, as they might be in the settings
@@ -81,6 +82,7 @@ Subject: [PATCH 1/2] i2c: Add a driver
 
 Add a driver for the thing.
 
+Fixes: 0123456789ab ("i2c: Break it")
 Reviewed-by: Fred <fred@x.org>
 Signed-off-by: Ann Acker <ann@x.org>
 ---
@@ -144,19 +146,60 @@ def make_mbox(*patches):
                     patch.encode('utf-8') + b'\n' for patch in patches)
 
 
-class TestSuggest(CseriesTester):
+class SuggestHelper(CseriesTester):
+    """Helpers for the tests which find suggestions"""
+    # pylint: disable-next=R0913
+    def suggester(self, values, series, mboxes, limit=10, repo=None,
+                  earlier=None):
+        """Find suggestions with some rules, reading made-up patches
+
+        Args:
+            values (dict): Settings, as in [suggest]
+            series (list of dict): Recent series
+            mboxes (dict): key (str): Series link
+                value (bytes or Exception): Its mbox, or what reading it
+                    raises
+            limit (int): Most series to suggest
+            repo (str or None): Repo for the tests which need the history,
+                with the history to use at HEAD
+            earlier (AsyncMock or None): Mock of earlier_series()
+
+        Returns:
+            tuple:
+                Suggester: The suggester, after finding
+                list of Suggestion: What it found
+                AsyncMock: The mock of get_series_mbox()
+        """
+        cser = self.cser or self.get_database()
+        pwork = patchwork.Patchwork.for_testing(None)
+        def read(_client, link):
+            if isinstance(mboxes[link], Exception):
+                raise mboxes[link]
+            return mboxes[link]
+        get = mock.AsyncMock(side_effect=read)
+        sug = suggest.Suggester(suggest_rules.get_rules(values), pwork, cser,
+                                {ME}, cser.db, NOW, limit, 'HEAD')
+        sug._top = repo  # pylint: disable=W0212
+        with mock.patch.object(pwork, 'get_series_mbox', get), \
+                mock.patch.object(pwork, 'earlier_series',
+                                  earlier or mock.AsyncMock(return_value=[])):
+            found = sug.find(series)
+        return sug, found, get
+
+
+class TestSuggest(SuggestHelper):
     """Tests for the rules which suggest series to review"""
 
     def test_parse(self):
         """Each kind of rule is parsed, and kept in order of cost"""
-        rules = suggest.get_rules(RULES)
+        rules = suggest_rules.get_rules(RULES)
         self.assertEqual(
             ['bots', 'stable', 'i2c', 'listed', 'reviewed', 'udev', 'fresh',
              'mine', 'quiet'],
             [rule.name for rule in rules.rules])
         by_name = {rule.name: rule for rule in rules.rules}
         self.assertEqual(
-            suggest.Rule('i2c', 'path',
+            suggest_rules.Rule('i2c', 'path',
                          ('drivers/i2c/**', 'arch/arm/mach-bcm283x/**'),
                          False, 3),
             by_name['i2c'])
@@ -175,15 +218,15 @@ class TestSuggest(CseriesTester):
                           rules.max_reads))
 
         # Without settings, there are no rules, and the defaults
-        self.assertEqual(suggest.Rules([], 10, 1, 30, 30),
-                         suggest.get_rules({}))
+        self.assertEqual(suggest_rules.Rules([], 10, 1, 30, 30),
+                         suggest_rules.get_rules({}))
 
         # With 'maintainer' and no roles, both match
         self.assertEqual(('M', 'R'),
-                         suggest.parse_rule('x', 'maintainer +1').args)
-        self.assertEqual((5, 5), suggest.parse_rule('x', 'patches 5 +1').args)
+                         suggest_rules.parse_rule('x', 'maintainer +1').args)
+        self.assertEqual((5, 5), suggest_rules.parse_rule('x', 'patches 5 +1').args)
         self.assertEqual((None, 3),
-                         suggest.parse_rule('x', 'version -3 +1').args)
+                         suggest_rules.parse_rule('x', 'version -3 +1').args)
 
     def test_errors(self):
         """A rule or setting which is not valid gives a clear error"""
@@ -213,7 +256,7 @@ class TestSuggest(CseriesTester):
                                 'none')):
             with self.subTest(value=value):
                 with self.assertRaises(ValueError) as exc:
-                    suggest.get_rules({'x': value})
+                    suggest_rules.get_rules({'x': value})
                 self.assertTrue(str(exc.exception).startswith(msg),
                                 str(exc.exception))
 
@@ -226,29 +269,29 @@ class TestSuggest(CseriesTester):
                                      "a number, not '1.5'")):
             with self.subTest(name=name):
                 with self.assertRaises(ValueError) as exc:
-                    suggest.get_rules({name: value})
+                    suggest_rules.get_rules({name: value})
                 self.assertEqual(msg, str(exc.exception))
 
         # A low score is fine, for rule sets which only subtract
-        self.assertEqual(-2, suggest.get_rules({'min_score': '-2'}).min_score)
+        self.assertEqual(-2, suggest_rules.get_rules({'min_score': '-2'}).min_score)
 
     def test_check(self):
         """Rules which can never match are reported"""
-        rules = suggest.get_rules(RULES)
-        self.assertEqual([], suggest.check_rules(rules, False))
+        rules = suggest_rules.get_rules(RULES)
+        self.assertEqual([], suggest_rules.check_rules(rules, False))
         self.assertEqual(
             ["Suggest rule 'mine' uses 'delegate', which lore does not have, "
              'so it never matches'],
-            suggest.check_rules(rules, True))
-        rules = suggest.get_rules({'big': 'patches 20- -2'})
+            suggest_rules.check_rules(rules, True))
+        rules = suggest_rules.get_rules({'big': 'patches 20- -2'})
         self.assertEqual(['No suggest rule adds to the score, so no series '
                           'reaches min_score 1'],
-                         suggest.check_rules(rules, False))
-        rules = suggest.get_rules({'big': 'patches 20- -2', 'min_score': '0'})
-        self.assertEqual([], suggest.check_rules(rules, False))
+                         suggest_rules.check_rules(rules, False))
+        rules = suggest_rules.get_rules({'big': 'patches 20- -2', 'min_score': '0'})
+        self.assertEqual([], suggest_rules.check_rules(rules, False))
 
         # With no rules, show_rules() says so, so there is no warning
-        self.assertEqual([], suggest.check_rules(suggest.get_rules({}), False))
+        self.assertEqual([], suggest_rules.check_rules(suggest_rules.get_rules({}), False))
 
     def test_show(self):
         """The rules are shown as understood, grouped by cost"""
@@ -269,19 +312,19 @@ class TestSuggest(CseriesTester):
              '    quiet     no-replies 3-  +1',
              'Suggest at most 8, with a score of at least 2, sent in the last '
              '30 days'],
-            suggest.show_rules(suggest.get_rules(RULES), 'U-Boot'))
+            suggest_rules.show_rules(suggest_rules.get_rules(RULES), 'U-Boot'))
         self.assertEqual(
             ['No rules for suggesting dtc series: add them to the [suggest] '
              'section of the settings'],
-            suggest.show_rules(suggest.get_rules({}), 'dtc'))
+            suggest_rules.show_rules(suggest_rules.get_rules({}), 'dtc'))
 
         # A shown rule reads back as the same rule
-        for rule in suggest.get_rules(RULES).rules:
-            line = suggest.show_rules(
-                suggest.Rules([rule], 10, 1, 30, 30), 'x')[2]
+        for rule in suggest_rules.get_rules(RULES).rules:
+            line = suggest_rules.show_rules(
+                suggest_rules.Rules([rule], 10, 1, 30, 30), 'x')[2]
             name, value = re.match(r'\s+(\S+)\s+(.*)$', line).groups()
             with self.subTest(name=name):
-                again = suggest.parse_rule(name, value)
+                again = suggest_rules.parse_rule(name, value)
                 self.assertEqual(rule.test, again.test)
                 self.assertEqual(
                     [getattr(arg, 'pattern', arg) for arg in rule.args],
@@ -294,18 +337,19 @@ class TestSuggest(CseriesTester):
         pwork = patchwork.Patchwork.for_testing(None)
         with mock.patch.dict(suggest.settings.suggest, RULES, clear=True), \
                 terminal.capture() as (out, err):
-            self.assertEqual(0, suggest.do_rules(pwork))
+            self.assertEqual(0, suggest_rules.do_rules(pwork))
         self.assertIn('    i2c       path', out.getvalue())
         self.assertEqual('', err.getvalue())
 
         with mock.patch.dict(suggest.settings.suggest, RULES, clear=True), \
                 terminal.capture() as (out, err):
-            self.assertEqual(1, suggest.do_rules(lorelist.LoreList('https://lore.kernel.org/dtc')))
+            self.assertEqual(1, suggest_rules.do_rules(
+                lorelist.LoreList('https://lore.kernel.org/dtc')))
         self.assertIn("'mine' uses 'delegate'", err.getvalue())
 
         with mock.patch.dict(suggest.settings.suggest, {}, clear=True), \
                 terminal.capture() as (out, err):
-            self.assertEqual(1, suggest.do_rules(pwork))
+            self.assertEqual(1, suggest_rules.do_rules(pwork))
         self.assertIn('No rules for suggesting', out.getvalue())
         self.assertEqual('', err.getvalue())
 
@@ -349,20 +393,20 @@ class TestSuggest(CseriesTester):
                 ('reviewed-before', False),
                 ('state new', True), ('state accepted', False)):
             with self.subTest(value=value):
-                rule = suggest.parse_rule('r', f'{value} +1')
+                rule = suggest_rules.parse_rule('r', f'{value} +1')
                 self.assertEqual(
                     (1 if matched else 0, ['r +1'] if matched else []),
                     suggest.score_series([rule], info, suggest.FREE_TESTS))
 
         # Every free test has code to run it
         self.assertEqual(
-            sorted(name for name, test in suggest.TESTS.items()
-                   if test.cost == suggest.FREE),
+            sorted(name for name, test in suggest_rules.TESTS.items()
+                   if test.cost == suggest_rules.FREE),
             sorted(suggest.FREE_TESTS))
 
     def test_score(self):
         """Scores add up, 'skip' leaves a series out and 'need' keeps it in"""
-        rules = suggest.get_rules({
+        rules = suggest_rules.get_rules({
             'boot': 'prefix boot: +3', 'small': 'patches -2 +1',
             'old': 'age 20- -2', 'rfc': 'rfc skip',
             'only-boot': 'prefix boot: bootstd: need'}).rules
@@ -414,7 +458,7 @@ class TestSuggest(CseriesTester):
             make_series(500, 'video: Not mine', days=4),
             make_series(601, 'boot: Twice', version=2, days=2),
             make_series(600, 'boot: Twice', version=1, days=8)]
-        rules = suggest.get_rules({
+        rules = suggest_rules.get_rules({
             'boot': 'prefix boot: +2', 'dm': 'prefix dm: +2',
             'again': 'reviewed-before +3'})
         pwork = patchwork.Patchwork.for_testing(None)
@@ -461,7 +505,7 @@ class TestSuggest(CseriesTester):
         series = [make_series(100, 'boot: Fix it'),
                   make_series(101, 'video: Other')]
         recent = mock.AsyncMock(return_value=series)
-        values = {'boot': 'prefix boot: +2', 'mine': 'blame +3'}
+        values = {'boot': 'prefix boot: +2', 'mine': 'checks pass +3'}
         with mock.patch.dict(suggest.settings.suggest, values, clear=True), \
                 mock.patch.object(scan, 'recent_series', recent), \
                 terminal.capture() as (out, err):
@@ -474,7 +518,7 @@ class TestSuggest(CseriesTester):
              '       boot +2',
              '1 of 2 recent series suggested'],
             out.getvalue().splitlines())
-        self.assertIn("Suggest rule 'mine' uses 'blame', which --suggest "
+        self.assertIn("Suggest rule 'mine' uses 'checks', which --suggest "
                       'does not run yet, so it is left out', err.getvalue())
         since = recent.call_args.args[2]
         self.assertEqual(
@@ -566,17 +610,29 @@ class TestSuggest(CseriesTester):
 
     def test_parse_patch(self):
         """The files, changed lines and tags of a patch are found"""
-        files, changed, tags = patchdata.parse_patch(
-            PATCH.split('\n\n', 1)[1])
-        self.assertEqual(['drivers/i2c/x.c', 'MAINTAINERS'], files)
+        patch = patchdata.parse_patch(PATCH.split('\n\n', 1)[1])
+        self.assertEqual(['drivers/i2c/x.c', 'MAINTAINERS'], patch.files)
         self.assertEqual(['int x;', 'struct udevice *dev;', 'int y;',
-                          'F:\told', 'F:\tnew'], changed)
-        self.assertEqual({'reviewed-by', 'signed-off-by'}, tags)
+                          'F:\told', 'F:\tnew'], patch.changed)
+        self.assertEqual({'reviewed-by', 'signed-off-by', 'fixes'},
+                         patch.tags)
+        self.assertEqual(['0123456789ab'], patch.fixes)
+
+        # The lines removed are given by their number before the patch
+        self.assertEqual({'drivers/i2c/x.c': [2], 'MAINTAINERS': [5]},
+                         patch.removed)
 
         # A patch which only renames a file has both names
-        files, changed, _ = patchdata.parse_patch(
+        patch = patchdata.parse_patch(
             'Rename it\n---\ndiff --git a/a.c b/b.c\nsimilarity index 100%\n')
-        self.assertEqual((['a.c', 'b.c'], []), (files, changed))
+        self.assertEqual((['a.c', 'b.c'], [], {}),
+                         (patch.files, patch.changed, patch.removed))
+
+        # A series based on a commit says so
+        info = patchdata.patch_info(make_mbox(PATCH + '\nbase-commit: '
+                                              'abcdef0123456\n'), set(), None)
+        self.assertEqual('abcdef0123456', info.base)
+        self.assertEqual(['0123456789ab'], info.fixes)
 
     def test_maintainers(self):
         """MAINTAINERS files are parsed and matched as get_maintainer does"""
@@ -643,48 +699,17 @@ class TestSuggest(CseriesTester):
                 ('has note', False),
                 ('to-me', True), ('not to-me', False)):
             with self.subTest(value=value):
-                rule = suggest.parse_rule('r', f'{value} +1')
+                rule = suggest_rules.parse_rule('r', f'{value} +1')
                 self.assertEqual(
                     1 if matched else 0,
                     suggest.score_series([rule], info,
                                          suggest.PATCH_TESTS)[0])
 
-        # Every test which needs only the patches has code to run it, apart
-        # from 'fixes', which needs the history too
+        # Every test which needs only the patches has code to run it
         self.assertEqual(
-            sorted(name for name, test in suggest.TESTS.items()
-                   if test.cost == suggest.PATCH and name != 'fixes'),
+            sorted(name for name, test in suggest_rules.TESTS.items()
+                   if test.cost == suggest_rules.PATCH),
             sorted(suggest.PATCH_TESTS))
-
-    def suggester(self, values, series, mboxes, limit=10):
-        """Find suggestions with some rules, reading made-up patches
-
-        Args:
-            values (dict): Settings, as in [suggest]
-            series (list of dict): Recent series
-            mboxes (dict): key (str): Series link
-                value (bytes or Exception): Its mbox, or what reading it
-                    raises
-            limit (int): Most series to suggest
-
-        Returns:
-            tuple:
-                Suggester: The suggester, after finding
-                list of Suggestion: What it found
-                AsyncMock: The mock of get_series_mbox()
-        """
-        cser = self.cser or self.get_database()
-        pwork = patchwork.Patchwork.for_testing(None)
-        def read(_client, link):
-            if isinstance(mboxes[link], Exception):
-                raise mboxes[link]
-            return mboxes[link]
-        get = mock.AsyncMock(side_effect=read)
-        sug = suggest.Suggester(suggest.get_rules(values), pwork, cser, {ME},
-                                cser.db, NOW, limit)
-        with mock.patch.object(pwork, 'get_series_mbox', get):
-            found = sug.find(series)
-        return sug, found, get
 
     def test_prune(self):
         """Patches are read only for the series which could be suggested"""

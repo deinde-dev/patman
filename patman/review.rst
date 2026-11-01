@@ -297,6 +297,24 @@ from ``path`` to ``fixes`` need the patches, which are read in one request
 for each series, as an mbox, and the rest need a request for each patch, or
 work in your git repo.
 
+The tests which use your git repo look at the history of the tree you run
+patman in:
+
+- ``fixes`` looks up the commit which each Fixes: tag names, and matches if
+  you wrote it
+- ``blame`` runs ``git blame`` on the lines which the patches remove or
+  change, in the commit given by the series' ``base-commit:`` trailer if the
+  repo has it, else in the upstream branch, as for reviewing (see
+  ``--base-branch``). A line in a later patch is found by its number in that
+  patch, so it may be a little off if an earlier patch in the series changes
+  the same file
+- ``newcomer`` matches if the submitter has sent no series before this one,
+  apart from earlier versions of it. It looks first at the other recent
+  series, then at the authors of the commits in the upstream branch, and only
+  then asks patchwork or lore for the series the submitter sent before. That
+  answer is kept for good once there is one, since it does not go away, and
+  otherwise asked again after a day
+
 A range is as for ``-i``: ``5``, ``3-10``, ``-3`` (3 or fewer) or ``25-``
 (25 or more). In a file pattern, ``**`` matches anything, ``*`` and ``?``
 match anything but ``/``, and a pattern ending in ``/`` matches everything
@@ -342,12 +360,36 @@ run first, on every series. The patches are then read only for the series
 which could still reach ``min_score``, taking those which could reach the
 highest score first, and stopping once none left could get into the top
 ``limit``, or ``max_reads`` series have been read. On patchwork, an mbox read
-in the last hour is used again. A rule which says ``need`` with a cheap test is
-the best way to narrow the series down before any patches are read.
+in the last hour is used again. The tests which use git or extra requests
+come last, again only for the series which could still be suggested. A rule
+which says ``need`` with a cheap test is the best way to narrow the series
+down before any patches are read. A costly test with a high score does the
+opposite: until it has run, any series could gain that score, so the patches
+of more series are read.
 
-So far ``--suggest`` runs the tests from ``prefix`` to ``to-me`` in the
-table above. It warns about a rule which uses any other test, and leaves it
-out.
+So far ``--suggest`` runs every test but ``no-replies``, ``delegate`` and
+``checks``. It warns about a rule which uses one of those, and leaves it out.
+
+To see how the rules score one series, and why it is or is not suggested,
+give it as for ``-s``::
+
+    patman review --explain 530954
+
+This runs every rule, including those which ``--suggest`` would not reach,
+e.g. after a ``skip`` rule matches, and shows what each test saw: the files
+which matched a ``path`` rule, or else those the series touches, the lines
+you wrote for ``blame``, and so on::
+
+    imagemap: structural and cosmetic review follow-ups (v3, 11 patches)
+      https://patchwork.ozlabs.org/project/uboot/list/?series=530954&state=*&archive=both
+      Rule   Test               Match  Score  Seen
+      boot   prefix boot:       yes    +2     boot: bootm:, boot: imagemap:
+      huge   patches 25-        no     skip   11
+      i2c    path drivers/i2c/  no     +3     test/cmd_ut.c, boot/bootm.c, boot/imagemap.c and 6 more
+      mine   maintainer M       yes    +3     M
+      fresh  newcomer           no     +2     has commits in the tree
+      wrote  blame              yes    +2     10 in boot/bootm.c, 2 in boot/image-fit.c
+    Score 7: suggested if among the best 10 recent series
 
 Choosing the model
 ~~~~~~~~~~~~~~~~~~

@@ -41,6 +41,7 @@ from patman.review import checkout
 from patman.review import common
 from patman.review import drafts
 from patman.review import emails
+from patman.review import explain
 from patman.review import lookup
 from patman.review import prompts
 from patman.review import replies
@@ -48,6 +49,7 @@ from patman.review import scan
 from patman.review import stats
 from patman.review import stored
 from patman.review import suggest
+from patman.review import suggest_rules
 from patman.review import voice
 
 
@@ -1218,11 +1220,18 @@ def do_review(args, pwork, cser, own_db=None):
         return scan.do_scan(args, pwork, cser)
 
     if getattr(args, 'suggest_rules', False):
-        return suggest.do_rules(pwork)
+        return suggest_rules.do_rules(pwork)
 
     if getattr(args, 'suggest', False):
         return suggest.do_suggest(args, pwork, cser, _own_emails(args),
                                   own_db or cser.db)
+
+    if getattr(args, 'explain', None):
+        link = args.explain
+        if isinstance(pwork, lorelist.LoreList):
+            link = lorelist.parse_link(link)
+        return explain.do_explain(args, pwork, cser, _own_emails(args),
+                                  own_db or cser.db, link)
 
     has_patch = getattr(args, 'patch', None)
     has_patch_title = getattr(args, 'patch_title', None)

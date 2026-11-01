@@ -742,6 +742,43 @@ class LoreList(patchwork.SeriesFinder):  # pylint: disable=R0902,R0904
                 cache.put(self.url, subpath, data)
         return data
 
+    async def earlier_series(self, client, project, addr, before):
+        """Find the series which someone sent to the list before a date
+
+        Only the newest FEED_PAGE patches and cover letters are read. Once
+        some are found they are kept for good, since none goes away
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            project (str): Project link name (not used)
+            addr (str): Address of the submitter
+            before (str): Date, in ISO format
+
+        Returns:
+            list of dict: Series, newest first, as from get_recent_series(),
+                not completed from their threads
+
+        Raises:
+            ValueError: Lore cannot be searched
+        """
+        del project
+        day = (before or '')[:10].replace('-', '')
+        query = f'f:{addr} AND {FEED_QUERY} AND d:..{day}'
+        subpath = f'?q={quote_plus(query)}&x=A'
+        cache = pwcache.get()
+        data = (cache.get(self.url, subpath, patchwork.EARLIER_MAX_AGE,
+                          keep=bool) if cache else None)
+        if data is None:
+            content = await self.lore.read(client, subpath, kind='search')
+            if content is None:
+                raise ValueError(f'Cannot search {self.url}')
+            data = ([ser for ser in feed_series(parse_feed(content), self.url)
+                     if (ser.get('date') or '')[:10] < before[:10]]
+                    if content else [])
+            if cache:
+                cache.put(self.url, subpath, data)
+        return data
+
     async def complete_series(self, client, ser):
         """Fill in a series which is only partly in a page of the feed
 

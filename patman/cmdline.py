@@ -969,6 +969,10 @@ def add_review_subparser(subparsers):
         help='Suggest recent series to review, by your rules in the '
              '[suggest] settings, best first, with the reasons for each')
     review.add_argument(
+        '--explain', type=str, metavar='SERIES',
+        help='Show how your rules for suggesting series score a series, '
+             'given as for -s, with what each test saw')
+    review.add_argument(
         '--limit', type=int, metavar='N',
         help="With --suggest, suggest at most N series, rather than the "
              "'limit' setting")

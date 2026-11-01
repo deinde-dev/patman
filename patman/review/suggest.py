@@ -4,32 +4,18 @@
 #
 """Suggest series to review, by your own rules
 
-Each person chooses which series to review in their own way, e.g. by the
-files a series touches, who sent it or whether anyone has reviewed it yet.
-The rules for this are in the [suggest] section of the settings, one to a
-line, each with a name of your choosing:
-
-    i2c:      path drivers/i2c/**  +3
-    newcomer: newcomer  +2
-    bots:     from *bot*@*  skip
-    limit:    8
-
-A rule's value is an optional 'not', a test, the test's arguments and then
-a score: '+N' or '-N' to add to the series' score, 'skip' to leave the
-series out or 'need' to leave it out unless the rule matches. A value of
-'off' turns off a rule of the same name from a more general section, so a
-project's section, e.g. [linux_suggest], can drop one of your general rules.
-
-The tests differ in how much they cost to run, from those which need only
-the list of series, to those which need each patch or extra requests, so the
-rules are kept in order of cost, to run the cheap ones first.
+The rules, from the [suggest] section of the settings (see suggest_rules),
+are run on the recent series, the cheap tests first: those which need only
+the list of series on every series, then those which need the patches, or
+extra requests or git, only on the series which could still be suggested.
 """
 
+import asyncio
 from collections import namedtuple
 from datetime import datetime, timedelta, timezone
 import fnmatch
 import re
-import shlex
+from types import SimpleNamespace
 
 import aiohttp
 
@@ -38,364 +24,23 @@ from u_boot_pylib import tout
 
 from patman import lorelist
 from patman import settings
+from patman.review import apply
 from patman.review import common
+from patman.review import history
 from patman.review import lookup
 from patman.review import maintainers
 from patman.review import patchdata
 from patman.review import scan
-
-# How much a test costs to run: the list of series is enough for FREE, PATCH
-# needs the patches of the series, read in one request as an mbox, and EXTRA
-# needs a request for each patch, or work in the git repo
-FREE, PATCH, EXTRA = range(3)
-
-# What each cost is called, when showing the rules
-COST_NAMES = {
-    FREE: 'From the list of series',
-    PATCH: 'From each patch',
-    EXTRA: 'With extra requests or git',
-}
-
-# The kinds of arguments which a test takes:
-#   none: no arguments
-#   globs: one or more file or address patterns, e.g. 'drivers/i2c/**'
-#   words: one or more words, e.g. 'boot:'
-#   regex: one or more regular expressions
-#   range: one number or range, e.g. '25-' (see common.split_range())
-#   roles: 'M' and 'R', or neither for both
-#   me-none: 'me' or 'none'
-#   pass-fail: 'pass' or 'fail'
-Test = namedtuple('Test', 'args,cost,patchwork,desc')
-
-TESTS = {
-    'prefix': Test('words', FREE, False,
-                   'a patch subject starts with one of these'),
-    'from': Test('globs', FREE, False,
-                 "the submitter's address or name matches"),
-    'patches': Test('range', FREE, False, 'the number of patches'),
-    'version': Test('range', FREE, False, 'the version of the series'),
-    'age': Test('range', FREE, False, 'days since the series was sent'),
-    'rfc': Test('none', FREE, False, 'the series is an RFC'),
-    'reviewed-before': Test('none', FREE, False,
-                            'you reviewed an earlier version'),
-    'state': Test('words', FREE, True,
-                  'a patch is in one of these patchwork states'),
-    'path': Test('globs', PATCH, False, 'a patch touches a matching file'),
-    'only-path': Test('globs', PATCH, False, 'every file touched matches'),
-    'lines': Test('range', PATCH, False,
-                  'the number of lines added and removed'),
-    'maintainer': Test('roles', PATCH, False,
-                       'you are in MAINTAINERS for a file touched'),
-    'word': Test('regex', PATCH, False,
-                 'the diff adds or removes a matching line'),
-    'has': Test('words', PATCH, False,
-                'a patch has one of these tags, e.g. reviewed-by'),
-    'to-me': Test('none', PATCH, False, 'you are in To: or Cc: of a patch'),
-    'no-replies': Test('range', EXTRA, False,
-                       'days since it was sent, with no replies'),
-    'fixes': Test('none', PATCH, False,
-                  'a Fixes: tag names one of your commits'),
-    'delegate': Test('me-none', EXTRA, True,
-                     'the patchwork delegate is you, or nobody'),
-    'checks': Test('pass-fail', EXTRA, True, "patchwork's CI result"),
-    'blame': Test('none', EXTRA, False, 'it changes lines you wrote'),
-    'newcomer': Test('none', EXTRA, False,
-                     'the submitter has no earlier series'),
-}
-
-# The settings in [suggest] which are not rules, with their defaults
-FIXED = {'limit': 10, 'min_score': 1, 'days': 30, 'max_reads': 30}
+from patman.review import suggest_rules
 
 # Oldest copy of the first page of recent series to use from the cache, in
 # seconds; suggestions need not be up to the minute, so the pages which the
 # inbox read in the last hour do, along with any later pages read with them
 SUGGEST_MAX_AGE = 60 * 60
 
-# A score which adds to the series' score, e.g. '+3' or '-2'
-RE_SCORE = re.compile(r'^[+-]\d+$')
-
-# A rule: its 'name', the 'test' (a key of TESTS), the test's 'args' (see
-# _parse_args()), whether the result is negated ('negate'), and the score,
-# which is an int, or 'skip' or 'need'
-Rule = namedtuple('Rule', 'name,test,args,negate,score')
-
-# The rules, in order of cost, then name, with the fixed settings
-Rules = namedtuple('Rules', 'rules,limit,min_score,days,max_reads')
-
-
-def _parse_list(test, kind, words):
-    """Parse the arguments of a test which takes a list
-
-    Args:
-        test (str): Name of the test, a key of TESTS
-        kind (str): Kind of arguments: 'globs', 'words' or 'regex'
-        words (list of str): Its arguments
-
-    Returns:
-        tuple: The arguments, as given, with words in lower case for 'has'
-            and 'state', or the compiled patterns for regex
-
-    Raises:
-        ValueError: There are no arguments, or a pattern is not valid
-    """
-    if not words:
-        raise ValueError(f"'{test}' needs at least one argument")
-    if kind == 'regex':
-        try:
-            return tuple(re.compile(word) for word in words)
-        except re.error as exc:
-            raise ValueError(f"'{test}' has a bad pattern: {exc}") from exc
-    if test in ('has', 'state'):
-        return tuple(word.lower() for word in words)
-    return tuple(words)
-
-
-def _parse_range(test, words):
-    """Parse the argument of a test which takes a range
-
-    Args:
-        test (str): Name of the test, a key of TESTS
-        words (list of str): Its arguments
-
-    Returns:
-        tuple: The two ends of the range (see common.split_range())
-
-    Raises:
-        ValueError: There is not exactly one range, or it is back to front
-    """
-    ends = len(words) == 1 and common.split_range(words[0])
-    if not ends:
-        raise ValueError(f"'{test}' needs one number or range, e.g. '5', "
-                         "'3-10', '-3' or '25-'")
-    if None not in ends and ends[0] > ends[1]:
-        raise ValueError(f"'{test}' has a range which is back to front")
-    return ends
-
-
-def _parse_args(test, words):
-    """Parse the arguments of a test
-
-    Args:
-        test (str): Name of the test, a key of TESTS
-        words (list of str): Its arguments
-
-    Returns:
-        tuple: The arguments (see _parse_list() and _parse_range()), or the
-            roles, or the one word for me-none and pass-fail
-
-    Raises:
-        ValueError: The arguments are not valid for the test
-    """
-    kind = TESTS[test].args
-    if kind == 'none':
-        if words:
-            raise ValueError(f"'{test}' takes no arguments")
-        return ()
-    if kind in ('globs', 'words', 'regex'):
-        return _parse_list(test, kind, words)
-    if kind == 'range':
-        return _parse_range(test, words)
-    if kind == 'roles':
-        roles = tuple(word.upper() for word in words)
-        if any(role not in ('M', 'R') for role in roles):
-            raise ValueError(f"'{test}' takes only M and R")
-        return roles or ('M', 'R')
-    choices = kind.split('-')
-    if len(words) != 1 or words[0].lower() not in choices:
-        raise ValueError(f"'{test}' needs {' or '.join(choices)}")
-    return (words[0].lower(),)
-
-
-def parse_rule(name, value):
-    """Parse one rule from the settings
-
-    Args:
-        name (str): Name of the rule
-        value (str): The rule, e.g. 'not path doc/** +2'
-
-    Returns:
-        Rule or None: The rule, or None if it is 'off'
-
-    Raises:
-        ValueError: The rule is not valid
-    """
-    try:
-        words = shlex.split(value)
-    except ValueError as exc:
-        raise ValueError(f"Suggest rule '{name}': {exc}") from exc
-    if words == ['off']:
-        return None
-    negate = bool(words) and words[0] == 'not'
-    if negate:
-        words = words[1:]
-    if len(words) < 2:
-        raise ValueError(f"Suggest rule '{name}' needs a test and a score, "
-                         "e.g. 'path drivers/i2c/** +3'")
-    test, *args, score = words
-    if test not in TESTS:
-        raise ValueError(f"Suggest rule '{name}' has an unknown test '{test}'"
-                         f"; use one of: {', '.join(sorted(TESTS))}")
-    if RE_SCORE.match(score):
-        score = int(score)
-    elif score not in ('skip', 'need'):
-        raise ValueError(f"Suggest rule '{name}' ends with '{score}', not a "
-                         "score: use e.g. +3 or -2, or skip or need")
-    try:
-        args = _parse_args(test, args)
-    except ValueError as exc:
-        raise ValueError(f"Suggest rule '{name}': {exc}") from exc
-    return Rule(name, test, args, negate, score)
-
-
-def _parse_fixed(name, value):
-    """Parse one of the fixed settings, e.g. 'limit'
-
-    Args:
-        name (str): Name of the setting, a key of FIXED
-        value (str): Its value
-
-    Returns:
-        int: The value
-
-    Raises:
-        ValueError: The value is not valid
-    """
-    try:
-        num = int(value)
-    except ValueError:
-        num = None
-    if num is None or (name != 'min_score' and num < 1):
-        what = 'a number' if name == 'min_score' else 'a number above 0'
-        raise ValueError(f"The suggest setting '{name}' needs {what}, not "
-                         f"'{value}'")
-    return num
-
-
-def get_rules(values=None):
-    """Get the rules for suggesting series, from the [suggest] settings
-
-    Args:
-        values (dict or None): Settings, or None to use those read from the
-            config (settings.suggest)
-
-    Returns:
-        Rules: The rules, in order of cost then name, with the fixed settings
-
-    Raises:
-        ValueError: A rule or setting is not valid
-    """
-    values = settings.suggest if values is None else values
-    fixed = dict(FIXED)
-    rules = []
-    for name, value in values.items():
-        if name in FIXED:
-            fixed[name] = _parse_fixed(name, value)
-            continue
-        rule = parse_rule(name, value)
-        if rule:
-            rules.append(rule)
-    rules.sort(key=lambda rule: (TESTS[rule.test].cost, rule.name))
-    return Rules(rules, fixed['limit'], fixed['min_score'], fixed['days'],
-                 fixed['max_reads'])
-
-
-def check_rules(rules, on_lore):
-    """Find the rules which can never match
-
-    Args:
-        rules (Rules): Rules to check
-        on_lore (bool): True if the series come from lore, which has no
-            patchwork states, delegates or checks
-
-    Returns:
-        list of str: Warnings, one for each problem found
-    """
-    warnings = []
-    if on_lore:
-        for rule in rules.rules:
-            if TESTS[rule.test].patchwork:
-                warnings.append(f"Suggest rule '{rule.name}' uses "
-                                f"'{rule.test}', which lore does not have, "
-                                'so it never matches')
-    if rules.rules and rules.min_score > 0 and not any(
-            isinstance(rule.score, int) and rule.score > 0
-            for rule in rules.rules):
-        warnings.append('No suggest rule adds to the score, so no series '
-                        f'reaches min_score {rules.min_score}')
-    return warnings
-
-
-def _show_args(rule):
-    """Show the arguments of a rule as they would be written
-
-    Args:
-        rule (Rule): Rule to show
-
-    Returns:
-        str: The arguments, e.g. 'drivers/i2c/**' or '25-'
-    """
-    kind = TESTS[rule.test].args
-    if kind == 'range':
-        start, end = rule.args
-        if start == end:
-            return str(start)
-        return f"{'' if start is None else start}-{'' if end is None else end}"
-    if kind == 'regex':
-        return shlex.join(pat.pattern for pat in rule.args)
-    return shlex.join(rule.args)
-
-
-def show_rules(rules, project):
-    """Show the rules, as understood from the settings
-
-    Args:
-        rules (Rules): Rules to show
-        project (str): Name of the project the rules are for, e.g. 'U-Boot'
-
-    Returns:
-        list of str: Lines to show
-    """
-    if not rules.rules:
-        return [f'No rules for suggesting {project} series: add them to the '
-                '[suggest] section of the settings']
-    lines = [f'Rules for suggesting {project} series:']
-    width = max(len(rule.name) for rule in rules.rules)
-    cost = None
-    for rule in rules.rules:
-        if TESTS[rule.test].cost != cost:
-            cost = TESTS[rule.test].cost
-            lines.append(f'  {COST_NAMES[cost]}:')
-        test = f"{'not ' if rule.negate else ''}{rule.test}"
-        args = _show_args(rule)
-        score = (f'{rule.score:+d}' if isinstance(rule.score, int)
-                 else rule.score)
-        lines.append(f"    {rule.name:{width}}  {test}{' ' if args else ''}"
-                     f'{args}  {score}')
-    lines.append(f'Suggest at most {rules.limit}, with a score of at least '
-                 f'{rules.min_score}, sent in the last {rules.days} days')
-    return lines
-
-
-def do_rules(pwork):
-    """Check the rules for suggesting series and show them
-
-    Args:
-        pwork (Patchwork or LoreList): Where the series come from
-
-    Returns:
-        int: 0 if the rules are valid and can match, else 1
-
-    Raises:
-        ValueError: A rule or setting is not valid
-    """
-    rules = get_rules()
-    for line in show_rules(rules, settings.review_project()):
-        print(line)
-    warnings = check_rules(rules, isinstance(pwork, lorelist.LoreList))
-    for warning in warnings:
-        tout.warning(warning)
-    return 1 if warnings or not rules.rules else 0
-
+# What reading a series' patches or its submitter's earlier series can
+# raise, e.g. when patchwork is busy, so that the series is left out
+PW_ERRORS = (ValueError, aiohttp.ClientError, asyncio.TimeoutError)
 
 # The [...] tags at the start of a subject, e.g. '[PATCH v2 1/3] '
 RE_TAGS = re.compile(r'^(\[[^]]*\]\s*)+')
@@ -416,6 +61,43 @@ Info = namedtuple('Info', 'subjects,email,who,patches,version,age,rfc,'
 # A series to suggest: the series ('pws', as from patchwork or lore), its
 # score and the reasons for it, e.g. ['i2c +3']
 Suggestion = namedtuple('Suggestion', 'pws,score,reasons')
+
+# What a test finds: whether it 'matched', and what it 'seen', to show with
+# --explain, e.g. the files which matched, or else the files touched
+Result = namedtuple('Result', 'matched,seen')
+
+# Most items to show of what a test saw, e.g. the files a series touches
+SHOW_ITEMS = 3
+
+
+def _seen(items):
+    """Show some of the items which a test saw
+
+    Args:
+        items (iterable of str): Items, e.g. files
+
+    Returns:
+        str: The first SHOW_ITEMS of them, saying how many more there are, or
+            'none' if there are none
+    """
+    items = list(items)
+    out = ', '.join(items[:SHOW_ITEMS])
+    if len(items) > SHOW_ITEMS:
+        out += f' and {len(items) - SHOW_ITEMS} more'
+    return out or 'none'
+
+
+def _found(found, others):
+    """Get the result of a test which looks for some items
+
+    Args:
+        found (list of str): Items which match
+        others (list of str): Items to show if none match, e.g. all of them
+
+    Returns:
+        Result: Matched if any item matches
+    """
+    return Result(bool(found), _seen(found or others))
 
 
 def _in_range(value, ends):
@@ -446,19 +128,62 @@ def _matches_from(pats, info):
                for text in (info.email, info.who) if text)
 
 
+# The prefix of a subject, e.g. 'boot: bootm: ' in 'boot: bootm: Fix it'
+RE_PREFIX = re.compile(r'^(?:[\w./-]+: )+')
+
+
+def _prefixes(subjects):
+    """Get the prefixes of some subjects, to show
+
+    Args:
+        subjects (list of str): Subjects, without their tags
+
+    Returns:
+        list of str: Their prefixes, e.g. 'boot: bootm:', each once
+    """
+    out = []
+    for subj in subjects:
+        match = RE_PREFIX.match(subj)
+        prefix = match.group(0).strip() if match else subj
+        if prefix not in out:
+            out.append(prefix)
+    return out
+
+
+def _yes_no(value):
+    """Show whether something is so
+
+    Args:
+        value (bool): Whether it is so
+
+    Returns:
+        str: 'yes' or 'no'
+    """
+    return 'yes' if value else 'no'
+
+
 # The tests which need only the list of series, each taking the rule's
-# arguments and the Info of a series
+# arguments and the Info of a series, and giving a Result
 FREE_TESTS = {
-    'prefix': lambda args, info: any(
-        subj.lower().startswith(word.lower())
-        for subj in info.subjects for word in args),
-    'from': _matches_from,
-    'patches': lambda args, info: _in_range(info.patches, args),
-    'version': lambda args, info: _in_range(info.version, args),
-    'age': lambda args, info: _in_range(info.age, args),
-    'rfc': lambda args, info: info.rfc,
-    'reviewed-before': lambda args, info: info.reviewed_before,
-    'state': lambda args, info: any(state in args for state in info.states),
+    'prefix': lambda args, info: _found(
+        _prefixes([subj for subj in info.subjects
+                   if any(subj.lower().startswith(word.lower())
+                          for word in args)]), _prefixes(info.subjects)),
+    'from': lambda args, info: Result(_matches_from(args, info),
+                                      info.email or info.who or 'none'),
+    'patches': lambda args, info: Result(_in_range(info.patches, args),
+                                         str(info.patches)),
+    'version': lambda args, info: Result(_in_range(info.version, args),
+                                         f'v{info.version}'),
+    'age': lambda args, info: Result(
+        _in_range(info.age, args),
+        f"{info.age} day{'s' if info.age != 1 else ''}"),
+    'rfc': lambda args, info: Result(info.rfc, _yes_no(info.rfc)),
+    'reviewed-before': lambda args, info: Result(
+        info.reviewed_before, _yes_no(info.reviewed_before)),
+    'state': lambda args, info: _found(
+        sorted({state for state in info.states if state in args}),
+        sorted(set(info.states))),
 }
 
 
@@ -527,7 +252,7 @@ def score_series(rules, info, tests):
     score = 0
     reasons = []
     for rule in rules:
-        matched = tests[rule.test](rule.args, info) != rule.negate
+        matched = tests[rule.test](rule.args, info).matched != rule.negate
         if rule.score == 'skip':
             if matched:
                 return None
@@ -581,25 +306,88 @@ def _reviewed(pws, cser, by_key):
         cser.db.series_get_max_version(earlier) or 0) < version
 
 
+def _paths(pats, info):
+    """Find the files which some patterns match
+
+    Args:
+        pats (tuple of str): Patterns, as for patchdata.glob_match()
+        info (patchdata.PatchInfo): The series
+
+    Returns:
+        list of str: Files touched which match one of them
+    """
+    return [name for name in info.files
+            if any(patchdata.glob_match(pat, name) for pat in pats)]
+
+
+def _only_paths(pats, info):
+    """Check whether every file touched matches some patterns
+
+    Args:
+        pats (tuple of str): Patterns, as for patchdata.glob_match()
+        info (patchdata.PatchInfo): The series
+
+    Returns:
+        Result: Matched if all do, showing those which do not
+    """
+    others = [name for name in info.files if name not in _paths(pats, info)]
+    return Result(bool(info.files) and not others,
+                  _seen(others or info.files))
+
+
 # The tests which need the patches, each taking the rule's arguments and
-# the patchdata.PatchInfo of a series
+# the patchdata.PatchInfo of a series, and giving a Result
 PATCH_TESTS = {
-    'path': lambda args, info: any(patchdata.glob_match(pat, name)
-                                   for pat in args for name in info.files),
-    'only-path': lambda args, info: bool(info.files) and all(
-        any(patchdata.glob_match(pat, name) for pat in args)
-        for name in info.files),
-    'lines': lambda args, info: _in_range(len(info.changed), args),
-    'maintainer': lambda args, info: bool(set(args) & info.roles),
-    'word': lambda args, info: any(pat.search(line) for pat in args
-                                   for line in info.changed),
-    'has': lambda args, info: bool(set(args) & info.tags),
-    'to-me': lambda args, info: info.to_me,
+    'path': lambda args, info: _found(_paths(args, info), info.files),
+    'only-path': _only_paths,
+    'lines': lambda args, info: Result(_in_range(len(info.changed), args),
+                                       f'{len(info.changed)} lines'),
+    'maintainer': lambda args, info: Result(bool(set(args) & info.roles),
+                                            _seen(sorted(info.roles))),
+    'word': lambda args, info: _found(
+        [line.strip() for line in info.changed
+         if any(pat.search(line) for pat in args)],
+        [f'{len(info.changed)} lines']),
+    'has': lambda args, info: _found(sorted(set(args) & info.tags),
+                                     sorted(info.tags)),
+    'to-me': lambda args, info: Result(info.to_me, _yes_no(info.to_me)),
+    'fixes': lambda args, info: _found(info.own_fixes, info.fixes),
 }
+
+# What the tests which need extra requests or git know about a series:
+#   blame (dict): Lines you wrote among those it changes (see
+#       history.blame_mine())
+#   newcomer (bool): True if its submitter has sent no earlier series
+#   how (str): How that was decided, e.g. 'has commits in the tree'
+Extra = namedtuple('Extra', 'blame,newcomer,how')
+
+# The tests which need extra requests or git, each taking the rule's
+# arguments and the Extra of a series, and giving a Result
+EXTRA_TESTS = {
+    'blame': lambda args, extra: Result(bool(extra.blame), _seen(
+        f'{count} in {fname}' for fname, count in extra.blame.items())),
+    'newcomer': lambda args, extra: Result(extra.newcomer, extra.how),
+}
+
+# Every test which can be run
+ALL_TESTS = {**FREE_TESTS, **PATCH_TESTS, **EXTRA_TESTS}
 
 # A series which the free tests leave in the running: the series ('pws'),
 # its score and reasons so far, and the best score it could reach
 Candidate = namedtuple('Candidate', 'pws,score,reasons,best')
+
+
+def _gain(rules):
+    """Get the most which some rules can add to a score
+
+    Args:
+        rules (list of Rule): Rules
+
+    Returns:
+        int: Total of their positive scores
+    """
+    return sum(rule.score for rule in rules
+               if isinstance(rule.score, int) and rule.score > 0)
 
 
 class Suggester:  # pylint: disable=R0902
@@ -607,8 +395,9 @@ class Suggester:  # pylint: disable=R0902
 
     The free tests are run on every recent series. The series which could
     still reach min_score are then taken in order of the best score they
-    could reach, and their patches read for the other tests, stopping once
-    no series left could get into the top 'limit', or max_reads series have
+    could reach, and their patches read for the tests which need them, then
+    the tests which need extra requests or git are run, stopping once no
+    series left could get into the top 'limit', or max_reads series have
     been read
 
     Properties:
@@ -619,14 +408,18 @@ class Suggester:  # pylint: disable=R0902
         own_db (Database): Database holding your own series
         now (datetime): The time now, with its time zone
         limit (int): Most series to suggest
+        upstream (str or None): Branch to use for the history of the tree,
+            for a series with no base-commit which is in the repo
         reads (int): Number of series whose patches were read
         complete (bool): True if every series in the running was scored,
             False if some were left since they could not get into the top
             'limit', or max_reads was reached
         sections (list of Section or None): MAINTAINERS sections, once read
+        series (list of dict): The recent series, once candidates() has run
     """
     # pylint: disable-next=R0913
-    def __init__(self, rules, pwork, cser, emails, own_db, now, limit):
+    def __init__(self, rules, pwork, cser, emails, own_db, now, limit,
+                 upstream=None):
         self.rules = rules
         self.pwork = pwork
         self.cser = cser
@@ -634,9 +427,14 @@ class Suggester:  # pylint: disable=R0902
         self.own_db = own_db
         self.now = now
         self.limit = limit
+        self.upstream = upstream
         self.reads = 0
         self.complete = True
         self.sections = None
+        self.series = []
+        self._top = None
+        self._authors = None
+        self._keys = None
 
     def _rules(self, tests):
         """Get the rules whose tests are in a set
@@ -648,6 +446,62 @@ class Suggester:  # pylint: disable=R0902
             list of Rule: The rules
         """
         return [rule for rule in self.rules.rules if rule.test in tests]
+
+    def _uses(self, test):
+        """Check whether a rule uses a test
+
+        Args:
+            test (str): Test, e.g. 'blame'
+
+        Returns:
+            bool: True if one does
+        """
+        return any(rule.test == test for rule in self.rules.rules)
+
+    def needs_patches(self):
+        """Check whether the rules need the patches of a series
+
+        Returns:
+            bool: True if they do
+        """
+        return bool(self._rules(PATCH_TESTS)) or self._uses('blame')
+
+    def git_dir(self):
+        """Get the top of the git repo, for the tests which need it
+
+        Returns:
+            str: Directory
+        """
+        if self._top is None:
+            self._top = gitutil.get_top_level() or '.'
+        return self._top
+
+    def free_info(self, pws):
+        """Get what the free tests know about a series
+
+        Args:
+            pws (dict): Series, as from patchwork or lore
+
+        Returns:
+            tuple:
+                bool: True if you have reviewed this version
+                Info: What is known
+        """
+        done, before = _reviewed(pws, self.cser, self._by_key())
+        states = self.pwork.get_states([pat['id'] for pat in
+                                        pws.get('patches') or []])
+        return done, series_info(pws, self.now, before,
+                                 list(states.values()))
+
+    def _by_key(self):
+        """Get the series ID for each b4 key, reading them the first time
+
+        Returns:
+            dict: As from lookup.b4_series()
+        """
+        if self._keys is None:
+            self._keys = lookup.b4_series(self.cser.db)
+        return self._keys
 
     def candidates(self, series):
         """Run the free tests on recent series
@@ -663,28 +517,24 @@ class Suggester:  # pylint: disable=R0902
             list of Candidate: Series still in the running, those which
                 could reach the highest score first, then the newest
         """
+        self.series = series
         free = self._rules(FREE_TESTS)
-        gain = sum(rule.score for rule in self._rules(PATCH_TESTS)
-                   if isinstance(rule.score, int) and rule.score > 0)
-        by_key = lookup.b4_series(self.cser.db)
+        gain = _gain(self._rules(PATCH_TESTS) + self._rules(EXTRA_TESTS))
         found = []
         for pws in _newest(series):
             if lookup.is_own_series(pws, self.emails, self.own_db):
                 continue
-            done, before = _reviewed(pws, self.cser, by_key)
+            done, info = self.free_info(pws)
             if done:
                 continue
-            states = self.pwork.get_states([pat['id'] for pat in
-                                            pws.get('patches') or []])
-            result = score_series(free, series_info(
-                pws, self.now, before, list(states.values())), FREE_TESTS)
+            result = score_series(free, info, FREE_TESTS)
             if result and result[0] + gain >= self.rules.min_score:
                 found.append(Candidate(pws, *result, result[0] + gain))
         found.sort(key=lambda cand: (cand.best, cand.pws.get('date') or ''),
                    reverse=True)
         return found
 
-    async def _patch_info(self, client, pws):
+    async def patch_info(self, client, pws):
         """Read the patches of a series and find what the tests need
 
         Args:
@@ -697,15 +547,168 @@ class Suggester:  # pylint: disable=R0902
         Raises:
             ValueError: The patches cannot be read
         """
-        if self.sections is None and any(
-                rule.test == 'maintainer' for rule in self.rules.rules):
-            self.sections = maintainers.read(gitutil.get_top_level() or '.')
+        if self.sections is None and self._uses('maintainer'):
+            self.sections = maintainers.read(self.git_dir())
         self.reads += 1
         mbox = await self.pwork.get_series_mbox(client, str(pws['id']))
-        return patchdata.patch_info(mbox, self.emails, self.sections)
+        info = patchdata.patch_info(mbox, self.emails, self.sections)
+        if info.fixes and self._uses('fixes'):
+            info = info._replace(own_fixes=history.own_commits(
+                self.git_dir(), info.fixes, self.emails))
+        return info
+
+    async def _newcomer(self, client, pws):
+        """Check whether the submitter of a series has sent one before
+
+        Earlier versions of the series do not count. The recent series and
+        the history of the tree are looked at first, since they need no
+        request
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            pws (dict): Series, as from patchwork or lore
+
+        Returns:
+            tuple:
+                bool: True if the submitter is new
+                str: How that was decided
+
+        Raises:
+            ValueError: The earlier series cannot be read
+        """
+        addr = ((pws.get('submitter') or {}).get('email') or '').lower()
+        if not addr:
+            return False, 'no address'
+        name = lookup.clean_series_name(pws.get('name') or '').lower()
+        date = pws.get('date') or ''
+
+        def _other(ser):
+            return lookup.clean_series_name(
+                ser.get('name') or '').lower() != name
+
+        for ser in self.series:
+            if (((ser.get('submitter') or {}).get('email') or '').lower() ==
+                    addr and (ser.get('date') or '') < date and _other(ser)):
+                return False, f"sent '{ser.get('name')}'"
+        if self._authors is None:
+            self._authors = history.authors(self.git_dir(),
+                                            self.upstream or 'HEAD')
+        if addr in self._authors:
+            return False, 'has commits in the tree'
+        earlier = await self.pwork.earlier_series(
+            client, self.pwork.link_name, addr, date)
+        earlier = [ser for ser in earlier if _other(ser)]
+        if earlier:
+            return False, f"sent '{earlier[0].get('name')}'"
+        return True, 'no earlier series'
+
+    async def extra(self, client, pws, info):
+        """Find what the tests which need extra requests or git need
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            pws (dict): Series, as from patchwork or lore
+            info (patchdata.PatchInfo or None): Its patches, if read
+
+        Returns:
+            Extra: What is known
+
+        Raises:
+            ValueError: Something which is needed cannot be read
+        """
+        blame = {}
+        if info and info.removed and self._uses('blame'):
+            top = self.git_dir()
+            ref = (info.base if info.base and history.ref_exists(
+                top, info.base) else self.upstream)
+            if ref:
+                blame = history.blame_mine(top, ref, info.removed,
+                                           self.emails)
+        newcomer, how = False, ''
+        if self._uses('newcomer'):
+            newcomer, how = await self._newcomer(client, pws)
+        return Extra(blame, newcomer, how)
+
+    def _could_place(self, found, best):
+        """Check whether a series could get into the top 'limit'
+
+        Args:
+            found (list of Suggestion): Series found so far
+            best (int): Best score the series could reach
+
+        Returns:
+            bool: True if it could
+        """
+        scores = sorted((sug.score for sug in found), reverse=True)
+        return len(scores) < self.limit or best >= scores[self.limit - 1]
+
+    async def _score(self, client, cand, found):
+        """Run the tests which need the patches, or more, on a candidate
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            cand (Candidate): Candidate, from candidates()
+            found (list of Suggestion): Series found so far
+
+        Returns:
+            Suggestion or None: The series, if it reaches min_score
+        """
+        info = None
+        if self.needs_patches():
+            try:
+                info = await self.patch_info(client, cand.pws)
+            except PW_ERRORS as exc:
+                tout.warning(f"Cannot read the patches of "
+                             f"'{cand.pws.get('name')}': {exc}")
+                return None
+        result = score_series(self._rules(PATCH_TESTS), info, PATCH_TESTS)
+        if not result:
+            return None
+        score = cand.score + result[0]
+        reasons = cand.reasons + result[1]
+        if self._rules(EXTRA_TESTS):
+            result = await self._score_extra(client, cand.pws, info, score,
+                                             found)
+            if not result:
+                return None
+            score += result[0]
+            reasons = reasons + result[1]
+        return (Suggestion(cand.pws, score, reasons)
+                if score >= self.rules.min_score else None)
+
+    # pylint: disable-next=R0913
+    async def _score_extra(self, client, pws, info, score, found):
+        """Run the tests which need extra requests or git on a series
+
+        They are not run if the series could not be suggested anyway
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            pws (dict): Series, as from patchwork or lore
+            info (patchdata.PatchInfo or None): Its patches, if read
+            score (int): Its score from the other tests
+            found (list of Suggestion): Series found so far
+
+        Returns:
+            tuple or None: As for score_series(), or None if the series is
+                left out
+        """
+        rules = self._rules(EXTRA_TESTS)
+        best = score + _gain(rules)
+        if best < self.rules.min_score:
+            return None
+        if not self._could_place(found, best):
+            self.complete = False
+            return None
+        try:
+            extra = await self.extra(client, pws, info)
+        except PW_ERRORS as exc:
+            tout.warning(f"Cannot check '{pws.get('name')}': {exc}")
+            return None
+        return score_series(rules, extra, EXTRA_TESTS)
 
     async def _finish(self, cands):
-        """Run the tests which need the patches, for the best candidates
+        """Run the tests which need the patches, or more, for the best
 
         Args:
             cands (list of Candidate): Candidates, from candidates()
@@ -713,32 +716,23 @@ class Suggester:  # pylint: disable=R0902
         Returns:
             list of Suggestion: Series which reach min_score
         """
-        rules = self._rules(PATCH_TESTS)
         found = []
         async with aiohttp.ClientSession() as client:
             for cand in cands:
-                scores = sorted((sug.score for sug in found), reverse=True)
-                if len(scores) >= self.limit and (
-                        cand.best < scores[self.limit - 1]):
+                if not self._could_place(found, cand.best):
                     self.complete = False
                     break
-                if self.reads >= self.rules.max_reads:
+                if self.needs_patches() and (
+                        self.reads >= self.rules.max_reads):
                     tout.warning(
                         f'Read the patches of {self.reads} series, the most '
                         "for one run (the 'max_reads' setting); the others "
                         'are left out')
                     self.complete = False
                     break
-                try:
-                    info = await self._patch_info(client, cand.pws)
-                except ValueError as exc:
-                    tout.warning(f"Cannot read the patches of "
-                                 f"'{cand.pws.get('name')}': {exc}")
-                    continue
-                result = score_series(rules, info, PATCH_TESTS)
-                if result and cand.score + result[0] >= self.rules.min_score:
-                    found.append(Suggestion(cand.pws, cand.score + result[0],
-                                            cand.reasons + result[1]))
+                sug = await self._score(client, cand, found)
+                if sug:
+                    found.append(sug)
         return found
 
     def find(self, series):
@@ -752,7 +746,7 @@ class Suggester:  # pylint: disable=R0902
                 then the newest
         """
         cands = self.candidates(series)
-        if self._rules(PATCH_TESTS):
+        if self._rules(PATCH_TESTS) or self._rules(EXTRA_TESTS):
             found = common.run(self._finish(cands))
         else:
             found = [Suggestion(cand.pws, cand.score, cand.reasons)
@@ -760,6 +754,21 @@ class Suggester:  # pylint: disable=R0902
         found.sort(key=lambda sug: (sug.score, sug.pws.get('date') or ''),
                    reverse=True)
         return found
+
+
+def series_title(pws):
+    """Show the name of a series, with its version and number of patches
+
+    Args:
+        pws (dict): Series, as from patchwork or lore
+
+    Returns:
+        str: e.g. 'i2c: Add a driver (v2, 3 patches)'
+    """
+    count = pws.get('total') or len(pws.get('patches') or [])
+    name = lookup.clean_series_name(pws.get('name') or '')
+    return (f"{name} (v{pws.get('version') or 1}, {count} "
+            f"patch{'es' if count != 1 else ''})")
 
 
 # pylint: disable-next=R0913
@@ -781,12 +790,8 @@ def show_suggestions(found, total, limit, urls, reads=0, complete=True):
     """
     lines = []
     for sug in found[:limit]:
-        pws = sug.pws
-        count = pws.get('total') or len(pws.get('patches') or [])
-        name = lookup.clean_series_name(pws.get('name') or '')
-        lines.append(f"{sug.score:3}  {name} (v{pws.get('version') or 1}, "
-                     f"{count} patch{'es' if count != 1 else ''})")
-        lines.append(f"       {urls[str(pws['id'])]}")
+        lines.append(f'{sug.score:3}  {series_title(sug.pws)}')
+        lines.append(f"       {urls[str(sug.pws['id'])]}")
         if sug.reasons:
             lines.append(f"       {', '.join(sug.reasons)}")
     shown = min(len(found), limit)
@@ -799,6 +804,29 @@ def show_suggestions(found, total, limit, urls, reads=0, complete=True):
         summary += f'; {len(found) - limit} more, which --limit can show'
     lines.append(summary)
     return lines
+
+
+def upstream_ref(args, cser, rules):
+    """Get the branch to use for the history of the tree, if the rules need it
+
+    The 'blame' test uses it for a series with no base-commit in the repo,
+    and the 'newcomer' test for the authors of the commits in the tree
+
+    Args:
+        args (Namespace): Command-line arguments, for base_branch and
+            upstream, if given
+        cser (Cseries): Open cseries instance, for the default upstream
+        rules (Rules): Rules to use
+
+    Returns:
+        str or None: Branch, e.g. 'us/next', or None if no rule needs it
+    """
+    if not any(rule.test in ('blame', 'newcomer') for rule in rules.rules):
+        return None
+    ref = apply.get_upstream_branch(SimpleNamespace(
+        base_branch=getattr(args, 'base_branch', None),
+        upstream=getattr(args, 'upstream', None)), cser)
+    return ref if history.ref_exists('.', ref) else 'HEAD'
 
 
 def _read_recent(pwork, since):
@@ -852,21 +880,22 @@ def do_suggest(args, pwork, cser, own_emails, own_db):
         ValueError: A rule or setting is not valid, or the series cannot be
             read
     """
-    rules = get_rules()
+    rules = suggest_rules.get_rules()
     if not rules.rules:
-        tout.error(show_rules(rules, settings.review_project())[0])
+        tout.error(suggest_rules.show_rules(rules, settings.review_project())[0])
         return 1
-    for warning in check_rules(rules, isinstance(pwork, lorelist.LoreList)):
+    for warning in suggest_rules.check_rules(rules, isinstance(pwork, lorelist.LoreList)):
         tout.warning(warning)
     for rule in rules.rules:
-        if rule.test not in FREE_TESTS and rule.test not in PATCH_TESTS:
+        if rule.test not in ALL_TESTS:
             tout.warning(f"Suggest rule '{rule.name}' uses '{rule.test}', "
                          'which --suggest does not run yet, so it is left out')
     now = datetime.now(timezone.utc)
     series = _read_recent(pwork, (now - timedelta(days=rules.days)).strftime(
         '%Y-%m-%d'))
     limit = getattr(args, 'limit', None) or rules.limit
-    sug = Suggester(rules, pwork, cser, own_emails, own_db, now, limit)
+    sug = Suggester(rules, pwork, cser, own_emails, own_db, now, limit,
+                    upstream_ref(args, cser, rules))
     found = sug.find(series)
     for line in show_suggestions(found, len(series), limit,
                                  _series_urls(pwork, found[:limit]),
