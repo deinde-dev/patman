@@ -965,6 +965,14 @@ def add_review_subparser(subparsers):
              'received, in all and for each of the last WEEKS weeks '
              '(default: 8)')
     review.add_argument(
+        '--suggest', action='store_true',
+        help='Suggest recent series to review, by your rules in the '
+             '[suggest] settings, best first, with the reasons for each')
+    review.add_argument(
+        '--limit', type=int, metavar='N',
+        help="With --suggest, suggest at most N series, rather than the "
+             "'limit' setting")
+    review.add_argument(
         '--suggest-rules', action='store_true',
         help='Check your rules for suggesting series to review, from the '
              '[suggest] settings, and show them as understood')

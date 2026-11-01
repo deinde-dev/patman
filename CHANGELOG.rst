@@ -13,7 +13,10 @@ Added
 - Rules for suggesting series to review, in a new ``[suggest]`` section of
   the settings, with tests such as the files a series touches, who sent it
   and whether it has been reviewed, each adding to a score. ``patman review
-  --suggest-rules`` checks them and shows them as understood.
+  --suggest-rules`` checks them and shows them as understood. ``patman review
+  --suggest`` lists the recent series which the rules suggest, best first,
+  with the link and the reasons for each, using the tests which need only the
+  list of series.
 - Reviewing a series from the inbox of ``patman serve`` can review only some
   of its patches, given in a box beside the context for the agent.
 - A patch selection, as given to ``patman review -i`` or ``patman maint apply

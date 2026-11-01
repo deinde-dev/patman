@@ -1220,6 +1220,10 @@ def do_review(args, pwork, cser, own_db=None):
     if getattr(args, 'suggest_rules', False):
         return suggest.do_rules(pwork)
 
+    if getattr(args, 'suggest', False):
+        return suggest.do_suggest(args, pwork, cser, _own_emails(args),
+                                  own_db or cser.db)
+
     has_patch = getattr(args, 'patch', None)
     has_patch_title = getattr(args, 'patch_title', None)
     if not args.pw_link and not args.title and not has_patch and \

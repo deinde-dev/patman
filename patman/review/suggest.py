@@ -26,14 +26,20 @@ rules are kept in order of cost, to run the cheap ones first.
 """
 
 from collections import namedtuple
+from datetime import datetime, timedelta, timezone
+import fnmatch
 import re
 import shlex
+
+import aiohttp
 
 from u_boot_pylib import tout
 
 from patman import lorelist
 from patman import settings
 from patman.review import common
+from patman.review import lookup
+from patman.review import scan
 
 # How much a test costs to run: the list of series is enough for FREE, PATCH
 # needs each patch of the series, and EXTRA needs another request, or work
@@ -380,3 +386,328 @@ def do_rules(pwork):
     for warning in warnings:
         tout.warning(warning)
     return 1 if warnings or not rules.rules else 0
+
+
+# The [...] tags at the start of a subject, e.g. '[PATCH v2 1/3] '
+RE_TAGS = re.compile(r'^(\[[^]]*\]\s*)+')
+
+# What the tests which need only the list of series know about a series:
+#   subjects (list of str): Subjects of its patches, without their tags
+#   email (str): Submitter's address, in lower case
+#   who (str): Submitter's name, in lower case
+#   patches (int): Number of patches
+#   version (int): Version of the series
+#   age (int): Whole days since it was sent
+#   rfc (bool): True if it is an RFC
+#   reviewed_before (bool): True if you reviewed an earlier version
+#   states (list of str): Patchwork states of its patches, where known
+Info = namedtuple('Info', 'subjects,email,who,patches,version,age,rfc,'
+                          'reviewed_before,states')
+
+# A series to suggest: the series ('pws', as from patchwork or lore), its
+# score and the reasons for it, e.g. ['i2c +3']
+Suggestion = namedtuple('Suggestion', 'pws,score,reasons')
+
+
+def _in_range(value, ends):
+    """Check whether a number is in a range from a rule
+
+    Args:
+        value (int): Number to check
+        ends (tuple): Start and end, either of which may be None for none
+
+    Returns:
+        bool: True if it is in the range
+    """
+    start, end = ends
+    return (start is None or value >= start) and (end is None or value <= end)
+
+
+def _matches_from(pats, info):
+    """Check whether the submitter matches any of some patterns
+
+    Args:
+        pats (tuple of str): Patterns, for the address or the name
+        info (Info): The series
+
+    Returns:
+        bool: True if the address or name matches one of them
+    """
+    return any(fnmatch.fnmatchcase(text, pat.lower()) for pat in pats
+               for text in (info.email, info.who) if text)
+
+
+# The tests which need only the list of series, each taking the rule's
+# arguments and the Info of a series
+FREE_TESTS = {
+    'prefix': lambda args, info: any(
+        subj.lower().startswith(word.lower())
+        for subj in info.subjects for word in args),
+    'from': _matches_from,
+    'patches': lambda args, info: _in_range(info.patches, args),
+    'version': lambda args, info: _in_range(info.version, args),
+    'age': lambda args, info: _in_range(info.age, args),
+    'rfc': lambda args, info: info.rfc,
+    'reviewed-before': lambda args, info: info.reviewed_before,
+    'state': lambda args, info: any(state in args for state in info.states),
+}
+
+
+def _age_days(date, now):
+    """Get the whole days since a series was sent
+
+    Args:
+        date (str): When it was sent, in ISO format, in UTC if it gives no
+            time zone, as lore and some patchwork servers do
+        now (datetime): The time now, with its time zone
+
+    Returns:
+        int: Days since then, or 0 if the date is not known
+    """
+    try:
+        when = datetime.fromisoformat((date or '').replace('Z', '+00:00'))
+    except ValueError:
+        return 0
+    if not when.tzinfo:
+        when = when.replace(tzinfo=timezone.utc)
+    return max((now - when).days, 0)
+
+
+def series_info(pws, now, reviewed_before, states):
+    """Get what the free tests need to know about a series
+
+    Args:
+        pws (dict): Series, as from patchwork or lore
+        now (datetime): The time now, with its time zone
+        reviewed_before (bool): True if you reviewed an earlier version
+        states (list of str): Patchwork states of its patches, where known
+
+    Returns:
+        Info: What is known
+    """
+    patches = pws.get('patches') or []
+    names = [pat.get('name') or '' for pat in patches]
+    cover = (pws.get('cover_letter') or {}).get('name') or ''
+    sub = pws.get('submitter') or {}
+    tags = ' '.join(RE_TAGS.match(name).group(0)
+                    for name in (cover, pws.get('name') or '', *names)
+                    if RE_TAGS.match(name))
+    return Info(
+        [RE_TAGS.sub('', name).strip() for name in names] or
+        [RE_TAGS.sub('', pws.get('name') or '').strip()],
+        (sub.get('email') or '').lower(), (sub.get('name') or '').lower(),
+        pws.get('total') or len(patches), int(pws.get('version') or 1),
+        _age_days(pws.get('date'), now),
+        bool(re.search(r'\bRFC\b', tags, re.I)), reviewed_before, states)
+
+
+def score_series(rules, info):
+    """Work out the score of a series, by the rules
+
+    Args:
+        rules (list of Rule): Rules to use, each with a test in FREE_TESTS
+        info (Info): The series
+
+    Returns:
+        tuple or None: None if a rule leaves the series out, else:
+            int: Its score
+            list of str: Reasons for the score, e.g. ['i2c +3']
+    """
+    score = 0
+    reasons = []
+    for rule in rules:
+        matched = FREE_TESTS[rule.test](rule.args, info) != rule.negate
+        if rule.score == 'skip':
+            if matched:
+                return None
+        elif rule.score == 'need':
+            if not matched:
+                return None
+        elif matched:
+            score += rule.score
+            reasons.append(f'{rule.name} {rule.score:+d}')
+    return score, reasons
+
+
+def _newest(series):
+    """Keep only the newest version of each series
+
+    Args:
+        series (list of dict): Series, as from patchwork or lore
+
+    Returns:
+        list of dict: The newest version of each, in the same order
+    """
+    newest = {}
+    for pws in series:
+        key = lookup.clean_series_name(pws.get('name') or '').lower()
+        if int(pws.get('version') or 1) > int(
+                (newest.get(key) or {}).get('version') or 0):
+            newest[key] = pws
+    keep = {id(pws) for pws in newest.values()}
+    return [pws for pws in series if id(pws) in keep]
+
+
+def _reviewed(pws, cser, by_key):
+    """Check what you have reviewed of a series
+
+    Args:
+        pws (dict): Series, as from patchwork or lore
+        cser (Cseries): Open cseries instance with the reviews
+        by_key (dict): Series ID for each b4 key, from lookup.b4_series()
+
+    Returns:
+        tuple:
+            bool: True if you have reviewed this version
+            bool: True if you have reviewed an earlier version
+    """
+    version = int(pws.get('version') or 1)
+    existing = cser.db.series_find_by_link(str(pws['id']))
+    if existing and cser.db.review_get_for_version(existing[3]):
+        return True, False
+    earlier = scan.find_reviewed(cser, pws, by_key)
+    return False, bool(earlier) and (
+        cser.db.series_get_max_version(earlier) or 0) < version
+
+
+# pylint: disable-next=R0913
+def find_suggestions(rules, series, pwork, cser, own_emails, own_db, now):
+    """Find the series to suggest, of those sent recently
+
+    Your own series are left out, as are those you have already reviewed at
+    this version, and older versions of a series
+
+    Args:
+        rules (Rules): Rules to use, keeping only those in FREE_TESTS
+        series (list of dict): Recent series, as from patchwork or lore
+        pwork (Patchwork or LoreList): Where the series come from
+        cser (Cseries): Open cseries instance with the reviews
+        own_emails (set of str): Your email addresses, in lower case
+        own_db (Database): Database holding your own series
+        now (datetime): The time now, with its time zone
+
+    Returns:
+        list of Suggestion: Every series which reaches min_score, the best
+            first, then the newest
+    """
+    usable = [rule for rule in rules.rules if rule.test in FREE_TESTS]
+    by_key = lookup.b4_series(cser.db)
+    found = []
+    for pws in _newest(series):
+        if lookup.is_own_series(pws, own_emails, own_db):
+            continue
+        done, before = _reviewed(pws, cser, by_key)
+        if done:
+            continue
+        states = pwork.get_states([pat['id']
+                                   for pat in pws.get('patches') or []])
+        result = score_series(usable, series_info(pws, now, before,
+                                                  list(states.values())))
+        if result and result[0] >= rules.min_score:
+            found.append(Suggestion(pws, *result))
+    found.sort(key=lambda sug: (sug.score, sug.pws.get('date') or ''),
+               reverse=True)
+    return found
+
+
+def show_suggestions(found, total, limit, urls):
+    """Show the series to suggest
+
+    Args:
+        found (list of Suggestion): Series to suggest, the best first
+        total (int): Number of recent series looked at
+        limit (int): Most series to show
+        urls (dict): key (str): Series link
+            value (str): URL of the series
+
+    Returns:
+        list of str: Lines to show
+    """
+    lines = []
+    for sug in found[:limit]:
+        pws = sug.pws
+        count = pws.get('total') or len(pws.get('patches') or [])
+        name = lookup.clean_series_name(pws.get('name') or '')
+        lines.append(f"{sug.score:3}  {name} (v{pws.get('version') or 1}, "
+                     f"{count} patch{'es' if count != 1 else ''})")
+        lines.append(f"       {urls[str(pws['id'])]}")
+        if sug.reasons:
+            lines.append(f"       {', '.join(sug.reasons)}")
+    shown = min(len(found), limit)
+    summary = f'{shown} of {total} recent series suggested'
+    if len(found) > limit:
+        summary += (f'; {len(found) - limit} more with lower scores, which '
+                    '--limit can show')
+    lines.append(summary)
+    return lines
+
+
+def _read_recent(pwork, since):
+    """Read the series sent recently
+
+    Args:
+        pwork (Patchwork or LoreList): Where the series come from
+        since (str): Date to start from, as YYYY-MM-DD
+
+    Returns:
+        list of dict: Series, newest first, as from patchwork or lore
+    """
+    async def _read():
+        async with aiohttp.ClientSession() as client:
+            return await scan.recent_series(client, pwork, since)
+
+    return common.run(_read())
+
+
+def _series_urls(pwork, found):
+    """Get the link to each of some series, on patchwork or lore
+
+    Args:
+        pwork (Patchwork or LoreList): Where the series come from
+        found (list of Suggestion): Series to link to
+
+    Returns:
+        dict: key (str): Series link
+            value (str): URL of the series
+    """
+    return {str(sug.pws['id']): common.run(pwork.get_series_url(
+        str(sug.pws['id']))) for sug in found}
+
+
+def do_suggest(args, pwork, cser, own_emails, own_db):
+    """Suggest series to review, by the rules in the settings
+
+    Args:
+        args (Namespace): Command-line arguments (for limit)
+        pwork (Patchwork or LoreList): Where the series come from
+        cser (Cseries): Open cseries instance with the reviews
+        own_emails (set of str): Your email addresses, in lower case
+        own_db (Database): Database holding your own series
+
+    Returns:
+        int: 0 on success, 1 if there are no rules
+
+    Raises:
+        ValueError: A rule or setting is not valid, or the series cannot be
+            read
+    """
+    rules = get_rules()
+    if not rules.rules:
+        tout.error(show_rules(rules, settings.review_project())[0])
+        return 1
+    for warning in check_rules(rules, isinstance(pwork, lorelist.LoreList)):
+        tout.warning(warning)
+    for rule in rules.rules:
+        if rule.test not in FREE_TESTS:
+            tout.warning(f"Suggest rule '{rule.name}' uses '{rule.test}', "
+                         'which --suggest does not run yet, so it is left out')
+    now = datetime.now(timezone.utc)
+    series = _read_recent(pwork, (now - timedelta(days=rules.days)).strftime(
+        '%Y-%m-%d'))
+    found = find_suggestions(rules, series, pwork, cser, own_emails, own_db,
+                             now)
+    limit = getattr(args, 'limit', None) or rules.limit
+    for line in show_suggestions(found, len(series), limit,
+                                 _series_urls(pwork, found[:limit])):
+        print(line)
+    return 0
