@@ -50,7 +50,7 @@ SCAN_MAX_AGE = 10 * 60
 ScanResult = namedtuple('ScanResult', 'desc,version,link,returncode,output')
 
 
-async def recent_series(client, pwork, since):
+async def recent_series(client, pwork, since, partial=False):
     """Read the series sent to patchwork since a date, newest first
 
     Pages which the inbox read recently are used from the cache. A page of
@@ -61,15 +61,31 @@ async def recent_series(client, pwork, since):
         client (aiohttp.ClientSession): Session to use
         pwork (Patchwork or LoreList): Where the series come from
         since (str): Date, as YYYY-MM-DD
+        partial (bool): True to give the series read so far, with a warning,
+            if a page after the first cannot be read, e.g. since the server
+            is busy, rather than failing
 
     Returns:
         list of dict: Series, as from Patchwork.get_recent_series()
+
+    Raises:
+        ValueError: A page cannot be read, and either it is the first or
+            'partial' is False
     """
     found = []
     lore = isinstance(pwork, lorelist.LoreList)
     for page in range(1, SCAN_MAX_PAGES + 1):
-        series = await pwork.get_recent_series(
-            client, pwork.link_name, page, SCAN_PAGE, max_age=SCAN_MAX_AGE)
+        try:
+            series = await pwork.get_recent_series(
+                client, pwork.link_name, page, SCAN_PAGE,
+                max_age=SCAN_MAX_AGE)
+        except ValueError as exc:
+            if not partial or page == 1:
+                raise
+            tout.warning(f"{exc}; using the {len(found)} series sent since "
+                         f"{(found[-1].get('date') or '')[:10]}, from the "
+                         'pages before it')
+            break
         found += series
         last = not series if lore else len(series) < SCAN_PAGE
         if last or (series[-1].get('date') or '')[:10] < since:

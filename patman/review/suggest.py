@@ -636,8 +636,7 @@ def show_suggestions(found, total, limit, urls):
     shown = min(len(found), limit)
     summary = f'{shown} of {total} recent series suggested'
     if len(found) > limit:
-        summary += (f'; {len(found) - limit} more with lower scores, which '
-                    '--limit can show')
+        summary += f'; {len(found) - limit} more, which --limit can show'
     lines.append(summary)
     return lines
 
@@ -654,7 +653,8 @@ def _read_recent(pwork, since):
     """
     async def _read():
         async with aiohttp.ClientSession() as client:
-            return await scan.recent_series(client, pwork, since)
+            return await scan.recent_series(client, pwork, since,
+                                            partial=True)
 
     return common.run(_read())
 
