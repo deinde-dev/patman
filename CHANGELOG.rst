@@ -178,6 +178,10 @@ Changed
 
 Fixed
 ~~~~~
+- 'No reply needed' on a reply drops the response and deletes its Gmail
+  draft, rather than leaving them to be drafted or sent by mistake, and is
+  offered until the response is sent. ``patman review --skip-reply ID`` does
+  the same. Saving an empty response no longer starts a draft which fails.
 - The page for a series whose reviews have all been deleted offers 'Review'
   rather than 'Review again', since there is nothing to review again.
 - The page for a review whose upstream is on lore, e.g. for dtc, links to

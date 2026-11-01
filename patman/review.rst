@@ -753,6 +753,11 @@ To see the replies which still need a response, and act on them::
     patman review --suggest-reply 12    # ask the agent (again) for a response
     patman review --draft-reply 12      # create a Gmail draft of it
     patman review --send-reply 12       # send it
+    patman review --skip-reply 12       # no response needed: drop it
+
+``--skip-reply`` drops the response and deletes its Gmail draft, if there is
+one, unless the draft has been sent from Gmail, in which case that is
+recorded instead.
 
 To have the agent change a response, say what to change with ``--revise``,
 adding ``-d`` to update its Gmail draft too::

@@ -1574,9 +1574,18 @@ class TestWebServer(unittest.TestCase, TestCommon):
              for job in reversed(srv.get_jobs())])
         self.assertEqual('Because of this', db.reply_get(first).response)
 
+        # Saving an empty response leaves nothing to draft
+        status, data = self.call(srv, 'POST', f'/api/replies/{first}',
+                                 json={'response': ' ', 'draft': True})
+        self.assertEqual((200, 'new', None),
+                         (status, data['status'], data['response']))
+
+        # Needing no response drops the response
+        db.reply_set_response(first, 'Because', database.REPLY_SUGGESTED)
+        db.commit()
         _, data = self.call(srv, 'POST', f'/api/replies/{first}',
                             json={'skip': True})
-        self.assertEqual('skip', data['status'])
+        self.assertEqual(('skip', None), (data['status'], data['response']))
         _, data = self.call(srv, 'GET', '/api/reviews')
         self.assertEqual(0, data[0]['replies_waiting'])
 
@@ -1587,6 +1596,16 @@ class TestWebServer(unittest.TestCase, TestCommon):
                                  json={'note': 'x'})
         self.assertEqual((400, 'There is no response to revise'),
                          (status, data['error']))
+
+        # With a Gmail draft, a job deletes the draft
+        db.reply_set_response(first, 'Because', database.REPLY_SUGGESTED)
+        db.reply_set_status(first, database.REPLY_DRAFT, 'd1')
+        db.commit()
+        status, data = self.call(srv, 'POST', f'/api/replies/{first}',
+                                 json={'skip': True})
+        self.assertEqual((202, f'Drop the response to reply {first}'),
+                         (status, data['title']))
+        self.assertEqual('draft', db.reply_get(first).status)
 
     def test_parallel_reviews(self):
         """Reviews of series run alongside each other, a few at once"""

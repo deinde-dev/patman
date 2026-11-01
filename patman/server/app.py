@@ -1906,15 +1906,17 @@ class Server(jobs.JobRunner):
     async def _reply(self, request):
         """Handle 'POST /api/replies/<id>': update the response to a reply
 
-        The body may give the 'response', 'skip' to skip the reply, and 'draft'
-        to create a Gmail draft of the response afterwards.
+        The body may give the 'response', 'skip' to note that the reply needs
+        no response, dropping any response, and 'draft' to create a Gmail
+        draft of the response afterwards. Skipping a reply whose response has
+        a Gmail draft runs a job, which deletes the draft.
 
         Args:
             request (web.Request): Request, with the reply ID as 'idnum'
 
         Return:
-            web.Response: Updated reply, or the state of the draft job with
-                status 202, or status 409 if the response has been sent
+            web.Response: Updated reply, or the state of the job with status
+                202, or status 409 if the response has been sent
 
         Raises:
             BadRequest: The response is invalid
@@ -1925,6 +1927,15 @@ class Server(jobs.JobRunner):
         data = await self._read_json(request)
         if reply.status == database.REPLY_SENT:
             return _already_sent('The response')
+        if data.get('skip'):
+            if reply.draft_id:
+                return self._review_job(
+                    f'Drop the response to reply {reply.idnum}',
+                    '--skip-reply', str(reply.idnum))
+            db.reply_set_response(reply.idnum, None, database.REPLY_SKIP)
+            db.reply_set_status(reply.idnum, database.REPLY_SKIP)
+            self.rcser.commit()
+            return web.json_response(info.reply_info(db.reply_get(reply.idnum)))
         if 'response' in data:
             response = data['response']
             if not isinstance(response, str):
@@ -1933,11 +1944,9 @@ class Server(jobs.JobRunner):
                 reply.idnum, response if response.strip() else None,
                 database.REPLY_SUGGESTED if response.strip() else
                 database.REPLY_NEW)
-        if data.get('skip'):
-            db.reply_set_status(reply.idnum, database.REPLY_SKIP,
-                                reply.draft_id)
         self.rcser.commit()
-        if data.get('draft'):
+        # An empty response has nothing to draft
+        if data.get('draft') and db.reply_get(reply.idnum).response:
             return self._review_job(f'Draft response to reply {reply.idnum}',
                                     '--draft-reply', str(reply.idnum))
         return web.json_response(info.reply_info(db.reply_get(reply.idnum)))

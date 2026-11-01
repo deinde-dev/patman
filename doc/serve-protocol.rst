@@ -590,12 +590,14 @@ Replies
 Change the response to a reply, given its ID. The body may have:
 
 - ``response`` (str): new response; an empty one removes it
-- ``skip`` (bool): note that no response is needed
-- ``draft`` (bool): create a Gmail draft of the response, threaded as a reply
+- ``skip`` (bool): note that no response is needed, dropping the response and
+  deleting its Gmail draft, if any; the rest of the body is then ignored
+- ``draft`` (bool): create a Gmail draft of the response, threaded as a reply;
+  an empty response has nothing to draft
 
-The response is the Reply, or with ``draft``, status 202 and the Job which
-creates the draft. Once the response has been sent, it cannot be changed,
-giving status 409.
+The response is the Reply, or status 202 and the Job which creates the draft,
+or, when skipping a response which has a draft, deletes it. Once the response
+has been sent, it cannot be changed, giving status 409.
 
 ``POST /api/replies/<id>/suggest``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

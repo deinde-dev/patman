@@ -819,6 +819,10 @@ def _add_reply_args(review):
         help='Ask the agent to change the response to a reply as the '
              '--revise note says (with -d, update its Gmail draft)')
     review.add_argument(
+        '--skip-reply', type=int, metavar='ID',
+        help='Note that a reply needs no response, dropping any response to '
+             'it and deleting its Gmail draft')
+    review.add_argument(
         '--draft-reply', type=int, metavar='ID',
         help='Create a Gmail draft of the response to a reply, threaded as a '
              'reply to it')
