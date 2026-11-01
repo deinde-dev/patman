@@ -767,6 +767,32 @@ adding ``-d`` to update its Gmail draft too::
 The agent sees your review, the reply and the response, and changes only what
 the note asks for. This works for a response to a comment, too.
 
+Talking it through
+~~~~~~~~~~~~~~~~~~
+
+To talk through a reply with the agent before deciding what to say, start a
+discussion::
+
+    patman review --discuss-reply 12
+    patman review --end-discussion 12
+
+This starts an interactive Claude session with Remote Control, named after the
+reply, in a tmux session, and gives its link, so you can use it from
+claude.ai/code or the Claude app. Where it can, it carries on from the session
+which wrote the review, in the review's worktree, so it knows the patches and
+what it found; otherwise it starts afresh in the repo. It is given your review,
+the reply, the response so far and a link to the thread.
+
+Once you agree on a response, the session stores it in patman with
+``--set-response 12 --file FILE -d``, which also puts it in a Gmail draft,
+replacing any earlier one, so it is ready to send. You can still change it as
+usual. The session stays open in case you want more
+changes, until you end it, which also removes the review's worktree if it was
+checked out for the discussion.
+
+This needs tmux, and Claude Code must trust the repo: run ``claude`` there once
+and say that you trust it, if you have not already.
+
 The draft is threaded as a reply to the reply, with a 'Re:' subject, and is
 copied to everyone the reply went to. ``--send-reply`` sends the draft as it
 is in Gmail, so any changes made there are kept, and records the text which

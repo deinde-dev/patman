@@ -46,6 +46,7 @@ def run_patman():
         from patman import test_pwcache
         from patman import test_reqlog
         from patman import test_database
+        from patman import test_discuss
         from patman import test_lore
         from patman import test_maint
         from patman import test_maint_apply
@@ -76,7 +77,8 @@ def run_patman():
              'patman.settings', test_cseries.TestCseries,
              test_cseries.TestGetUpstreamBranch, test_status.TestSeriesStatus,
              test_upstream.TestUpstream, test_workflow.TestWorkflow,
-             test_database.TestDatabase, test_review.TestReview,
+             test_database.TestDatabase, test_discuss.TestDiscuss,
+             test_review.TestReview,
              test_send.TestSend, test_settings.TestSettings,
              test_pwcache.TestPwCache, test_reqlog.TestReqLog, test_lore.TestLore,
              test_maint.TestMaint, test_maint_apply.TestMaintApply,

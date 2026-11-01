@@ -351,6 +351,12 @@ or note that no reply is needed, which drops your response and deletes its
 Gmail draft, if any. These run as jobs, but the page stays where it is, showing
 how each is getting on below the reply, then the reply again.
 
+'Discuss' starts a Claude session for talking through the reply (see
+``review --discuss-reply``), which you can use from the Claude app or
+claude.ai/code. The reply then links to the session, and shows the response
+once the session stores it, along with a Gmail draft of it, so it is ready to
+send. 'End discussion' closes the session.
+
 To respond to other comments on patchwork, tap 'Comments' under a review, or on
 the cover-letter card, to list the comments on that patch or cover letter.
 Your own comments, such as the review itself, are left out, since they need no

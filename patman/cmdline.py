@@ -823,6 +823,19 @@ def _add_reply_args(review):
         help='Note that a reply needs no response, dropping any response to '
              'it and deleting its Gmail draft')
     review.add_argument(
+        '--discuss-reply', type=int, metavar='ID',
+        help='Start a Claude session with Remote Control to talk through the '
+             'response to a reply, which stores the response once agreed')
+    review.add_argument(
+        '--end-discussion', type=int, metavar='ID',
+        help='End the discussion of a reply')
+    review.add_argument(
+        '--set-response', type=int, metavar='ID',
+        help='Store the response to a reply, read from --file')
+    review.add_argument(
+        '--file', type=str, metavar='FILE',
+        help="File holding the response for --set-response, or '-' for stdin")
+    review.add_argument(
         '--draft-reply', type=int, metavar='ID',
         help='Create a Gmail draft of the response to a reply, threaded as a '
              'reply to it')

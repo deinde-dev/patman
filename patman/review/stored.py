@@ -213,7 +213,7 @@ def _review_label(seq):
     return f'patch {seq}' if seq else 'the cover letter'
 
 
-def _review_branch(link, ups, git_dir):
+def review_branch(link, ups, git_dir):
     """Find the branch which holds the patches of a reviewed series
 
     Args:
@@ -232,7 +232,7 @@ def _review_branch(link, ups, git_dir):
     return None
 
 
-def _open_review_worktree(git_dir, branch):
+def open_review_worktree(git_dir, branch):
     """Check out a review branch in its review worktree again
 
     The agent session which wrote a review runs in the review's worktree,
@@ -284,7 +284,7 @@ def _review_commits(args, cser, link, ups):
             or an empty list if the branch is not present
     """
     git_dir = gitutil.get_top_level()
-    branch = _review_branch(link, ups, git_dir)
+    branch = review_branch(link, ups, git_dir)
     if not branch:
         return []
     bases = [apply.get_upstream_branch(args, cser)]
@@ -496,9 +496,9 @@ def _do_revise(args, pwork, cser, link):
                if len(reviews) == 1 else None)
     # Run the agent where the review ran, so that the session can be found
     git_dir, added = ctx.repo_path, False
-    branch = session and _review_branch(link, ups, git_dir)
+    branch = session and review_branch(link, ups, git_dir)
     if branch:
-        wt_path, added = _open_review_worktree(git_dir, branch)
+        wt_path, added = open_review_worktree(git_dir, branch)
         ctx.repo_path = wt_path or git_dir
     try:
         changed = revise_reviews_sync(

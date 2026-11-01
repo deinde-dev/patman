@@ -29,6 +29,7 @@ from patman import database
 from patman import interpreter
 from patman import lorelist
 from patman.database import Pcommit
+from patman.review import discuss
 from patman import patchwork
 from patman.patchwork import Patchwork
 from patman import pwcache
@@ -1540,7 +1541,7 @@ class TestWebServer(unittest.TestCase, TestCommon):
             {'id': first, 'sender': 'Fred <f@x>', 'subject': 'Re: [PATCH] a',
              'date': 'today', 'body': 'Why?', 'response': None,
              'status': 'new', 'timestamp': '2026-10-02 10:00:00',
-             'seq': None, 'comment_id': None},
+             'seq': None, 'comment_id': None, 'discussion': None},
             replies[0])
         self.assertEqual(('sent', 'Thanks'),
                          (replies[1]['status'], replies[1]['response']))
@@ -1588,6 +1589,29 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(('skip', None), (data['status'], data['response']))
         _, data = self.call(srv, 'GET', '/api/reviews')
         self.assertEqual(0, data[0]['replies_waiting'])
+
+        # A reply can be talked through in a Claude session, which the page
+        # can find
+        srv = self.make_server()
+        srv.get_patman_cmd = lambda *args: ['echo', *args]
+        res = self.run_jobs(srv, [
+            ('POST', f'/api/replies/{first}/discuss', {}),
+            ('POST', f'/api/replies/{first}/discuss', {'end': True}),
+            ('POST', f'/api/replies/{second}/discuss', {}),
+        ])
+        self.assertEqual([202, 202, 409], [status for status, _ in res])
+        self.assertEqual(
+            [f'review --discuss-reply {first}',
+             f'review --end-discussion {first}'],
+            [job.state['results'][0]['output'].strip()
+             for job in reversed(srv.get_jobs())])
+        talk = {'name': 'patman: Fred on a', 'url': 'https://claude.ai/x'}
+        with mock.patch.object(discuss, 'discussions',
+                               return_value={first: talk}):
+            _, data = self.call(srv, 'GET', f'/api/reviews/{series_id}')
+        self.assertEqual(
+            [talk, None], [rp['discussion'] for rp in
+                           data['versions'][0]['reviews'][0]['replies']])
 
         # A reply with no response has nothing to revise
         db.reply_set_response(first, None, database.REPLY_NEW)

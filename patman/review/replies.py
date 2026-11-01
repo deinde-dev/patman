@@ -29,6 +29,7 @@ from patman import database
 from patman import gmail
 from patman import settings
 from patman.review import common
+from patman.review import discuss
 from patman.review import drafts
 from patman.review import emails
 from patman.review import prompts
@@ -346,9 +347,36 @@ def _list_replies(cser):
     return 0
 
 
+def _do_discussion(args, cser):
+    """Handle --discuss-reply, --end-discussion and --set-response
+
+    Args:
+        args (Namespace): Command-line arguments; with --set-response and -d,
+            draft_reply is set so that the response is drafted afterwards
+        cser (Cseries): Open cseries instance
+
+    Return:
+        int or None: Exit code, or None to carry on
+    """
+    if getattr(args, 'discuss_reply', None):
+        return discuss.start(args, cser, args.discuss_reply)
+    if getattr(args, 'end_discussion', None):
+        return discuss.end(cser, args.end_discussion)
+    if getattr(args, 'set_response', None):
+        if not args.file:
+            raise ValueError("--set-response needs --file, or '--file -' to "
+                             'read stdin')
+        discuss.set_response(cser, args.set_response, args.file)
+        if not args.create_drafts:
+            return 0
+        args.draft_reply = args.set_response
+    return None
+
+
 def do_reply_cmd(args, cser):
     """Handle --replies, --suggest-reply, --revise-reply, --skip-reply,
-    --draft-reply and --send-reply
+    --discuss-reply, --end-discussion, --set-response, --draft-reply and
+    --send-reply
 
     With --revise-reply, --revise gives the note saying what to change and -d
     updates the Gmail draft of the response, if it changes
@@ -362,6 +390,9 @@ def do_reply_cmd(args, cser):
     """
     if args.list_replies:
         return _list_replies(cser)
+    ret = _do_discussion(args, cser)
+    if ret is not None:
+        return ret
     ctx = _make_reply_ctx(args, cser)
     if args.suggest_reply:
         _suggest_response(ctx, args.suggest_reply)

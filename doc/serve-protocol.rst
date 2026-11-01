@@ -160,6 +160,9 @@ responding to (see ``POST /api/reviews/<id>/respond``):
 - ``seq`` (int or null): for a comment, the patch it is about, 0 for the cover
   letter
 - ``comment_id`` (int or null): for a comment, its ID on patchwork
+- ``discussion`` (object or null): the Claude session talking through the
+  reply, if there is one, with its ``name`` and its ``url`` (null until it
+  gives one); only given by ``GET /api/reviews/<id>``
 
 Job
 ~~~
@@ -605,6 +608,14 @@ has been sent, it cannot be changed, giving status 409.
 Have the agent suggest a response to a reply, giving status 202 and the Job.
 For a comment on patchwork, this reads the comment again, as ``respond``
 does.
+
+``POST /api/replies/<id>/discuss``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Start a Claude session with Remote Control to talk through the response to a
+reply (see ``review --discuss-reply``), giving status 202 and the Job. With
+``end``, end the discussion instead. A response which has been sent gives
+status 409.
 
 ``POST /api/replies/<id>/revise``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

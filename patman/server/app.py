@@ -35,6 +35,7 @@ from patman import traffic
 from patman.patchwork import Patchwork
 from patman.review import apply
 from patman.review import checkout
+from patman.review import discuss
 from patman.review import given
 from patman.review import lookup
 from patman.review import stats
@@ -665,6 +666,12 @@ class Server(jobs.JobRunner):
         await self._find_covers(data)
         data['patchwork_url'] = self.get_pw_url(data['upstream'])
         data['lore_url'] = self.get_lore_url(data['upstream'])
+        # Show where each reply being talked through is being discussed
+        talks = discuss.discussions(self.rcser)
+        for ver in data['versions']:
+            for item in [rp for rev in ver['reviews'] for rp in rev['replies']
+                         ] + ver.get('comments', []):
+                item['discussion'] = talks.get(item['id'])
         proj = self.cser.project_get(data['upstream'])
         data['project'] = proj[2] if proj else None
         return web.json_response(data)
@@ -2005,6 +2012,34 @@ class Server(jobs.JobRunner):
         return self._review_job(f'Revise the response to reply {reply.idnum}',
                                 *args)
 
+    async def _reply_discuss(self, request):
+        """Handle 'POST /api/replies/<id>/discuss': talk through a reply
+
+        This starts a Claude session with Remote Control, as a job, to talk
+        through the response to the reply. With 'end', the discussion is
+        ended instead.
+
+        Args:
+            request (web.Request): Request, with the reply ID as 'idnum'
+
+        Return:
+            web.Response: Job state, with status 202, or status 409 if the
+                response has been sent
+
+        Raises:
+            ValueError: The reply does not exist
+        """
+        reply = self.rcser.db.reply_get(_idnum(request))
+        data = await self._read_json(request)
+        if data.get('end'):
+            return self._review_job(
+                f'End the discussion of reply {reply.idnum}',
+                '--end-discussion', str(reply.idnum))
+        if reply.status == database.REPLY_SENT:
+            return _already_sent('The response')
+        return self._review_job(f'Discuss reply {reply.idnum}',
+                                '--discuss-reply', str(reply.idnum))
+
     async def _reply_send(self, request):
         """Handle 'POST /api/replies/<id>/send': send the response to a reply
 
@@ -2148,6 +2183,8 @@ class Server(jobs.JobRunner):
                             self._reply_suggest)
         app.router.add_post(r'/api/replies/{idnum:\d+}/revise',
                             self._reply_revise)
+        app.router.add_post(r'/api/replies/{idnum:\d+}/discuss',
+                            self._reply_discuss)
         app.router.add_get('/', self._index)
         app.router.add_get('/static/{name}', self._static)
         app.on_startup.append(self._start_background)
