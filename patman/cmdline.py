@@ -802,6 +802,37 @@ def add_workflow_subparser(subparsers):
     return workflow
 
 
+def _add_reply_args(review):
+    """Add the arguments for handling replies to reviews
+
+    Args:
+        review (ArgumentParser): Parser for the review command
+    """
+    review.add_argument(
+        '--replies', action='store_true', dest='list_replies',
+        help='List replies to your reviews which still need a response')
+    review.add_argument(
+        '--suggest-reply', type=int, metavar='ID',
+        help='Ask the agent to suggest a response to a reply (see --replies)')
+    review.add_argument(
+        '--revise-reply', type=int, metavar='ID',
+        help='Ask the agent to change the response to a reply as the '
+             '--revise note says (with -d, update its Gmail draft)')
+    review.add_argument(
+        '--draft-reply', type=int, metavar='ID',
+        help='Create a Gmail draft of the response to a reply, threaded as a '
+             'reply to it')
+    review.add_argument(
+        '--respond-comment', type=int, metavar='ID',
+        help='Ask the agent to suggest a response to a comment on patchwork '
+             'about a reviewed series, given by the comment ID; use -i to '
+             'say which patch it is about, with 0 for the cover letter')
+    review.add_argument(
+        '--send-reply', type=int, metavar='ID',
+        help='Send the response to a reply, creating its Gmail draft first if '
+             'needed')
+
+
 def add_review_subparser(subparsers):
     """Add the 'review' subparser
 
@@ -927,25 +958,7 @@ def add_review_subparser(subparsers):
         '--voice-count', type=int, default=20,
         help='Number of review emails/comments to collect for '
              '--learn-voice (default: 20)')
-    review.add_argument(
-        '--replies', action='store_true', dest='list_replies',
-        help='List replies to your reviews which still need a response')
-    review.add_argument(
-        '--suggest-reply', type=int, metavar='ID',
-        help='Ask the agent to suggest a response to a reply (see --replies)')
-    review.add_argument(
-        '--draft-reply', type=int, metavar='ID',
-        help='Create a Gmail draft of the response to a reply, threaded as a '
-             'reply to it')
-    review.add_argument(
-        '--respond-comment', type=int, metavar='ID',
-        help='Ask the agent to suggest a response to a comment on patchwork '
-             'about a reviewed series, given by the comment ID; use -i to '
-             'say which patch it is about, with 0 for the cover letter')
-    review.add_argument(
-        '--send-reply', type=int, metavar='ID',
-        help='Send the response to a reply, creating its Gmail draft first if '
-             'needed')
+    _add_reply_args(review)
     review.add_argument(
         '--sync', action='store_true',
         help='Check if review drafts have been sent and record the '

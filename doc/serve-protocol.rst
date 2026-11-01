@@ -604,6 +604,14 @@ Have the agent suggest a response to a reply, giving status 202 and the Job.
 For a comment on patchwork, this reads the comment again, as ``respond``
 does.
 
+``POST /api/replies/<id>/revise``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Have the agent change the response to a reply, as the ``note`` says, giving
+status 202 and the Job. With ``draft``, its Gmail draft is updated too. A
+response which has been sent gives status 409, and there must be a response
+to revise.
+
 ``POST /api/replies/<id>/send``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

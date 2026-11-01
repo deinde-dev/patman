@@ -1948,6 +1948,9 @@ function replyBox(rp, seriesId, changed) {
         h('button', { class: 'btn light small', onclick: edit,
                       title: 'Write your response to this reply yourself' },
           rp.response ? 'Edit response' : 'Write a response'),
+        rp.response && h('button', { class: 'btn light small', onclick: revise,
+                                     title: 'Ask the agent to change your response' },
+                         'Revise'),
         rp.response && confirmButton('Send', 'btn small',
                                      () => run(`replies/${rp.id}/send`, {}, 'Sending'),
                                      'Send your response'),
@@ -1967,6 +1970,12 @@ function replyBox(rp, seriesId, changed) {
         } }, 'No reply needed')));
     if (changed) changed();
   };
+  // Ask the agent to change the response, as a note says
+  const revise = () => fill(box, h('div', { class: 'who' }, `Response to ${rp.sender}`),
+    reviseForm(null, rp.status === 'draft', show,
+               (note, draft, msg) => run(`replies/${rp.id}/revise`, { note, draft },
+                                         'Revising the response', msg),
+               'response'));
   const edit = () => {
     const text = h('textarea', { spellcheck: 'true' });
     text.value = rp.response || quoteReply(rp);
@@ -2006,10 +2015,12 @@ function replyBox(rp, seriesId, changed) {
 }
 
 // A form asking the agent to change a review, or part of one, or all of them.
-// Calls submit(note, drafts, msg) when the user sends it
-function reviseForm(part, drafted, cancel, submit) {
+// Calls submit(note, drafts, msg) when the user sends it. 'what' is what it
+// changes, e.g. 'response' for the response to a reply
+function reviseForm(part, drafted, cancel, submit, what = 'review') {
   const text = h('textarea', { class: 'note', spellcheck: 'true',
-    placeholder: part ? "e.g. 'Drop this', 'Suggest a timeout instead'"
+    placeholder: what !== 'review' ? "e.g. 'Mention the spec PR at https://...'"
+               : part ? "e.g. 'Drop this', 'Suggest a timeout instead'"
                       : "e.g. 'Approve it', 'Drop the comments about style'" });
   const box = h('input', { type: 'checkbox', checked: drafted });
   const msg = h('div', { class: 'msg' });
@@ -2023,7 +2034,7 @@ function reviseForm(part, drafted, cancel, submit) {
     part && h('div', { class: 'hint' }, 'About this part:'),
     part && h('div', { class: 'notes revise-part' }, renderMail(part)),
     h('label', {}, 'What should change?'), text,
-    h('label', { class: 'check', title: 'Also update the Gmail draft of the review' },
+    h('label', { class: 'check', title: `Also update the Gmail draft of the ${what}` },
       box, 'Update the Gmail draft'),
     h('div', { class: 'actions' }, send,
       h('button', { class: 'btn light small', onclick: cancel,
@@ -2067,7 +2078,7 @@ function chunkForm(comment, drafted, cancel, submit) {
     }
   }, title: 'Save the changed comment' }, 'Save');
   const form = h('div', { class: 'form' }, text,
-    h('label', { class: 'check', title: 'Also update the Gmail draft of the review' },
+    h('label', { class: 'check', title: `Also update the Gmail draft of the ${what}` },
       box, 'Update the Gmail draft'),
     h('div', { class: 'hint' }, 'Leave it empty to drop the comment and its quote'),
     h('div', { class: 'actions' }, save,
@@ -2094,7 +2105,7 @@ function editReview(card, r, header, show, target, refresh) {
     }
   }, title: 'Save the changed review' }, 'Save');
   fill(card, header, h('div', { class: 'form' }, text,
-    h('label', { class: 'check', title: 'Also update the Gmail draft of the review' },
+    h('label', { class: 'check', title: `Also update the Gmail draft of the ${what}` },
       box, 'Update the Gmail draft'),
     h('div', { class: 'hint' }, "Include a 'Reviewed-by:' line to approve the patch"),
     h('div', { class: 'actions' }, save,

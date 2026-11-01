@@ -10,6 +10,9 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman review --revise-reply ID --revise NOTE`` has the agent change the
+  response to a reply as the note says, with ``-d`` to update its Gmail
+  draft. On the page, each response has a 'Revise' button, as reviews do.
 - ``patman review --suggest`` runs the ``fixes``, ``blame`` and
   ``newcomer`` tests, which use the history of your git repo, with
   ``newcomer`` asking patchwork or lore only when the recent series and the

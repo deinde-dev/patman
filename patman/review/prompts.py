@@ -844,6 +844,41 @@ Rules:
 - If you need to push back, explain concisely with evidence from code
 '''
 
+REVISE_REPLY_PROMPT = '''You are a {project} maintainer. Someone replied to
+your review of a patch series, or commented on the series, and you drafted a
+response which has not been sent yet. The reviewer has read it and wants it
+changed, as described in their note.
+
+NOTE FROM THE REVIEWER:
+{note}
+{review_section}
+REPLY FROM {reply_from}:
+(see file: {reply_path})
+
+YOUR DRAFT RESPONSE:
+(see file: {response_path})
+
+The source tree is in the current directory. You can use 'git log',
+'git show', Read and Grep to check facts.
+
+TASK:
+- Change the response as the note asks. If the note quotes part of the
+  response, it is about that part.
+- Change only what the note asks for, keeping the rest of the response as it
+  is, word for word
+- Keep the line breaks as they are: do not re-wrap a paragraph, even one
+  which you change
+- Use any link or other facts which the note gives as they are given
+- Do NOT run 'git checkout', switch branches or change any files
+- Keep the email format: the greeting, the quoted lines starting with '>',
+  the comments after each quote and the closing lines
+- Use {spelling} spelling
+{voice}
+OUTPUT:
+Output the line '---RESPONSE---' followed by the complete new text of the
+response. Do not add any commentary.
+'''
+
 COMMENT_PROMPT = '''You are a {project} maintainer. Someone has commented on
 {what} of a patch series on the mailing list, and you have been asked to
 respond to the comment.
