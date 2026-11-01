@@ -1420,7 +1420,7 @@ class CseriesHelper:
         ser, version = self._parse_series_and_version(series, version,
                                                       include_archived)
         if not ser.idnum:
-            raise ValueError(f"Unknown series '{series}'")
+            raise ValueError(f"Unknown series '{ser.name}'")
         self._ensure_version(ser, version)
         svinfo = self.get_ser_ver(ser.idnum, version)
         pwc = self.get_pcommit_dict(svinfo.idnum)
