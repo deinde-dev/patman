@@ -595,8 +595,9 @@ def _show_reviews(reviews, series_data):
         print()
 
 
+# pylint: disable-next=R0913
 def _register_series(cser, clean_name, version, link, series_data,
-                     upstream=None):
+                     upstream=None, on_lore=False):
     """Register a series in the database for review
 
     Creates or finds the series record, adds a ser_ver entry and pcommit
@@ -609,6 +610,8 @@ def _register_series(cser, clean_name, version, link, series_data,
         link (str): Patchwork series link/ID
         series_data (dict): Series data from patchwork
         upstream (str or None): Upstream name for branch naming
+        on_lore (bool): True if the series comes from a list on lore, so
+            its patches and cover letter are known by 'lore:<msgid>'
 
     Returns:
         tuple or None: (series_id, svid) or None if already reviewed
@@ -643,19 +646,21 @@ def _register_series(cser, clean_name, version, link, series_data,
         svid = cser.db.ser_ver_add(series_id, version, link=str(link))
         # A new version needs looking at, even if the series was hidden
         cser.db.series_set_hidden(series_id, False)
+        def pw_id(item):
+            # A patch taken from lore to fill a gap on patchwork has no ID
+            # there, but one from a list on lore is known by its Message-ID
+            pid = item.get('id')
+            if isinstance(pid, int) or (on_lore and isinstance(pid, str)):
+                return pid
+            return None
+
         cover = series_data.get('cover_letter')
-        # A cover letter taken from lore has no patchwork ID
-        if cover and isinstance(cover.get('id'), int):
+        if cover and pw_id(cover):
             cser.db.ser_ver_set_info(database.SerVer(
-                svid, None, None, None, cover['id'], 0, cover.get('name'),
+                svid, None, None, None, pw_id(cover), 0, cover.get('name'),
                 None, None, None))
 
         patches = series_data.get('patches', [])
-
-        def pw_id(patch):
-            # A patch taken from lore is not on patchwork, so has no ID there
-            pid = patch.get('id')
-            return pid if isinstance(pid, int) else None
 
         pcommits = []
         for i, patch in enumerate(patches):
@@ -799,8 +804,9 @@ def _find_or_register(ctx, args, clean_name, link):
             not forcing
     """
     ups = ctx.pwork.upstream if ctx.pwork else None
-    result = _register_series(ctx.cser, clean_name, ctx.version, link,
-                              ctx.series_data, upstream=ups)
+    result = _register_series(
+        ctx.cser, clean_name, ctx.version, link, ctx.series_data,
+        upstream=ups, on_lore=isinstance(ctx.pwork, lorelist.LoreList))
     if result is not None:
         return result
 

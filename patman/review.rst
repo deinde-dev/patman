@@ -819,6 +819,10 @@ series, give the comment's ID on patchwork (the number in its URL) and, with
     patman review -s 528450 -U us --respond-comment 3773405 -i 0 \
         -c 'Explain why fit,compress differs from compress'
 
+For a series on a list on lore, give the comment as ``lore:`` and its
+Message-ID, e.g. ``--respond-comment lore:1234.abcd@example.com``. The page
+lists the comments with their IDs, so it is easiest to respond from there.
+
 The agent sees the comment, what it is about (the cover letter, or the patch
 with its diff), your review of it, if any, and the other comments on it. Use
 ``-c`` to say what you would like to say. The comment is recorded along with

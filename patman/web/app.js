@@ -1738,17 +1738,19 @@ async function followJob(job, strip, verb) {
   return job;
 }
 
-// Get the comments on patchwork which have responses, for a patch (0 for the
-// cover letter) of a version
+// Get the comments on patchwork or lore which have responses, for a patch (0
+// for the cover letter) of a version
 function commentResponses(sv, seq) {
   return (sv.comments || []).filter((c) => c.seq === seq);
 }
 
-// A button showing the comments on patchwork about a patch (seq) or the cover
-// letter (seq 0) of a reviewed version, each with 'Respond' to have the agent
-// suggest a response to it. Returns the button and the box which holds them
+// A button showing the comments on patchwork, or on lore for a list there,
+// about a patch (seq) or the cover letter (seq 0) of a reviewed version, each
+// with 'Respond' to have the agent suggest a response to it. Returns the button
+// and the box which holds them
 function commentsToggle(ser, sv, seq, itemId) {
   const kind = seq ? 'patch' : 'cover';
+  const where = ser.lore_url ? 'lore' : 'patchwork';
   const box = h('div', {});
   const responded = new Set(commentResponses(sv, seq).map((c) => c.comment_id));
   const item = (c) => {
@@ -1795,7 +1797,7 @@ function commentsToggle(ser, sv, seq, itemId) {
   };
   let open = false;
   const btn = h('button', { class: 'btn light small',
-                            title: 'Show the comments on patchwork, to respond to them',
+                            title: `Show the comments on ${where}, to respond to them`,
                             onclick: async () => {
     open = !open;
     btn.textContent = open ? 'Hide comments' : 'Comments';
@@ -1809,8 +1811,8 @@ function commentsToggle(ser, sv, seq, itemId) {
         const others = list.filter((c) => !c.own);
         const mine = list.length - others.length;
         fill(box, ...(others.length ? others.map(item)
-          : [h('div', { class: 'ver' }, mine ? 'No comments from others on patchwork'
-                                             : 'No comments on patchwork')]),
+          : [h('div', { class: 'ver' }, mine ? `No comments from others on ${where}`
+                                             : `No comments on ${where}`)]),
           mine ? h('div', { class: 'ver', title: 'Such as the review itself' },
                    mine === 1 ? 'Leaving out your own comment'
                               : `Leaving out your own ${mine} comments`) : null);
