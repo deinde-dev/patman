@@ -210,6 +210,10 @@ Fixed
 ~~~~~
 - patman no longer fails when ``USER`` is not set, e.g. in a build chroot,
   on a commit with a Tested-by tag, as in ``patman series gather-all``
+- On the first run, with no ``~/.patman`` and no git identity, patman no
+  longer fails with an error from git: it asks for your name and email, or
+  without a terminal, e.g. for ``patman review --list-models`` in a build,
+  goes on without creating the file
 - Reading a series' mbox from patchwork, e.g. for ``patman review
   --suggest``, has a timeout and is tried again when the server is busy, as
   other requests are, rather than failing on the first 502 or dropped
