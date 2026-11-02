@@ -13,6 +13,9 @@ extra requests or git, only on the series which could still be suggested.
 import asyncio
 from collections import namedtuple
 from datetime import datetime, timedelta, timezone
+import hashlib
+import json
+import os
 from types import SimpleNamespace
 
 import aiohttp
@@ -21,6 +24,7 @@ from u_boot_pylib import gitutil
 from u_boot_pylib import tout
 
 from patman import lorelist
+from patman import pwcache
 from patman import settings
 from patman.review import apply
 from patman.review import common
@@ -40,6 +44,22 @@ SUGGEST_MAX_AGE = 60 * 60
 # What reading a series' patches or its submitter's earlier series can
 # raise, e.g. when patchwork is busy, so that the series is left out
 PW_ERRORS = (ValueError, aiohttp.ClientError, asyncio.TimeoutError)
+
+# How long what a test finds on a series is kept in the cache, in seconds,
+# for the tests whose result can change. The others look only at the
+# patches, which do not change, so their results are kept until the cache
+# drops them
+HOUR = 60 * 60
+RESULT_KEEP = {
+    # Tags are collected from replies, CI runs and delegates change
+    'has': HOUR, 'no-replies': HOUR, 'delegate': HOUR, 'checks': HOUR,
+    # These look at your repo, which changes slowly
+    'maintainer': 24 * HOUR, 'fixes': 24 * HOUR, 'blame': 24 * HOUR,
+    'newcomer': 24 * HOUR,
+}
+
+# Tests which look at your repo, so whose results depend on which it is
+REPO_TESTS = {'maintainer', 'fixes', 'blame', 'newcomer'}
 
 
 # A series to suggest: the series ('pws', as from patchwork or lore), its
@@ -113,8 +133,12 @@ class Suggester:  # pylint: disable=R0902
     still reach min_score are then taken in order of the best score they
     could reach, and their patches read for the tests which need them, then
     the tests which need extra requests or git are run, stopping once no
-    series left could get into the top 'limit', or max_reads series have
-    been read
+    series left could get into the top 'limit'. Once max_reads series have
+    been read, a series whose patches are needed is left out
+
+    What the costly tests find on each series is kept in the patchwork
+    cache (see pwcache), for the time given by RESULT_KEEP, so that a
+    series is not read or tested again each time
 
     Properties:
         rules (Rules): Rules to use
@@ -151,6 +175,8 @@ class Suggester:  # pylint: disable=R0902
         self._top = None
         self._authors = None
         self._keys = None
+        self._rule_keys = {}
+        self._capped = False
 
     def _rules(self, tests):
         """Get the rules whose tests are in a set
@@ -385,13 +411,16 @@ class Suggester:  # pylint: disable=R0902
                  for who in people], mine,
                 [pat.get('check') or 'pending' for pat in patches])
 
-    async def extra(self, client, pws, info):
+    # pylint: disable-next=R0914
+    async def extra(self, client, pws, info, tests=None):
         """Find what the tests which need extra requests or git need
 
         Args:
             client (aiohttp.ClientSession): Session to use
             pws (dict): Series, as from patchwork or lore
             info (patchdata.PatchInfo or None): Its patches, if read
+            tests (set of str or None): Tests to find out for, or None for
+                all those which the rules use
 
         Returns:
             suggest_tests.Extra: What is known
@@ -399,8 +428,9 @@ class Suggester:  # pylint: disable=R0902
         Raises:
             ValueError: Something which is needed cannot be read
         """
+        uses = self._uses if tests is None else tests.__contains__
         blame = {}
-        if info and info.removed and self._uses('blame'):
+        if info and info.removed and uses('blame'):
             top = self.git_dir()
             ref = (info.base if info.base and history.ref_exists(
                 top, info.base) else self.upstream)
@@ -408,14 +438,14 @@ class Suggester:  # pylint: disable=R0902
                 blame = history.blame_mine(top, ref, info.removed,
                                            self.emails)
         newcomer, how = False, ''
-        if self._uses('newcomer'):
+        if uses('newcomer'):
             newcomer, how = await self._newcomer(client, pws)
         age = suggest_tests.age_days(pws.get('date'), self.now)
         replier = None
-        if self._uses('no-replies'):
+        if uses('no-replies'):
             replier = await self._replier(client, pws, age)
         delegates, mine, checks = None, False, None
-        if self._uses('delegate') or self._uses('checks'):
+        if uses('delegate') or uses('checks'):
             delegates, mine, checks = await self._patch_list(client, pws)
         return suggest_tests.Extra(blame, newcomer, how, age, replier,
                                    delegates, mine, checks)
@@ -433,6 +463,102 @@ class Suggester:  # pylint: disable=R0902
         scores = sorted((sug.score for sug in found), reverse=True)
         return len(scores) < self.limit or best >= scores[self.limit - 1]
 
+    def _key(self, rule):
+        """Get the key of what the test of a rule finds, for the cache
+
+        The key covers what the result depends on, besides the series: the
+        test and its arguments, your addresses and, for a test which looks
+        at your repo, the repo and its upstream. It leaves out the rule's
+        name, score and 'not', which are applied to the result
+
+        Args:
+            rule (Rule): Rule
+
+        Returns:
+            str: Key
+        """
+        if rule.name not in self._rule_keys:
+            parts = [suggest_rules.rule_text(rule._replace(negate=False)),
+                     sorted(self.emails)]
+            if rule.test in REPO_TESTS:
+                parts += [os.path.abspath(self.git_dir()), self.upstream]
+            self._rule_keys[rule.name] = hashlib.sha1(
+                json.dumps(parts).encode('utf-8')).hexdigest()
+        return self._rule_keys[rule.name]
+
+    def _cached(self, pws):
+        """Get what the costly tests found on a series before, if recent
+
+        Args:
+            pws (dict): Series, as from patchwork or lore
+
+        Returns:
+            dict: key (str): Key of each result, from _key()
+                value (suggest_tests.Result): What the test found
+        """
+        cache = pwcache.get()
+        if not cache:
+            return {}
+        keys = {self._key(rule): RESULT_KEEP.get(rule.test)
+                for rule in self._rules(suggest_tests.PATCH_TESTS) +
+                self._rules(suggest_tests.EXTRA_TESTS)}
+        return {key: suggest_tests.Result(*res)
+                for key, res in cache.get_results(
+                    self.pwork.url, str(pws['id']), keys).items()}
+
+    # pylint: disable-next=R0913
+    def _apply(self, pws, rules, cached, known, tests):
+        """Score a series by some rules, running the tests not in the cache
+
+        What the tests find is stored in the cache
+
+        Args:
+            pws (dict): Series, as from patchwork or lore
+            rules (list of Rule): Rules to use, each with a test in 'tests'
+            cached (dict): What the tests found before, from _cached()
+            known (patchdata.PatchInfo or suggest_tests.Extra or None): What
+                the tests know, or None if every result is in 'cached'
+            tests (dict): The tests, e.g. suggest_tests.PATCH_TESTS
+
+        Returns:
+            tuple or None: As for suggest_tests.score_results()
+        """
+        new = {}
+        results = []
+        for rule in rules:
+            key = self._key(rule)
+            if key not in cached:
+                cached[key] = new[key] = tests[rule.test](rule.args, known)
+            results.append(cached[key])
+        cache = pwcache.get()
+        if new and cache:
+            cache.put_results(self.pwork.url, str(pws['id']),
+                              {key: (res.matched, str(res.seen))
+                               for key, res in new.items()})
+        return suggest_tests.score_results(rules, results)
+
+    async def _read_patches(self, client, pws):
+        """Read the patches of a series for the tests, if allowed
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            pws (dict): Series, as from patchwork or lore
+
+        Returns:
+            patchdata.PatchInfo or None: What is known, or None if the
+                patches cannot be read, or max_reads is reached
+        """
+        if self.reads >= self.rules.max_reads:
+            self._capped = True
+            self.complete = False
+            return None
+        try:
+            return await self.patch_info(client, pws)
+        except PW_ERRORS as exc:
+            tout.warning(f"Cannot read the patches of "
+                         f"'{pws.get('name')}': {exc}")
+            return None
+
     async def _score(self, client, cand, found):
         """Run the tests which need the patches, or more, on a candidate
 
@@ -444,24 +570,22 @@ class Suggester:  # pylint: disable=R0902
         Returns:
             Suggestion or None: The series, if it reaches min_score
         """
+        cached = self._cached(cand.pws)
+        rules = self._rules(suggest_tests.PATCH_TESTS)
         info = None
-        if self.needs_patches():
-            try:
-                info = await self.patch_info(client, cand.pws)
-            except PW_ERRORS as exc:
-                tout.warning(f"Cannot read the patches of "
-                             f"'{cand.pws.get('name')}': {exc}")
+        if any(self._key(rule) not in cached for rule in rules):
+            info = await self._read_patches(client, cand.pws)
+            if not info:
                 return None
-        result = suggest_tests.score_series(
-            self._rules(suggest_tests.PATCH_TESTS), info,
-            suggest_tests.PATCH_TESTS)
+        result = self._apply(cand.pws, rules, cached, info,
+                             suggest_tests.PATCH_TESTS)
         if not result:
             return None
         score = cand.score + result[0]
         reasons = cand.reasons + result[1]
         if self._rules(suggest_tests.EXTRA_TESTS):
             result = await self._score_extra(client, cand.pws, info, score,
-                                             found)
+                                             found, cached)
             if not result:
                 return None
             score += result[0]
@@ -469,8 +593,8 @@ class Suggester:  # pylint: disable=R0902
         return (Suggestion(cand.pws, score, reasons)
                 if score >= self.rules.min_score else None)
 
-    # pylint: disable-next=R0913
-    async def _score_extra(self, client, pws, info, score, found):
+    # pylint: disable-next=R0913,R0917
+    async def _score_extra(self, client, pws, info, score, found, cached):
         """Run the tests which need extra requests or git on a series
 
         They are not run if the series could not be suggested anyway
@@ -481,6 +605,7 @@ class Suggester:  # pylint: disable=R0902
             info (patchdata.PatchInfo or None): Its patches, if read
             score (int): Its score from the other tests
             found (list of Suggestion): Series found so far
+            cached (dict): What the tests found before, from _cached()
 
         Returns:
             tuple or None: As for suggest_tests.score_series(), or None
@@ -493,13 +618,21 @@ class Suggester:  # pylint: disable=R0902
         if not self._could_place(found, best):
             self.complete = False
             return None
-        try:
-            extra = await self.extra(client, pws, info)
-        except PW_ERRORS as exc:
-            tout.warning(f"Cannot check '{pws.get('name')}': {exc}")
-            return None
-        return suggest_tests.score_series(rules, extra,
-                                          suggest_tests.EXTRA_TESTS)
+        todo = {rule.test for rule in rules if self._key(rule) not in cached}
+        extra = None
+        if todo:
+            # Blame needs the lines which the patches remove
+            if 'blame' in todo and not info:
+                info = await self._read_patches(client, pws)
+                if not info:
+                    return None
+            try:
+                extra = await self.extra(client, pws, info, todo)
+            except PW_ERRORS as exc:
+                tout.warning(f"Cannot check '{pws.get('name')}': {exc}")
+                return None
+        return self._apply(pws, rules, cached, extra,
+                           suggest_tests.EXTRA_TESTS)
 
     async def _finish(self, cands):
         """Run the tests which need the patches, or more, for the best
@@ -516,17 +649,13 @@ class Suggester:  # pylint: disable=R0902
                 if not self._could_place(found, cand.best):
                     self.complete = False
                     break
-                if self.needs_patches() and (
-                        self.reads >= self.rules.max_reads):
-                    tout.warning(
-                        f'Read the patches of {self.reads} series, the most '
-                        "for one run (the 'max_reads' setting); the others "
-                        'are left out')
-                    self.complete = False
-                    break
                 sug = await self._score(client, cand, found)
                 if sug:
                     found.append(sug)
+        if self._capped:
+            tout.warning(
+                f'Read the patches of {self.reads} series, the most for one '
+                "run (the 'max_reads' setting); the others are left out")
         return found
 
     def find(self, series):

@@ -15,6 +15,7 @@ from u_boot_pylib import terminal
 
 from patman import lorelist
 from patman import patchwork
+from patman import pwcache
 from patman.review import common
 from patman.review import explain
 from patman.review import history
@@ -282,6 +283,61 @@ class TestSuggestExtra(SuggestHelper):
         found = common.run(
             sug._patch_list(None, series[0]))  # pylint: disable=W0212
         self.assertEqual((None, False, None), found)
+
+    def test_cache(self):
+        """What the costly tests find is cached, for as long as it holds"""
+        series = [make_series(num, f'boot: Change {num}', days=num,
+                              email=f'new{num}@x.org')
+                  for num in range(1, 4)]
+        mboxes = {str(num): make_mbox(PATCH) for num in range(1, 4)}
+        values = {'i2c': 'path drivers/i2c/ +3', 'tagged': 'has reviewed-by +1',
+                  'new': 'newcomer +2'}
+        now = [1000.0]
+        cache = pwcache.Cache(os.path.join(self.tmpdir, 'pw.db'),
+                              clock=lambda: now[0])
+        repo = self.history_repo()[0]
+        earlier = mock.AsyncMock(return_value=[])
+
+        def find(values, **kwargs):
+            with mock.patch.object(pwcache, 'get', return_value=cache):
+                sug, found, get = self.suggester(values, series, mboxes,
+                                                 repo=repo, earlier=earlier,
+                                                 **kwargs)
+            return ((sug.reads, get.call_count),
+                    [(s.pws['id'], s.score) for s in found])
+
+        first = [(1, 6), (2, 6), (3, 6)]
+        self.assertEqual(((3, 3), first), find(values))
+        self.assertEqual(3, earlier.call_count)
+
+        # The second time nothing is read, nor is patchwork asked
+        self.assertEqual(((0, 0), first), find(values))
+        self.assertEqual(3, earlier.call_count)
+
+        # A rule with a new name or score uses what its test found before
+        self.assertEqual(((0, 0), [(1, 7), (2, 7), (3, 7)]),
+                         find({**values, 'i2c-new': 'path drivers/i2c/ +4',
+                               'i2c': 'off'}))
+
+        # After an hour the tags are looked at again, but not the paths, and
+        # newcomer only after a day
+        now[0] += suggest.HOUR + 1
+        self.assertEqual(((3, 3), first), find(values))
+        self.assertEqual(3, earlier.call_count)
+        now[0] += 24 * suggest.HOUR
+        self.assertEqual(((3, 3), first), find(values))
+        self.assertEqual(6, earlier.call_count)
+
+        # Once max_reads is reached, a series whose results are all cached
+        # is still scored
+        drivers = {'drivers': 'path drivers/** +3'}
+        with mock.patch.object(pwcache, 'get', return_value=cache):
+            self.suggester(drivers, series[2:], mboxes, repo=repo)
+        with terminal.capture() as (_, err):
+            self.assertEqual(((1, 1), [(1, 3), (3, 3)]),
+                             find({**drivers, 'max_reads': '1'}))
+        self.assertIn("(the 'max_reads' setting)", err.getvalue())
+        cache.close()
 
     def test_explain(self):
         """--explain shows what each rule finds, even those not reached"""

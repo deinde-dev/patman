@@ -580,6 +580,31 @@ class TestPwCache(unittest.TestCase):  # pylint: disable=R0904
                          cache.get_states('https://other', [2]))
         cache.close()
 
+    def test_results(self):
+        """The cache holds what the suggest tests found, while recent"""
+        cache = self.cache()
+        self.assertEqual({}, cache.get_results('https://pw', '1', {'a': None}))
+        cache.put_results('https://pw', '1', {'a': (True, 'x.c'),
+                                              'b': (False, 'none')})
+        cache.put_results('https://other', '1', {'a': (False, '')})
+        self.now += 100
+        self.assertEqual({'a': (True, 'x.c'), 'b': (False, 'none')},
+                         cache.get_results('https://pw', '1',
+                                           {'a': None, 'b': 100, 'c': None}))
+
+        # Each result has its own age limit, and only those asked for come
+        self.assertEqual({'a': (True, 'x.c')}, cache.get_results(
+            'https://pw', '1', {'a': None, 'b': 99}))
+        self.assertEqual({}, cache.get_results('https://pw', '2', {'a': None}))
+
+        # Results not made for a while are dropped
+        self.now += pwcache.KEEP_DAYS * 86400 + 1
+        cache.put_results('https://pw', '1', {'b': (True, 'some')})
+        cache.prune()
+        self.assertEqual({'b': (True, 'some')}, cache.get_results(
+            'https://pw', '1', {'a': None, 'b': None}))
+        cache.close()
+
     def test_fill_states(self):
         """A cache from before states were recorded gains its patches' states"""
         cache = self.cache()
