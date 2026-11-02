@@ -4,7 +4,6 @@
 #
 """Functional tests for checking that patman behaves correctly"""
 
-import asyncio
 import functools
 import os
 import re
@@ -27,6 +26,7 @@ from patman import cmdline
 from patman import control
 from patman import cseries
 from patman import patchstream
+from patman import patchwork
 from patman.patchwork import Patchwork
 
 
@@ -368,7 +368,7 @@ class CseriesTester(unittest.TestCase, TestCommon):
     def setUp(self):
         TestCommon.setUp(self)
         self.autolink_extra = None
-        self.loop = asyncio.get_event_loop()
+        self.loop = patchwork.get_loop()
         self.cser = None
 
     def tearDown(self):

@@ -1637,9 +1637,8 @@ class Cseries(cser_helper.CseriesHelper):
             f"Updating series '{ser.name}' version {version} "
             f"from link '{link}'")
 
-        loop = asyncio.get_event_loop()
         with pwork.collect_stats() as stats:
-            cover, patches = loop.run_until_complete(self._gather(
+            cover, patches = self.loop.run_until_complete(self._gather(
                 pwork, link, show_cover_comments))
 
         with terminal.pager():
@@ -1707,8 +1706,7 @@ class Cseries(cser_helper.CseriesHelper):
         for pwk, fetch in groups:
             tout.info(f'Reading {len(fetch)} series from {pwk.url}')
 
-        loop = asyncio.get_event_loop()
-        outcomes = loop.run_until_complete(self._sync_groups(groups))
+        outcomes = self.loop.run_until_complete(self._sync_groups(groups))
 
         # Collect the results, skipping any series which could not be read
         results = {}

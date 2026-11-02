@@ -221,6 +221,9 @@ Fixed
   without a terminal, e.g. for ``patman review --list-models`` in a build,
   goes on without creating the file
 - The tests pass without ``~/.patman`` or the Gmail API installed
+- Commands which use patchwork, including ``patman series`` and ``patman
+  review``, no longer fail on Python 3.14 with 'There is no current event
+  loop'.
 - Reading a series' mbox from patchwork, e.g. for ``patman review
   --suggest``, has a timeout and is tried again when the server is busy, as
   other requests are, rather than failing on the first 502 or dropped

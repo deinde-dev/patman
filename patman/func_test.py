@@ -6,7 +6,6 @@
 
 """Functional tests for checking that patman behaves correctly"""
 
-import asyncio
 import contextlib
 import glob
 import io
@@ -16,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import unittest
 from unittest import mock
 
@@ -826,7 +826,7 @@ diff --git a/lib/efi_loader/efi_memory.c b/lib/efi_loader/efi_memory.c
         """Test Patchwork patches not matching the series"""
         pwork = patchwork.Patchwork.for_testing(self._fake_patchwork)
         with terminal.capture() as (_, err):
-            loop = asyncio.get_event_loop()
+            loop = patchwork.get_loop()
             _, patches = loop.run_until_complete(status.check_status(1234,
                                                                      pwork))
             status.check_patch_count(0, len(patches))
@@ -906,10 +906,30 @@ diff --git a/lib/efi_loader/efi_memory.c b/lib/efi_loader/efi_memory.c
                                new_rtags)
         self.assertEqual([None, None], new_rtags)
 
+    def test_get_loop(self):
+        """Test getting an event loop in a thread which has none"""
+        loops = []
+
+        def _check():
+            first = patchwork.get_loop()
+            loops.extend([first, patchwork.get_loop()])
+            first.close()
+            loops.append(patchwork.get_loop())
+            loops[-1].close()
+
+        # A new thread has no current loop, on any version of Python
+        thread = threading.Thread(target=_check)
+        thread.start()
+        thread.join()
+
+        self.assertEqual(3, len(loops))
+        self.assertIs(loops[0], loops[1])
+        self.assertIsNot(loops[0], loops[2])
+
     def test_status_read_patch(self):
         """Test handling a single patch in Patchwork"""
         pwork = patchwork.Patchwork.for_testing(self._fake_patchwork)
-        loop = asyncio.get_event_loop()
+        loop = patchwork.get_loop()
         _, patches = loop.run_until_complete(status.check_status(1234, pwork))
         self.assertEqual(1, len(patches))
         patch = patches[0]
