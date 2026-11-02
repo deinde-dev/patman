@@ -11,7 +11,6 @@ for running coroutines and calling patchwork, which the other review modules
 share.
 """
 
-import asyncio
 import os
 import re
 import shutil
@@ -22,6 +21,8 @@ import aiohttp
 from u_boot_pylib import gitutil
 from u_boot_pylib import tools
 from u_boot_pylib import tout
+
+from patman import patchwork
 
 try:
     from claude_agent_sdk import ClaudeAgentOptions
@@ -56,7 +57,7 @@ def run(coro):
     Returns:
         The coroutine's result
     """
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return patchwork.get_loop().run_until_complete(coro)
 
 
 def pw_call(method, *args):

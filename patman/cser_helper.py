@@ -118,7 +118,7 @@ class CseriesHelper:
         self._fake_time = None
         self._fake_sleep = None
         self.fake_now = None
-        self.loop = asyncio.get_event_loop()
+        self.loop = patchwork.get_loop()
         # Versions warned about by _check_patches(), as (name, version)
         self._patches_warned = set()
 

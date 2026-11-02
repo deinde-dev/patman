@@ -8,7 +8,6 @@ Allows creation of a new branch based on the old but with the review tags
 collected from patchwork.
 """
 
-import asyncio
 from collections import defaultdict
 
 import aiohttp
@@ -485,7 +484,7 @@ def check_and_show_status(series, link, branch, dest_branch, force,
         pwork (Patchwork): Patchwork object to use for reading
         test_repo (pygit2.Repository): Repo to use (use None unless testing)
     """
-    loop = asyncio.get_event_loop()
+    loop = patchwork.get_loop()
     # Read the cover letter's comments, since its tags apply to every patch
     cover, patches = loop.run_until_complete(check_status(
         link, pwork, True, True))

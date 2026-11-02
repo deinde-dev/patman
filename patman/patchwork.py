@@ -92,6 +92,27 @@ SEARCH_COUNT = 30
 # then it is read again after this many seconds, in case one arrives
 EARLIER_MAX_AGE = 24 * 60 * 60
 
+
+def get_loop():
+    """Get the event loop for this thread, creating one if needed
+
+    From Python 3.14, asyncio.get_event_loop() raises RuntimeError if the
+    thread has no current event loop, rather than creating one. The caller
+    needs a loop which stays around for later calls, so asyncio.run() is not
+    suitable.
+
+    Returns:
+        asyncio.AbstractEventLoop: Open event loop for this thread
+    """
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = None
+    if loop is None or loop.is_closed():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop
+
 # Number of a person's earlier series to read, which is enough to find one
 # which is not an earlier version of the series in question
 EARLIER_COUNT = 10
