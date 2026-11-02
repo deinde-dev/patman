@@ -214,6 +214,10 @@ Changed
 
 Fixed
 ~~~~~
+- The tests pass from an sdist or an installed package, with no git
+  identity and with a proxy set, as in a Debian build: they turn off the
+  patchwork cache wherever they are run from, give git an identity of their
+  own and ignore any proxy
 - patman no longer fails when ``USER`` is not set, e.g. in a build chroot,
   on a commit with a Tested-by tag, as in ``patman series gather-all``
 - On the first run, with no ``~/.patman`` and no git identity, patman no

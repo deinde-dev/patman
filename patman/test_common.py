@@ -4,6 +4,7 @@
 #
 """Functional tests for checking that patman behaves correctly"""
 
+import atexit
 import functools
 import os
 import re
@@ -25,6 +26,7 @@ from patman import checkpatch
 from patman import cmdline
 from patman import control
 from patman import cseries
+from patman import lore
 from patman import patchstream
 from patman import patchwork
 from patman.patchwork import Patchwork
@@ -42,6 +44,41 @@ def clear_git_env():
                          capture_output=True, text=True, check=False)
     for var in res.stdout.split():
         os.environ.pop(var, None)
+
+
+# Variables which send requests through a proxy, in either case
+PROXY_VARS = ('http_proxy', 'https_proxy', 'all_proxy', 'no_proxy')
+
+# The identity which git gives the tests
+TEST_IDENTITY = '''[user]
+	name = Patman Test
+	email = patman-test@example.com
+'''
+
+
+def isolate():
+    """Keep the tests away from the user's settings, caches and network
+
+    This is used by 'patman test' and by pytest (see conftest.py). Besides
+    clear_git_env(), it turns off the patchwork cache, the request log and
+    lore, so that tests do not see each other's results or the user's,
+    removes any proxy from the environment, since the tests only talk to
+    servers of their own on localhost, and gives git a global config of its
+    own, with an identity, so that the tests do not depend on the user's,
+    or fail where there is none, e.g. in a package build
+    """
+    clear_git_env()
+    os.environ['PATMAN_PWCACHE'] = 'off'
+    os.environ['PATMAN_REQLOG'] = 'off'
+    lore.set_mode('off')
+    for var in list(os.environ):
+        if var.lower() in PROXY_VARS:
+            del os.environ[var]
+    tmpdir = tempfile.mkdtemp(prefix='patman-git.')
+    atexit.register(shutil.rmtree, tmpdir, ignore_errors=True)
+    fname = os.path.join(tmpdir, 'gitconfig')
+    tools.write_file(fname, TEST_IDENTITY, binary=False)
+    os.environ['GIT_CONFIG_GLOBAL'] = fname
 
 
 def find_source_dir():
