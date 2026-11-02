@@ -208,6 +208,8 @@ Changed
 
 Fixed
 ~~~~~
+- patman no longer fails when ``USER`` is not set, e.g. in a build chroot,
+  on a commit with a Tested-by tag, as in ``patman series gather-all``
 - Reading a series' mbox from patchwork, e.g. for ``patman review
   --suggest``, has a timeout and is tried again when the server is busy, as
   other requests are, rather than failing on the first 502 or dropped

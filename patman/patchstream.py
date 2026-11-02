@@ -498,9 +498,10 @@ class PatchStream:
         out = []
         rtag_type, who = tag_match.groups()
         self._add_commit_rtag(rtag_type, who)
-        # Remove Tested-by self, since few will take much notice
-        if (rtag_type == 'Tested-by' and
-                who.find(os.getenv('USER') + '@') != -1):
+        # Remove Tested-by self, since few will take much notice. USER may
+        # be unset, e.g. in a build chroot
+        user = os.getenv('USER')
+        if rtag_type == 'Tested-by' and user and f'{user}@' in who:
             self._add_warn(f"Ignoring '{line}'")
         elif rtag_type == 'Patch-cc':
             self.commit.add_cc(who.split(','))

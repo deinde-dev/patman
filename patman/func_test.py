@@ -635,13 +635,20 @@ Commit-fred: testing
 
     def test_self_test(self):
         """Test a tested by tag by this user"""
-        test_line = 'Tested-by: %s@napier.com' % os.getenv('USER')
+        test_line = 'Tested-by: fred@napier.com'
         text = '''This is a patch
 
 %s
 ''' % test_line
-        pstrm = PatchStream.process_text(text)
+        with mock.patch.dict(os.environ, {'USER': 'fred'}):
+            pstrm = PatchStream.process_text(text)
         self.assertEqual(["Ignoring '%s'" % test_line], pstrm.commit.warn)
+
+        # Without USER, the tag is kept
+        with mock.patch.dict(os.environ):
+            os.environ.pop('USER', None)
+            pstrm = PatchStream.process_text(text)
+        self.assertEqual([], pstrm.commit.warn)
 
     def test_space_before_tab(self):
         """Test a space before a tab"""
