@@ -2542,6 +2542,40 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual({(urls[0], 'patch'): (3, len('{"ok": 3}'))},
                          traffic.take())
 
+    def test_patchwork_mbox_retry(self):
+        """A series' mbox is read again when the server is busy or slow"""
+        calls = []
+        real_sleep = asyncio.sleep
+
+        async def handler(request):
+            calls.append(request.path)
+            if len(calls) == 1:
+                return web.Response(status=502)
+            if len(calls) == 2:
+                await real_sleep(1)
+            return web.Response(body=b'From x\n\nmbox')
+
+        app = web.Application()
+        app.router.add_get('/series/{link}/mbox/', handler)
+
+        async def _go():
+            async with TestServer(app) as tserver:
+                pwork = Patchwork(str(tserver.make_url('')).rstrip('/'),
+                                  show_progress=False)
+                async with aiohttp.ClientSession() as client:
+                    return await pwork.get_series_mbox(client, '7')
+
+        loop = asyncio.new_event_loop()
+        try:
+            with mock.patch.object(patchwork, 'REQUEST_TIMEOUT', 0.2), \
+                    mock.patch.object(asyncio, 'sleep',
+                                      side_effect=self._no_sleep(asyncio.sleep)):
+                self.assertEqual(b'From x\n\nmbox',
+                                 loop.run_until_complete(_go()))
+        finally:
+            loop.close()
+        self.assertEqual(['/series/7/mbox/'] * 3, calls)
+
     def test_patchwork_connect_retry(self):
         """A failed connection is retried, but a name which fails is not"""
         sleeps = []

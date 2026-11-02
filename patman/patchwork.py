@@ -448,6 +448,68 @@ class Patchwork(SeriesFinder):
         # Message-ID without angle brackets
         self._lore_thread = {}
 
+    async def _fetch(self, client, full_url, kind):
+        """Read a URL from patchwork, trying again if the server is busy
+
+        The server may stall, drop the connection or give 502 when busy, so
+        each of these is tried again, a few times, waiting longer each time.
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            full_url (str): URL to read
+            kind (str): Kind of request, for counting the traffic
+
+        Returns:
+            tuple:
+                int: HTTP status of the last try
+                bytes: Content which came back
+
+        Raises:
+            aiohttp.ClientError: The server cannot be reached or keeps
+                dropping the connection
+            asyncio.TimeoutError: The server does not respond in time
+        """
+        for i in range(RETRIES + 1):
+            try:
+                traffic.add(self.url, requests=1, kind=kind)
+                with reqlog.attempt(full_url, i + 1) as tried:
+                    async with client.get(
+                            full_url, proxy=get_proxy(full_url),
+                            timeout=aiohttp.ClientTimeout(
+                                total=REQUEST_TIMEOUT)) as response:
+                        content = await response.read()
+                        tried.done(response.status, len(content))
+                traffic.add(self.url, nbytes=len(content), kind=kind)
+                if response.status in RETRY_STATUS and i < RETRIES:
+                    # The server is overloaded, so try again later
+                    await asyncio.sleep(i + 1)
+                    continue
+                return response.status, content
+            except aiohttp.ClientConnectorError as exc:
+                # A name which does not resolve will not start working,
+                # but a busy server may fail to accept a connection
+                if isinstance(exc, DNS_ERROR) or \
+                        isinstance(exc.os_error, socket.gaierror) or \
+                        i == RETRIES:
+                    raise
+                await asyncio.sleep(i + 1)
+            except asyncio.TimeoutError as exc:
+                # The server may stall when busy. Say which one, since
+                # the exception itself has no message
+                if i == RETRIES:
+                    raise asyncio.TimeoutError(
+                        f"Patchwork '{self.url}' did not respond within "
+                        f'{REQUEST_TIMEOUT} seconds, after '
+                        f'{RETRIES + 1} tries') from exc
+                await asyncio.sleep(i + 1)
+            except (aiohttp.ServerDisconnectedError,
+                    aiohttp.ClientOSError):
+                # The server may drop or reset connections when busy
+                if i == RETRIES:
+                    raise
+                await asyncio.sleep(i + 1)
+        return None, b''
+
     async def _request(self, client, subpath):
         """Call the patchwork API and return the result as JSON
 
@@ -461,59 +523,18 @@ class Patchwork(SeriesFinder):
         Raises:
             ValueError: the URL could not be read
         """
-        # print('subpath', subpath)
         self.request_count += 1
         if self.fake_request:
             return self.fake_request(subpath)
 
         full_url = f'{self.url}/api/1.2/{subpath}'
         async with self.semaphore:
-            # print('full_url', full_url)
-            kind = request_kind(subpath)
-            for i in range(RETRIES + 1):
-                try:
-                    traffic.add(self.url, requests=1, kind=kind)
-                    with reqlog.attempt(full_url, i + 1) as tried:
-                        async with client.get(
-                                full_url, proxy=get_proxy(full_url),
-                                timeout=aiohttp.ClientTimeout(
-                                    total=REQUEST_TIMEOUT)) as response:
-                            nbytes = len(await response.read())
-                            tried.done(response.status, nbytes)
-                    traffic.add(self.url, nbytes=nbytes, kind=kind)
-                    if response.status in RETRY_STATUS and i < RETRIES:
-                        # The server is overloaded, so try again later
-                        await asyncio.sleep(i + 1)
-                        continue
-                    if response.status != 200:
-                        raise ValueError(
-                            f"Could not read URL '{full_url}' "
-                            f'(status {response.status})')
-                    # The body is kept once read, so this needs no request
-                    return await response.json()
-                except aiohttp.ClientConnectorError as exc:
-                    # A name which does not resolve will not start working,
-                    # but a busy server may fail to accept a connection
-                    if isinstance(exc, DNS_ERROR) or \
-                            isinstance(exc.os_error, socket.gaierror) or \
-                            i == RETRIES:
-                        raise
-                    await asyncio.sleep(i + 1)
-                except asyncio.TimeoutError as exc:
-                    # The server may stall when busy. Say which one, since
-                    # the exception itself has no message
-                    if i == RETRIES:
-                        raise asyncio.TimeoutError(
-                            f"Patchwork '{self.url}' did not respond within "
-                            f'{REQUEST_TIMEOUT} seconds, after '
-                            f'{RETRIES + 1} tries') from exc
-                    await asyncio.sleep(i + 1)
-                except (aiohttp.ServerDisconnectedError,
-                        aiohttp.ClientOSError):
-                    # The server may drop or reset connections when busy
-                    if i == RETRIES:
-                        raise
-                    await asyncio.sleep(i + 1)
+            status, content = await self._fetch(client, full_url,
+                                                request_kind(subpath))
+        if status != 200:
+            raise ValueError(f"Could not read URL '{full_url}' "
+                             f'(status {status})')
+        return json.loads(content)
 
     def _get_cache(self):
         """Get the cache to use, opening the default one the first time
@@ -1042,8 +1063,9 @@ class Patchwork(SeriesFinder):
 
         The mbox URL lives directly under '/series/<link>/mbox/' rather
         than the JSON API, so this fetches the bytes directly rather
-        than routing through self._request(). It is cached, base64-encoded,
-        since the cache holds JSON
+        than routing through self._request(), but tries again in the same
+        way if the server is busy. It is cached, base64-encoded, since the
+        cache holds JSON
 
         Args:
             client (aiohttp.ClientSession): Session to use
@@ -1056,6 +1078,9 @@ class Patchwork(SeriesFinder):
 
         Raises:
             ValueError: if the download fails
+            aiohttp.ClientError: The server cannot be reached or keeps
+                dropping the connection
+            asyncio.TimeoutError: The server does not respond in time
         """
         subpath = f'series/{link}/mbox/'
         kept = self._from_cache(subpath, max_age)
@@ -1064,16 +1089,9 @@ class Patchwork(SeriesFinder):
         self.request_count += 1
         full_url = f'{self.url}/{subpath}'
         async with self.semaphore:
-            traffic.add(self.url, requests=1, kind='mbox')
-            with reqlog.attempt(full_url, 1) as tried:
-                async with client.get(
-                        full_url, proxy=get_proxy(full_url)) as response:
-                    content = await response.read()
-                    tried.done(response.status, len(content))
-            traffic.add(self.url, nbytes=len(content), kind='mbox')
-            if response.status != 200:
-                raise ValueError(
-                    f'Failed to download mbox: HTTP {response.status}')
+            status, content = await self._fetch(client, full_url, 'mbox')
+        if status != 200:
+            raise ValueError(f'Failed to download mbox: HTTP {status}')
         self._to_cache(subpath, base64.b64encode(content).decode('ascii'))
         return content
 
