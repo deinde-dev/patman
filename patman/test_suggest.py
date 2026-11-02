@@ -20,6 +20,7 @@ from patman.review import patchdata
 from patman.review import scan
 from patman.review import suggest
 from patman.review import suggest_rules
+from patman.review import suggest_tests
 from patman.test_common import CseriesTester, Namespace
 
 # Rules of each kind, as they might be in the settings
@@ -357,27 +358,28 @@ class TestSuggest(SuggestHelper):
         """What a series' list entry says is found for the tests"""
         pws = make_series(1, 'dm: core: Add a thing', version=3, count=2,
                           tag='RFC', days=4)
-        info = suggest.series_info(pws, NOW, True, ['new'])
+        info = suggest_tests.series_info(pws, NOW, True, ['new'])
         self.assertEqual(['dm: core: Add a thing 1', 'dm: core: Add a thing 2'],
                          info.subjects)
         self.assertEqual(('ann@x.org', 'ann acker', 2, 3, 4, True, True,
                           ['new']),
                          info[1:])
-        self.assertFalse(suggest.series_info(make_series(2, 'x'), NOW, False,
-                                             []).rfc)
+        self.assertFalse(suggest_tests.series_info(
+            make_series(2, 'x'), NOW, False, []).rfc)
 
         # Lore's dates have no time zone, and are in UTC; a series with no
         # patches is known by its name
         pws = {'id': 'a@x', 'name': '[PATCH] boot: Fix it',
                'date': '2026-10-29T11:00:00Z', 'submitter': {}}
-        info = suggest.series_info(pws, NOW, False, [])
+        info = suggest_tests.series_info(pws, NOW, False, [])
         self.assertEqual(['boot: Fix it'], info.subjects)
         self.assertEqual(3, info.age)
-        self.assertEqual(0, suggest.series_info({'id': 1}, NOW, False, []).age)
+        self.assertEqual(
+            0, suggest_tests.series_info({'id': 1}, NOW, False, []).age)
 
     def test_free_tests(self):
         """Each free test matches as it should"""
-        info = suggest.series_info(
+        info = suggest_tests.series_info(
             make_series(1, 'boot: Fix the order', version=2, count=4,
                         email='Bob@Chromium.org', who='Bob Builder', days=5),
             NOW, False, ['new', 'superseded'])
@@ -396,13 +398,14 @@ class TestSuggest(SuggestHelper):
                 rule = suggest_rules.parse_rule('r', f'{value} +1')
                 self.assertEqual(
                     (1 if matched else 0, ['r +1'] if matched else []),
-                    suggest.score_series([rule], info, suggest.FREE_TESTS))
+                    suggest_tests.score_series([rule], info,
+                                               suggest_tests.FREE_TESTS))
 
         # Every free test has code to run it
         self.assertEqual(
             sorted(name for name, test in suggest_rules.TESTS.items()
                    if test.cost == suggest_rules.FREE),
-            sorted(suggest.FREE_TESTS))
+            sorted(suggest_tests.FREE_TESTS))
 
     def test_score(self):
         """Scores add up, 'skip' leaves a series out and 'need' keeps it in"""
@@ -412,9 +415,9 @@ class TestSuggest(SuggestHelper):
             'only-boot': 'prefix boot: bootstd: need'}).rules
         def score(**kwargs):
             pws = make_series(1, kwargs.pop('name', 'boot: Fix it'), **kwargs)
-            return suggest.score_series(
-                rules, suggest.series_info(pws, NOW, False, []),
-                suggest.FREE_TESTS)
+            return suggest_tests.score_series(
+                rules, suggest_tests.series_info(pws, NOW, False, []),
+                suggest_tests.FREE_TESTS)
 
         self.assertEqual((4, ['boot +3', 'small +1']), score())
         self.assertEqual((1, ['boot +3', 'old -2']), score(count=3, days=25))
@@ -505,21 +508,22 @@ class TestSuggest(SuggestHelper):
         series = [make_series(100, 'boot: Fix it'),
                   make_series(101, 'video: Other')]
         recent = mock.AsyncMock(return_value=series)
-        values = {'boot': 'prefix boot: +2', 'mine': 'checks pass +3'}
+        checks = {'100': 'success', '101': 'fail'}
+        pwork.get_series_patches = mock.AsyncMock(
+            side_effect=lambda _client, link: [{'check': checks[link]}])
+        values = {'boot': 'prefix boot: +2', 'ci': 'checks pass +3'}
         with mock.patch.dict(suggest.settings.suggest, values, clear=True), \
                 mock.patch.object(scan, 'recent_series', recent), \
-                terminal.capture() as (out, err):
+                terminal.capture() as (out, _):
             self.assertEqual(0, suggest.do_suggest(Namespace(limit=None),
                                                    pwork, cser, {ME}, cser.db))
         self.assertEqual(
-            ['  2  boot: Fix it (v1, 2 patches)',
+            ['  5  boot: Fix it (v1, 2 patches)',
              '       https://my-fake-url/project/uboot/list/?series=100'
              '&state=*&archive=both',
-             '       boot +2',
+             '       boot +2, ci +3',
              '1 of 2 recent series suggested'],
             out.getvalue().splitlines())
-        self.assertIn("Suggest rule 'mine' uses 'checks', which --suggest "
-                      'does not run yet, so it is left out', err.getvalue())
         since = recent.call_args.args[2]
         self.assertEqual(
             {'partial': True, 'max_age': suggest.SUGGEST_MAX_AGE,
@@ -702,14 +706,14 @@ class TestSuggest(SuggestHelper):
                 rule = suggest_rules.parse_rule('r', f'{value} +1')
                 self.assertEqual(
                     1 if matched else 0,
-                    suggest.score_series([rule], info,
-                                         suggest.PATCH_TESTS)[0])
+                    suggest_tests.score_series([rule], info,
+                                         suggest_tests.PATCH_TESTS)[0])
 
         # Every test which needs only the patches has code to run it
         self.assertEqual(
             sorted(name for name, test in suggest_rules.TESTS.items()
                    if test.cost == suggest_rules.PATCH),
-            sorted(suggest.PATCH_TESTS))
+            sorted(suggest_tests.PATCH_TESTS))
 
     def test_prune(self):
         """Patches are read only for the series which could be suggested"""

@@ -10,6 +10,11 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman review --suggest`` runs the ``no-replies``, ``delegate`` and
+  ``checks`` tests, so every test in ``[suggest]`` now works. ``delegate``
+  and ``checks`` read the series' patch list from patchwork in one request,
+  and ``no-replies`` reads the comments only for a series of the right age,
+  stopping at the first reply.
 - ``patman review --discuss-reply ID`` starts a Claude session with Remote
   Control, to talk through a reply from the Claude app, carrying on from the
   session which wrote the review where it can. Once a response is agreed, the

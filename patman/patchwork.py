@@ -117,6 +117,10 @@ EVENTS_MAX_GAP = 7 * 24 * 60 * 60
 EVENTS_PER_PAGE = 100
 EVENTS_MAX_PAGES = 20
 
+# Most patches to ask for at once, for the patches of a series, which
+# patchwork allows by default
+MAX_PER_PAGE = 250
+
 # Maximum number of requests to send to patchwork at once. Busy servers may
 # block a client which opens a lot of connections, so keep this small
 MAX_CONCURRENT = 4
@@ -1057,6 +1061,26 @@ class Patchwork(SeriesFinder):
         """
         res = await self._request(client, f'patches/?series={link}')
         return [patch.get('state') for patch in res]
+
+    async def get_series_patches(self, client, link, max_age=PATCH_MAX_AGE):
+        """Get the patches of a series as patchwork lists them
+
+        Unlike get_patch(), this gives every patch in one request, with its
+        state, delegate and CI result ('check'), but not its text.
+
+        Args:
+            client (aiohttp.ClientSession): Session to use
+            link (str): Patchwork series ID
+            max_age (float or None): Oldest cached copy to use, in seconds; 0
+                to read patchwork, or None to use any
+
+        Returns:
+            list of dict: Patches, each as get_patch() gives it, but without
+                'content', 'diff' or 'headers'
+        """
+        return await self._cached_request(
+            client, f'patches/?series={link}&per_page={MAX_PER_PAGE}',
+            max_age)
 
     async def get_series_mbox(self, client, link, max_age=MBOX_MAX_AGE):
         """Download the raw mbox file for a series.

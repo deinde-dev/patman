@@ -20,6 +20,7 @@ from patman.review import explain
 from patman.review import history
 from patman.review import suggest
 from patman.review import suggest_rules
+from patman.review import suggest_tests
 from patman.test_common import Namespace
 from patman.test_lore import feed_entry
 from patman.test_suggest import (ME, NOW, PATCH, SuggestHelper, make_mbox,
@@ -190,18 +191,97 @@ class TestSuggestExtra(SuggestHelper):
         Returns:
             tuple:
                 Suggester: The suggester
-                Patchwork: Where the series come from, with get_series_mbox()
-                    and earlier_series() mocked
+                Patchwork: Where the series come from, with get_series_mbox(),
+                    earlier_series() and the comments mocked
         """
         cser = self.cser or self.get_database()
         pwork = patchwork.Patchwork.for_testing(None)
         pwork.project_set(1, 'uboot')
         pwork.get_series_mbox = mock.AsyncMock(return_value=make_mbox(PATCH))
         pwork.earlier_series = mock.AsyncMock(return_value=[])
+        pwork.get_cover_comments = mock.AsyncMock(return_value=[])
+        pwork.get_patch_comments = mock.AsyncMock(return_value=[])
         sug = suggest.Suggester(suggest_rules.get_rules(values), pwork, cser,
                                 {ME}, cser.db, NOW, 10, 'HEAD')
         sug._top = repo  # pylint: disable=W0212
         return sug, pwork
+
+    def test_replies_delegate_checks(self):
+        """no-replies, delegate and checks use the comments and patch list"""
+        series = [make_series(1, 'a: One', days=5),
+                  make_series(2, 'b: Two', days=5),
+                  make_series(3, 'c: Three', days=1)]
+        series[0]['cover_letter']['id'] = 100
+        ann = {'name': 'Ann Acker', 'email': 'ann@x.org'}
+        tom = {'name': 'Tom Rini', 'email': 'trini@x.org'}
+        comments = {11: [{'submitter': ann}], 12: [], 21: [{'submitter': tom}],
+                    22: [{'submitter': tom}]}
+        lists = {
+            '1': [{'delegate': {'username': 'me', 'email': ME},
+                   'check': 'success'},
+                  {'delegate': None, 'check': 'success'}],
+            '2': [{'delegate': None, 'check': 'fail'},
+                  {'delegate': None, 'check': 'success'}],
+            '3': [{'delegate': None, 'check': None}]}
+        values = {'quiet': 'no-replies 3- +2', 'mine': 'delegate me +3',
+                  'nobody': 'delegate none +1', 'ci': 'checks fail -1'}
+        cser = self.get_database()
+        pwork = patchwork.Patchwork.for_testing(None)
+        pwork.get_cover_comments = mock.AsyncMock(return_value=[])
+        pwork.get_patch_comments = mock.AsyncMock(
+            side_effect=lambda _client, pid: comments[pid])
+        pwork.get_series_patches = mock.AsyncMock(
+            side_effect=lambda _client, link: lists[link])
+        sug = suggest.Suggester(suggest_rules.get_rules(values), pwork, cser,
+                                {ME}, cser.db, NOW, 10, 'HEAD')
+        found = sug.find(series)
+
+        # Only the submitter replied to the first, which is delegated to
+        # you; Tom replied to the second, whose CI failed; the third is too
+        # new for 'quiet' and has no delegate
+        self.assertEqual(
+            [(1, 5, ['mine +3', 'quiet +2']), (3, 1, ['nobody +1'])],
+            [(sug.pws['id'], sug.score, sug.reasons) for sug in found])
+
+        # The replies are read until one is found, and not at all for a
+        # series too new for the rule
+        pwork.get_cover_comments.assert_called_once_with(mock.ANY, 100)
+        reads = pwork.get_patch_comments.call_args_list
+        self.assertEqual([11, 12, 21], [call.args[1] for call in reads])
+
+        extra = common.run(sug.extra(None, series[1], None))
+        self.assertEqual(
+            [suggest_tests.Result(False, 'reply from Tom Rini'),
+             suggest_tests.Result(False, 'none'),
+             suggest_tests.Result(True, '1 fail, 1 success'),
+             suggest_tests.Result(False, '1 fail, 1 success')],
+            [suggest_tests.EXTRA_TESTS['no-replies']((3, None), extra),
+             suggest_tests.EXTRA_TESTS['delegate'](('me',), extra),
+             suggest_tests.EXTRA_TESTS['checks'](('fail',), extra),
+             suggest_tests.EXTRA_TESTS['checks'](('pass',), extra)])
+        extra = common.run(sug.extra(None, series[0], None))
+        self.assertEqual(
+            [suggest_tests.Result(True, 'no replies, 5 days'),
+             suggest_tests.Result(True, 'me'),
+             suggest_tests.Result(True, '2 success')],
+            [suggest_tests.EXTRA_TESTS['no-replies']((3, None), extra),
+             suggest_tests.EXTRA_TESTS['delegate'](('me',), extra),
+             suggest_tests.EXTRA_TESTS['checks'](('pass',), extra)])
+        self.assertEqual(
+            suggest_tests.Result(False, '3 days'),
+            suggest_tests.EXTRA_TESTS['no-replies']((5, None), extra._replace(
+                age=3, replier=None)))
+
+        # On lore there are no delegates or CI results
+        lore = suggest_tests.Extra({}, False, '')
+        self.assertEqual(
+            [suggest_tests.Result(False, 'not known')] * 2,
+            [suggest_tests.EXTRA_TESTS['delegate'](('none',), lore),
+             suggest_tests.EXTRA_TESTS['checks'](('pass',), lore)])
+        sug.pwork = mock.Mock(spec=['get_patch_comments'])
+        found = common.run(
+            sug._patch_list(None, series[0]))  # pylint: disable=W0212
+        self.assertEqual((None, False, None), found)
 
     def test_explain(self):
         """--explain shows what each rule finds, even those not reached"""
@@ -219,7 +299,7 @@ class TestSuggestExtra(SuggestHelper):
             "  i2c    path 'drivers/i2c/**'  yes    +3     drivers/i2c/x.c",
             '  spi    not word spi           yes    +1     5 lines',
             '  fresh  newcomer               yes    +2     no earlier series',
-            "Rule 'quiet' uses 'no-replies', which is not run yet",
+            '  quiet  no-replies 3-          no     +1     1 day',
             'Score 6: suggested if among the best 10 recent series'],
             explain.explain(sug, make_series(1, 'i2c: New', email='new@x.org'),
                             'https://pw/1'))
@@ -240,12 +320,12 @@ class TestSuggestExtra(SuggestHelper):
                             'https://pw/1')[-1])
 
         # Only the prefixes of the subjects are shown, each once
-        info = suggest.series_info(make_series(1, 'i2c: x: New'), NOW, False,
-                                   [])
-        self.assertEqual(suggest.Result(True, 'i2c: x:'),
-                         suggest.FREE_TESTS['prefix'](('i2c:',), info))
-        self.assertEqual(suggest.Result(False, 'i2c: x:'),
-                         suggest.FREE_TESTS['prefix'](('dm:',), info))
+        info = suggest_tests.series_info(make_series(1, 'i2c: x: New'),
+                                         NOW, False, [])
+        self.assertEqual(suggest_tests.Result(True, 'i2c: x:'),
+                         suggest_tests.FREE_TESTS['prefix'](('i2c:',), info))
+        self.assertEqual(suggest_tests.Result(False, 'i2c: x:'),
+                         suggest_tests.FREE_TESTS['prefix'](('dm:',), info))
 
         # A series which cannot be read shows what is known
         sug.pwork.get_series_mbox.side_effect = ValueError('No mbox')

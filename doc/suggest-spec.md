@@ -136,8 +136,8 @@ Each test has a cost, which sets the order they run in (see section 3).
 | `to-me` | you are in To: or Cc: of some patch | patch headers | per patch |
 | `no-replies RANGE` | days since it was sent, with no comments from anyone but the submitter | comments of each patch | extra request |
 | `fixes` | a Fixes: tag names one of your commits | patch content, git log in your repo | per patch |
-| `delegate me\|none` | the patches' patchwork delegate | detail of each patch | extra request |
-| `checks pass\|fail` | patchwork's CI result | checks for each patch | per patch, extra request |
+| `delegate me\|none` | the patches' patchwork delegate | the series' patch list | extra request |
+| `checks pass\|fail` | patchwork's CI result | the series' patch list | extra request |
 | `blame` | it changes lines you wrote | diff, git blame in your repo | per patch, slow locally |
 | `newcomer` | the submitter has no earlier series | a search by submitter | extra request |
 
@@ -149,8 +149,8 @@ Notes:
 - The tests marked 'per patch' read the series' mbox, which holds all its
   patches, with the tags patchwork collected from replies, so they cost one
   request per series. Patchwork has no events for comments, so 'no-replies'
-  needs the comments of each patch, and 'delegate' and 'checks' the detail
-  of each patch, which makes them extra requests
+  needs the comments of each patch, and 'delegate' and 'checks' the
+  series' patch list, which makes them extra requests
 - On patchwork, an mbox read in the last hour is used again
   (MBOX_MAX_AGE); it is not kept for good, since its tags change as
   reviews come in
@@ -225,7 +225,8 @@ it, so a reload does not run the costly tests again.
 3. The per-patch tests (from the mbox), the pruning and max_reads, with
    tests counting the mboxes read
 4. fixes, blame and newcomer, and --explain
-5. no-replies, delegate and checks
+5. no-replies, delegate and checks (the latter two from one request for
+   the series' patch list, rather than one for each patch)
 6. The 'Suggested' group in the inbox, with its reasons on each card
 
 ## Decisions
