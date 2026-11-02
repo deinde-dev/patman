@@ -4,6 +4,7 @@
 #
 """Functional tests for checking that patman behaves correctly"""
 
+import atexit
 import functools
 import os
 import re
@@ -45,17 +46,32 @@ def clear_git_env():
         os.environ.pop(var, None)
 
 
+# The identity which git gives the tests
+TEST_IDENTITY = '''[user]
+	name = Patman Test
+	email = patman-test@example.com
+'''
+
+
 def isolate():
     """Keep the tests away from the user's settings, caches and network
 
     This is used by 'patman test' and by pytest (see conftest.py). Besides
     clear_git_env(), it turns off the patchwork cache, the request log and
-    lore, so that tests do not see each other's results or the user's
+    lore, so that tests do not see each other's results or the user's, and
+    gives git a global config of its own, with an identity, so that the
+    tests do not depend on the user's, or fail where there is none, e.g. in
+    a package build
     """
     clear_git_env()
     os.environ['PATMAN_PWCACHE'] = 'off'
     os.environ['PATMAN_REQLOG'] = 'off'
     lore.set_mode('off')
+    tmpdir = tempfile.mkdtemp(prefix='patman-git.')
+    atexit.register(shutil.rmtree, tmpdir, ignore_errors=True)
+    fname = os.path.join(tmpdir, 'gitconfig')
+    tools.write_file(fname, TEST_IDENTITY, binary=False)
+    os.environ['GIT_CONFIG_GLOBAL'] = fname
 
 
 def find_source_dir():
