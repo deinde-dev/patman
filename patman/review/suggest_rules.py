@@ -100,6 +100,14 @@ TESTS = {
 # The settings in [suggest] which are not rules, with their defaults
 FIXED = {'limit': 10, 'min_score': 1, 'days': 30, 'max_reads': 30}
 
+# The rules used when the settings give none of their own, so that
+# --suggest is useful from the start: series like those you reviewed, then
+# small ones, which are a good place to start reviewing
+DEFAULT_RULES = {
+    'similar': 'similar  +2',
+    'small': 'patches -5  +1',
+}
+
 
 # A score which adds to the series' score, e.g. '+3' or '-2'
 RE_SCORE = re.compile(r'^[+-]\d+$')
@@ -109,8 +117,10 @@ RE_SCORE = re.compile(r'^[+-]\d+$')
 # which is an int, or 'skip' or 'need'
 Rule = namedtuple('Rule', 'name,test,args,negate,score')
 
-# The rules, in order of cost, then name, with the fixed settings
-Rules = namedtuple('Rules', 'rules,limit,min_score,days,max_reads')
+# The rules, in order of cost, then name, with the fixed settings, and
+# whether they are the DEFAULT_RULES
+Rules = namedtuple('Rules', 'rules,limit,min_score,days,max_reads,default',
+                   defaults=(False,))
 
 
 def _parse_list(test, kind, words):
@@ -266,6 +276,9 @@ def _parse_fixed(name, value):
 def get_rules(values=None):
     """Get the rules for suggesting series, from the [suggest] settings
 
+    The DEFAULT_RULES are used if the settings give no rules, other than
+    'off' to turn one of them off
+
     Args:
         values (dict or None): Settings, or None to use those read from the
             config (settings.suggest)
@@ -277,6 +290,10 @@ def get_rules(values=None):
         ValueError: A rule or setting is not valid
     """
     values = settings.suggest if values is None else values
+    default = not any(name not in FIXED and value.strip().lower() != 'off'
+                      for name, value in values.items())
+    if default:
+        values = {**DEFAULT_RULES, **values}
     fixed = dict(FIXED)
     rules = []
     for name, value in values.items():
@@ -288,7 +305,7 @@ def get_rules(values=None):
             rules.append(rule)
     rules.sort(key=lambda rule: (TESTS[rule.test].cost, rule.name))
     return Rules(rules, fixed['limit'], fixed['min_score'], fixed['days'],
-                 fixed['max_reads'])
+                 fixed['max_reads'], default and bool(rules))
 
 
 def check_rules(rules, on_lore):
@@ -376,7 +393,11 @@ def show_rules(rules, project):
     if not rules.rules:
         return [f'No rules for suggesting {project} series: add them to the '
                 '[suggest] section of the settings']
-    lines = [f'Rules for suggesting {project} series:']
+    if rules.default:
+        lines = [f'Default rules for suggesting {project} series, since the '
+                 '[suggest] section of the settings has none:']
+    else:
+        lines = [f'Rules for suggesting {project} series:']
     width = max(len(rule.name) for rule in rules.rules)
     cost = None
     for rule in rules.rules:

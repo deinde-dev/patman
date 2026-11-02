@@ -435,7 +435,9 @@ class TestSuggestExtra(SuggestHelper):
                          out.getvalue().splitlines()[-1])
 
         # Without rules, it says so
-        with mock.patch.dict(suggest.settings.suggest, {}, clear=True), \
+        with mock.patch.dict(suggest.settings.suggest,
+                             {'similar': 'off', 'small': 'off'},
+                             clear=True), \
                 terminal.capture() as (_, err):
             self.assertEqual(1, explain.do_explain(
                 Namespace(limit=None), pwork, cser, {ME}, cser.db, '100'))

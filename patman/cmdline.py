@@ -1020,8 +1020,9 @@ def add_review_subparser(subparsers):
              '(default: 8)')
     review.add_argument(
         '--suggest', action='store_true',
-        help='Suggest recent series to review, by your rules in the '
-             '[suggest] settings, best first, with the reasons for each')
+        help='Suggest recent series to review, best first, with the reasons '
+             'for each, by your rules in the [suggest] settings, or else '
+             'small ones and those like the series you reviewed before')
     review.add_argument(
         '--explain', type=str, metavar='SERIES',
         help='Show how your rules for suggesting series score a series, '

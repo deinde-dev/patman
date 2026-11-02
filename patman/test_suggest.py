@@ -26,6 +26,9 @@ from patman.review import suggest_tests
 from patman.test_common import CseriesTester, Namespace
 
 # Rules of each kind, as they might be in the settings
+# Settings which turn off the default rules, leaving none
+NO_RULES = {'similar': 'off', 'small': 'off'}
+
 RULES = {
     'i2c': 'path drivers/i2c/** arch/arm/mach-bcm283x/**  +3',
     'listed': 'maintainer r +3',
@@ -220,9 +223,31 @@ class TestSuggest(SuggestHelper):
                          (rules.limit, rules.min_score, rules.days,
                           rules.max_reads))
 
-        # Without settings, there are no rules, and the defaults
+        # Without rules in the settings, the default rules are used, with
+        # the default settings
+        rules = suggest_rules.get_rules({})
+        self.assertTrue(rules.default)
+        self.assertEqual(
+            [suggest_rules.Rule('similar', 'similar', (), False, 2),
+             suggest_rules.Rule('small', 'patches', (None, 5), False, 1)],
+            rules.rules)
+        self.assertEqual((10, 1, 30, 30), rules[1:5])
+
+        # One can be turned off, leaving the other, and fixed settings apply
+        rules = suggest_rules.get_rules({'small': 'off', 'limit': '4'})
+        self.assertEqual((['similar'], 4, True),
+                         ([rule.name for rule in rules.rules], rules.limit,
+                          rules.default))
+
+        # With both off, there are none
         self.assertEqual(suggest_rules.Rules([], 10, 1, 30, 30),
-                         suggest_rules.get_rules({}))
+                         suggest_rules.get_rules(NO_RULES))
+
+        # A rule of your own replaces them
+        self.assertEqual(['mine'], [rule.name for rule in suggest_rules.get_rules(
+            {'mine': 'similar 5-10 +1'}).rules])
+        self.assertEqual((5, 10), suggest_rules.parse_rule(
+            'x', 'similar 5-10 +1').args)
 
         # With 'maintainer' and no roles, both match
         self.assertEqual(('M', 'R'),
@@ -319,7 +344,7 @@ class TestSuggest(SuggestHelper):
         self.assertEqual(
             ['No rules for suggesting dtc series: add them to the [suggest] '
              'section of the settings'],
-            suggest_rules.show_rules(suggest_rules.get_rules({}), 'dtc'))
+            suggest_rules.show_rules(suggest_rules.get_rules(NO_RULES), 'dtc'))
 
         # A shown rule reads back as the same rule
         for rule in suggest_rules.get_rules(RULES).rules:
@@ -350,7 +375,16 @@ class TestSuggest(SuggestHelper):
                 lorelist.LoreList('https://lore.kernel.org/dtc')))
         self.assertIn("'mine' uses 'delegate'", err.getvalue())
 
+        # Without rules of your own, the default ones are shown
         with mock.patch.dict(suggest.settings.suggest, {}, clear=True), \
+                terminal.capture() as (out, err):
+            self.assertEqual(0, suggest_rules.do_rules(pwork))
+        self.assertIn('Default rules for suggesting', out.getvalue())
+        self.assertIn('    similar  similar  +2', out.getvalue())
+        self.assertIn('    small    patches -5  +1', out.getvalue())
+
+        with mock.patch.dict(suggest.settings.suggest, NO_RULES,
+                             clear=True), \
                 terminal.capture() as (out, err):
             self.assertEqual(1, suggest_rules.do_rules(pwork))
         self.assertIn('No rules for suggesting', out.getvalue())
@@ -627,7 +661,8 @@ class TestSuggest(SuggestHelper):
                 '%Y-%m-%d'), since)
 
         # Without rules, it says so
-        with mock.patch.dict(suggest.settings.suggest, {}, clear=True), \
+        with mock.patch.dict(suggest.settings.suggest, NO_RULES,
+                             clear=True), \
                 terminal.capture() as (out, err):
             self.assertEqual(1, suggest.do_suggest(Namespace(limit=None),
                                                    pwork, cser, {ME}, cser.db))
@@ -650,7 +685,8 @@ class TestSuggest(SuggestHelper):
               for sug in data['suggestions']]))
         self.assertEqual((['It never matches'], ''),
                          (data['warnings'], err.getvalue()))
-        with mock.patch.dict(suggest.settings.suggest, {}, clear=True), \
+        with mock.patch.dict(suggest.settings.suggest, NO_RULES,
+                             clear=True), \
                 terminal.capture() as (out, _):
             self.assertEqual(0, suggest.do_suggest(
                 Namespace(limit=None, json=True), pwork, cser, {ME}, cser.db))
