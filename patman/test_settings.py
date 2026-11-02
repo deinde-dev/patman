@@ -4,6 +4,7 @@
 #
 
 import contextlib
+import io
 import os
 import sys
 import tempfile
@@ -12,6 +13,8 @@ from unittest import mock
 
 from patman import cmdline
 from patman import settings
+from u_boot_pylib import command
+from u_boot_pylib import terminal
 from u_boot_pylib import tools
 
 
@@ -147,6 +150,36 @@ class TestSettings(unittest.TestCase):
                     args, _ = parser.parse_known_args([])
                     self.assertEqual('base-proj', args.project)
                     create.assert_called_once()
+
+    def test_create_config(self):
+        # ~/.patman is made from the git identity; without one, and nobody
+        # to ask, it is not made, rather than failing
+        exc = command.CommandExc('Error running git config', None)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fname = os.path.join(tmpdir, '.patman')
+            with mock.patch.object(settings.gitutil, 'get_default_user_name',
+                                   side_effect=exc), \
+                    mock.patch.object(settings.gitutil,
+                                      'get_default_user_email',
+                                      return_value='ann@x.org'), \
+                    mock.patch.object(sys, 'stdin', io.StringIO()), \
+                    terminal.capture() as (out, err):
+                self.assertFalse(settings.CreatePatmanConfigFile(fname))
+            self.assertFalse(os.path.exists(fname))
+            self.assertEqual('', out.getvalue())
+            self.assertIn('git has no user.name or user.email',
+                          err.getvalue())
+
+            with mock.patch.object(settings.gitutil, 'get_default_user_name',
+                                   return_value='Ann Acker'), \
+                    mock.patch.object(settings.gitutil,
+                                      'get_default_user_email',
+                                      return_value='ann@x.org'), \
+                    terminal.capture() as (out, _):
+                self.assertTrue(settings.CreatePatmanConfigFile(fname))
+            self.assertIn('Creating ~/.patman', out.getvalue())
+            self.assertIn('me: Ann Acker <ann@x.org>',
+                          tools.read_file(fname, binary=False))
 
     def test_review_section(self):
         # The [review] section is layered like [settings], and a relative

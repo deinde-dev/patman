@@ -15,6 +15,7 @@ import os
 import re
 import sys
 
+from u_boot_pylib import command
 from u_boot_pylib import gitutil
 
 """Default settings per-project.
@@ -196,21 +197,45 @@ def ReadGitAliases(fname):
     fd.close()
 
 
+def _git_identity(get):
+    """Get part of the git identity, if git has it
+
+    Args:
+        get (function): gitutil function to call, e.g.
+            gitutil.get_default_user_name
+
+    Returns:
+        str or None: What git gives, or None if it has none
+    """
+    try:
+        return get() or None
+    except command.CommandExc:
+        return None
+
+
 def CreatePatmanConfigFile(config_fname):
     """Creates a config file under $(HOME)/.patman if it can't find one.
+
+    The name and email come from git, else they are asked for. If git does
+    not have them and there is nobody to ask, e.g. in a build, no file is
+    created
 
     Args:
         config_fname: Default config filename i.e., $(HOME)/.patman
 
     Returns:
-        None
+        bool: True if the file is created
     """
-    name = gitutil.get_default_user_name()
+    name = _git_identity(gitutil.get_default_user_name)
+    email = _git_identity(gitutil.get_default_user_email)
+    if not (name and email) and not sys.stdin.isatty():
+        print(f'Not creating {config_fname}, since git has no user.name or '
+              'user.email', file=sys.stderr)
+        return False
+
+    print("No config file found.\nCreating ~/.patman...\n")
     if name is None:
         name = input("Enter name: ")
-
-    email = gitutil.get_default_user_email()
-
     if email is None:
         email = input("Enter email: ")
 
@@ -227,6 +252,7 @@ me: %s <%s>
 nxp = Zhikang Zhang <zhikang.zhang@nxp.com>
 ''' % (name, email), file=f)
     f.close()
+    return True
 
 
 def _UpdateDefaults(main_parser, config, argv):
@@ -478,7 +504,6 @@ def Setup(parser, project_name, argv, config_fname=None):
     # A shipped .patman-defaults must not suppress creating the user's own
     # config, so has_base_config is deliberately excluded from this test
     if config_fname is not False and not (has_config or has_git_local_config):
-        print("No config file found.\nCreating ~/.patman...\n")
         CreatePatmanConfigFile(config_fname)
 
     for name, value in GetItems(config, 'alias'):

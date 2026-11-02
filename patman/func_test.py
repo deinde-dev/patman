@@ -635,13 +635,20 @@ Commit-fred: testing
 
     def test_self_test(self):
         """Test a tested by tag by this user"""
-        test_line = 'Tested-by: %s@napier.com' % os.getenv('USER')
+        test_line = 'Tested-by: fred@napier.com'
         text = '''This is a patch
 
 %s
 ''' % test_line
-        pstrm = PatchStream.process_text(text)
+        with mock.patch.dict(os.environ, {'USER': 'fred'}):
+            pstrm = PatchStream.process_text(text)
         self.assertEqual(["Ignoring '%s'" % test_line], pstrm.commit.warn)
+
+        # Without USER, the tag is kept
+        with mock.patch.dict(os.environ):
+            os.environ.pop('USER', None)
+            pstrm = PatchStream.process_text(text)
+        self.assertEqual([], pstrm.commit.warn)
 
     def test_space_before_tab(self):
         """Test a space before a tab"""
@@ -744,7 +751,7 @@ diff --git a/lib/efi_loader/efi_memory.c b/lib/efi_loader/efi_memory.c
         finally:
             os.chdir(orig_dir)
 
-    def run_patman(self, *args):
+    def run_patman(self, *args, env=None):
         """Run patman using the provided arguments
 
         This runs the patman executable from scratch, as opposed to calling
@@ -752,17 +759,24 @@ diff --git a/lib/efi_loader/efi_memory.c b/lib/efi_loader/efi_memory.c
 
         Args:
             args (list of str): Arguments to pass (excluding argv[0])
+            env (dict or None): Environment to run it in, or None for this
+                one
 
         Return:
             CommandResult: Result of execution
         """
         all_args = self._patman_cmd + list(args)
-        return command.run_one(*all_args, capture=True, capture_stderr=True)
+        return command.run_one(*all_args, capture=True, capture_stderr=True,
+                               env=env)
 
     def test_full_help(self):
         """Test getting full help"""
         command.TEST_RESULT = None
-        result = self.run_patman('-H')
+        # Use a config file, so that patman does not create one and say so
+        home = os.path.join(self.tmpdir, 'home')
+        os.mkdir(home)
+        tools.write_file(os.path.join(home, '.patman'), b'')
+        result = self.run_patman('-H', env=dict(os.environ, HOME=home))
         # Remove the file-name banner which 'more' may add
         gothelp = re.sub(r'^:{14}\n.*\n:{14}\n', '', result.stdout)
         self.assertEqual(control.full_help_text(), gothelp)
