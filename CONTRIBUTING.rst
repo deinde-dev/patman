@@ -107,7 +107,7 @@ APIs other than Gmail's, which would make it considerably larger.
 Continuous integration
 ----------------------
 
-The *Tests* workflow runs the suite on Python 3.10-3.12 and builds and
+The *Tests* workflow runs the suite on Python 3.10-3.14 and builds and
 checks the package on every push and pull request.
 
 Making a release
