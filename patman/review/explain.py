@@ -10,6 +10,7 @@ shows what each test saw, to help in writing the rules.
 """
 
 from datetime import datetime, timezone
+import json
 
 import aiohttp
 
@@ -103,8 +104,8 @@ def _run(rule, facts):
     return tests[rule.test](rule.args, known) if known is not None else None
 
 
-def _table(rules, results):
-    """Show what each rule found, as a table
+def _rows(rules, results):
+    """Get what each rule found
 
     Args:
         rules (list of Rule): Rules run, in order
@@ -113,10 +114,11 @@ def _table(rules, results):
 
     Returns:
         tuple:
-            list of str: Lines of the table
+            list of tuple: One row for each rule: its name, test, whether it
+                matched ('yes', 'no' or '?'), score and what it saw
             int: Score from the rules which add to it
     """
-    rows = [('Rule', 'Test', 'Match', 'Score', 'Seen')]
+    rows = []
     score = 0
     for rule, res in zip(rules, results):
         if res is None:
@@ -129,10 +131,48 @@ def _table(rules, results):
         rows.append((rule.name, suggest_rules.rule_text(rule),
                      'yes' if matched else 'no',
                      suggest_rules.score_text(rule), res.seen))
+    return rows, score
+
+
+def _table(rows):
+    """Show what each rule found, as a table
+
+    Args:
+        rows (list of tuple): Rows, as from _rows()
+
+    Returns:
+        list of str: Lines of the table
+    """
+    rows = [('Rule', 'Test', 'Match', 'Score', 'Seen')] + rows
     widths = [max(len(row[col]) for row in rows) for col in range(4)]
     return ['  ' + '  '.join(f'{text:{width}}'
                              for text, width in zip(row, widths)) +
-            f'  {row[4]}' for row in rows], score
+            f'  {row[4]}' for row in rows]
+
+
+def explain_data(sug, pws):
+    """Find how the rules score a series
+
+    Args:
+        sug (suggest.Suggester): Suggester holding the rules
+        pws (dict): Series, as from patchwork or lore
+
+    Returns:
+        dict: The series' 'title', the 'rows' from _rows(), its 'score',
+            any 'problems' in testing it and the 'verdict'
+    """
+    done, facts, problems = common.run(_facts(sug, pws))
+    rules = sug.rules.rules
+    results = [_run(rule, facts) for rule in rules]
+    rows, score = _rows(rules, results)
+    if lookup.is_own_series(pws, sug.emails, sug.own_db):
+        verdict = 'Not suggested: it is your own series'
+    elif done:
+        verdict = 'Not suggested: you have reviewed this version'
+    else:
+        verdict = _verdict(sug, rules, results, score)
+    return {'title': suggest.series_title(pws), 'rows': rows, 'score': score,
+            'problems': problems, 'verdict': verdict}
 
 
 def explain(sug, pws, url):
@@ -146,19 +186,9 @@ def explain(sug, pws, url):
     Returns:
         list of str: Lines to show
     """
-    lines = [suggest.series_title(pws), f'  {url}']
-    done, facts, problems = common.run(_facts(sug, pws))
-    rules = sug.rules.rules
-    results = [_run(rule, facts) for rule in rules]
-    table, score = _table(rules, results)
-    lines += table + problems
-    if lookup.is_own_series(pws, sug.emails, sug.own_db):
-        lines.append('Not suggested: it is your own series')
-    elif done:
-        lines.append('Not suggested: you have reviewed this version')
-    else:
-        lines.append(_verdict(sug, rules, results, score))
-    return lines
+    data = explain_data(sug, pws)
+    return ([data['title'], f'  {url}'] + _table(data['rows']) +
+            data['problems'] + [data['verdict']])
 
 
 # pylint: disable-next=R0913
@@ -166,7 +196,7 @@ def do_explain(args, pwork, cser, own_emails, own_db, link):
     """Show how the rules for suggesting series score one series
 
     Args:
-        args (Namespace): Command-line arguments (for limit)
+        args (Namespace): Command-line arguments (for limit and json)
         pwork (Patchwork or LoreList): Where the series comes from
         cser (Cseries): Open cseries instance with the reviews
         own_emails (set of str): Your email addresses, in lower case
@@ -194,6 +224,9 @@ def do_explain(args, pwork, cser, own_emails, own_db, link):
                             getattr(args, 'limit', None) or rules.limit,
                             suggest.upstream_ref(args, cser, rules))
     url = common.run(pwork.get_series_url(link))
+    if getattr(args, 'json', False):
+        print(json.dumps({**explain_data(sug, pws), 'url': url}))
+        return 0
     for line in explain(sug, pws, url):
         print(line)
     return 0

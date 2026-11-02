@@ -353,9 +353,13 @@ function showError(err, tab) {
 
 // A search box and optional filter chips above a list of cards. Each item
 // is {card, text, groups} where text is searched and groups lists the
-// filters the item belongs to. Each filter is [id, label, tooltip]. The tip
-// says what the search box looks in
-function filteredList(key, items, filters, tip) {
+// filters the item belongs to. Each filter is [id, label, tooltip, opts],
+// where the optional opts may have an 'order' to sort the items by while it
+// is chosen, an 'empty' text and a 'note' element to show below the count.
+// The tip says what the search box looks in. If 'ctl' is given, it gets
+// update(), to show the filters again after one is changed, and replace(),
+// to show new items
+function filteredList(key, items, filters, tip, ctl) {
   let current = filters ? filters[0][0] : null;
   const saved = lsGet(`patman-filter-${key}`);
   if (filters && filters.some(([id]) => id === saved)) current = saved;
@@ -364,7 +368,20 @@ function filteredList(key, items, filters, tip) {
   const count = h('div', { class: 'section' });
   const empty = h('div', { class: 'empty', hidden: true }, 'Nothing matches');
   const chips = filters ? h('div', { class: 'tabs' }) : null;
+  const notes = h('div', {}, (filters || []).map(([, , , opts]) => opts && opts.note));
+  const list = h('div', { class: 'list' }, items.map((it) => it.card));
+  let sorted = false;
   const update = () => {
+    const opts = ((filters || []).find(([id]) => id === current) || [])[3] || {};
+    // Put the cards in order for this filter, or back as they came
+    if (opts.order || sorted) {
+      list.append(...(opts.order ? [...items].sort(opts.order) : items).map((it) => it.card));
+      sorted = !!opts.order;
+    }
+    for (const [, , , o] of filters || []) {
+      if (o && o.note) o.note.hidden = o !== opts;
+    }
+    empty.textContent = opts.empty || 'Nothing matches';
     const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
     let shown = 0;
     for (const it of items) {
@@ -387,9 +404,18 @@ function filteredList(key, items, filters, tip) {
   };
   for (const it of items) it.text = it.text.toLowerCase();
   search.addEventListener('input', update);
+  if (ctl) {
+    ctl.update = update;
+    ctl.replace = (fresh) => {
+      for (const it of fresh) it.text = it.text.toLowerCase();
+      items = fresh;
+      list.replaceChildren(...items.map((it) => it.card));
+      sorted = false;
+      update();
+    };
+  }
   update();
-  return [search, chips, count, h('div', { class: 'list' }, items.map((it) => it.card)),
-          empty];
+  return [search, chips, count, notes, list, empty];
 }
 
 // --- Series ---
@@ -2373,6 +2399,7 @@ function inboxDetails(s, ups, jobBox) {
       reviewBtn.replaceWith(busyLink(job.id));
     }, s.patches.length > 1);
   const [tryBtn, tryBox] = tryButton(s.id, ups, s.review_branch, s.review_name);
+  const explainBox = h('div', {});
   return h('div', { class: 'comments' },
     h('div', { class: 'list' }, cover, s.patches.map((p, i) => h('div', { class: 'row' },
       h('span', { class: 'seq' }, i + 1),
@@ -2395,10 +2422,42 @@ function inboxDetails(s, ups, jobBox) {
         } }, 'Remove'),
       s.web_url && extLink(s.web_url, siteName(s.web_url),
                            `Open the series on ${siteName(s.web_url)}, in a new tab`,
-                           'btn light small')),
-    reviewBox, tryBox,
+                           'btn light small'),
+      inbox && inbox.suggestOn && h('button', {
+        class: 'btn light small',
+        title: 'Show how your rules for suggesting series score this one, and what ' +
+               'each test saw',
+        onclick: (ev) => {
+          ev.target.disabled = true;
+          explainBox.replaceChildren(h('div', { class: 'spinner' }, 'Running the rules…'));
+          inboxExplain(s, ups).then((box) => explainBox.replaceChildren(box))
+            .catch((err) => explainBox.replaceChildren(errorBox(err)))
+            .finally(() => { ev.target.disabled = false; });
+        } }, 'Explain')),
+    reviewBox, tryBox, explainBox,
     s.earlier && s.earlier.parts.length > 0 && earlierDetails(s.earlier, ups),
     s.older && s.older.length > 0 && olderDetails(s.older, ups));
+}
+
+// Show how the rules for suggesting series score one, as 'patman review
+// --explain' does: each rule, whether it matched and what its test saw
+async function inboxExplain(s, ups) {
+  const data = await api(`inbox/explain?ups=${encodeURIComponent(ups)}` +
+                         `&series=${encodeURIComponent(s.id)}`);
+  const MATCH = { yes: 'st-accepted', no: 'st-other', '?': 'st-changes-requested' };
+  const TIP = { yes: 'The rule matches', no: 'The rule does not match',
+                '?': 'What this test needs could not be found out' };
+  return h('div', {},
+    h('div', { class: 'section' }, 'Suggest rules'),
+    h('div', { class: 'list' }, data.rows.map(([name, test, match, score, seen]) =>
+      h('div', { class: 'row' },
+        h('div', { class: 'grow' },
+          h('span', { class: 'name' }, name), ' ', h('span', { class: 'ver' }, test),
+          h('div', { class: 'desc' }, seen)),
+        h('span', { class: `chip ${MATCH[match] || 'st-other'}`, title: TIP[match] },
+          match === 'yes' ? score : match)))),
+    [...data.problems, ...data.warnings].map((w) => h('div', { class: 'desc' }, w)),
+    h('div', { class: 'desc' }, data.verdict));
 }
 
 // Show your review of an earlier version of a series in the inbox, which is
@@ -2580,6 +2639,10 @@ function inboxCard(s, ups) {
                'are waiting for your response' },
         nreplies(s.earlier.replies)),
       nextChip(s),
+      s.suggest && h('span', {
+        class: 'chip st-new', title: 'Its score from your rules for suggesting series ' +
+                                     `to review: ${s.suggest.reasons.join(', ')}` },
+        `score ${s.suggest.score}`),
       s.mine && h('span', { class: 'chip st-other' }, 'yours'),
       s.added && h('span', { class: 'chip st-other',
                              title: 'You added this series to the inbox' }, 'added'),
@@ -2589,7 +2652,10 @@ function inboxCard(s, ups) {
         class: 'chip st-other', title: 'Older versions of this series are in the inbox too; ' +
                                        'tap the series to see them' },
         `also ${s.older.map((o) => `v${o.version || 1}`).join(', ')}`),
-      jobBox));
+      jobBox),
+    s.suggest && s.suggest.reasons.length > 0 && h('div', {
+      class: 'desc', title: 'The rules which suggest this series, with their scores' },
+      s.suggest.reasons.join(', ')));
   if (s.job) inboxJobs.set(s.id, s.job);
   if (inboxJobs.has(s.id)) trackInboxJob(jobBox, inboxJobs.get(s.id));
   let box = null;
@@ -2610,7 +2676,10 @@ function inboxCard(s, ups) {
   if ((s.older || []).some((o) => (inboxNext(o) || [])[2] === 'me')) groups.push('me');
   if (s.applied && (s.applied.count || s.applied.later)) groups.push('applied');
   if (s.added) groups.push('added');
-  return { card, text: `${s.name} ${s.submitter || ''}`, groups };
+  if (s.suggest) groups.push('suggested');
+  return { card, text: `${s.name} ${s.submitter || ''}`, groups, id: s.id,
+           score: s.suggest ? s.suggest.score : 0,
+           sig: JSON.stringify(s.suggest || null) };
 }
 
 // Show the inbox; 'more' adds the next page, and 'refresh' has the server read
@@ -2641,6 +2710,7 @@ async function viewInbox(more, refresh) {
   if (location.hash !== hash) return;
   if (inbox.page === 0) inbox.fetched = data.fetched;
   inbox.feed = data.feed;
+  inbox.suggestOn = !!data.suggest;
   inbox.upstreamFetched = data.upstream_fetched || inbox.upstreamFetched;
   inbox.page = data.page;
   // New series move the others down, so a later page may repeat some
@@ -2707,15 +2777,66 @@ async function viewInbox(more, refresh) {
     filters.splice(filters.length - 1, 0,
                    ['added', 'Added', 'Series which you added to the inbox']);
   }
+  const ctl = { items: inboxCombine(inbox.series).map((s) => inboxCard(s, ups)) };
+  const sugFilter = inbox.suggestOn && ['suggested', 'Suggested…',
+    'Series which your [suggest] rules suggest reviewing, best first',
+    { order: (a, b) => b.score - a.score, empty: 'Working out the suggestions…',
+      note: h('div', { class: 'desc' }) }];
+  if (sugFilter) {
+    filters.unshift(sugFilter);
+    // Show the suggestions the first time there are rules for them
+    if (!lsGet('patman-inbox-suggested')) {
+      lsSet('patman-filter-inbox', 'suggested');
+      lsSet('patman-inbox-suggested', '1');
+    }
+  }
   // With no feed, the inbox has only what is added to it
   const hint = inbox.feed === false && !inbox.series.length && h('div', { class: 'empty' },
     `Nothing is in this inbox yet: find a series on ${site} to add it`);
   setView('Inbox', 'inbox', false, upsTabs, fetched, finder,
-    ...(hint ? [hint] : filteredList('inbox',
-                                     inboxCombine(inbox.series).map((s) => inboxCard(s, ups)),
-                                     filters, 'Find series by their title or submitter; each ' +
-                                              'word must match')),
+    ...(hint ? [hint] : filteredList('inbox', ctl.items, filters,
+                                     'Find series by their title or submitter; each ' +
+                                     'word must match', ctl)),
     loadMore);
+  if (sugFilter && !hint) {
+    inboxSuggest(ups, refresh, hash, ctl, sugFilter).catch((err) => {
+      sugFilter[1] = 'Suggested';
+      sugFilter[3].empty = `Cannot suggest series: ${err.message}`;
+      ctl.update();
+    });
+  }
+}
+
+// Fetch the series which the [suggest] rules suggest and show them in the
+// inbox, adding those which are not among the pages read. The cards which
+// do not change are kept, so that any details opened stay open
+async function inboxSuggest(ups, refresh, hash, ctl, filter) {
+  const data = await api(`inbox/suggest?ups=${encodeURIComponent(ups)}` +
+                         (refresh ? '&refresh=1' : ''));
+  if (location.hash !== hash || !inbox || inbox.ups !== ups) return;
+  const byId = new Map(inbox.series.map((s) => [s.id, s]));
+  for (const s of inbox.series) delete s.suggest;
+  for (const item of data.series) {
+    const s = byId.get(item.id);
+    if (s) s.suggest = item.suggest;
+    else inbox.series.push(item);
+  }
+  inboxApplied(inbox.series);
+  const old = new Map((ctl.items || []).map((it) => [it.id, it]));
+  const items = inboxCombine(inbox.series).map((s) => {
+    const it = old.get(s.id);
+    return it && it.sig === JSON.stringify(s.suggest || null) ? it : inboxCard(s, ups);
+  });
+  ctl.items = items;
+  filter[1] = 'Suggested';
+  filter[3].empty = data.rules ? 'Nothing to suggest' : 'There are no rules in [suggest]';
+  const note = data.rules ? `${data.series.length} of ${data.total} recent series suggested` +
+    (data.more ? `, and ${data.more} more` : '') +
+    (data.complete ? '' : '; some were not scored') +
+    (data.made ? `; worked out ${ago(parseTime(data.made))}` : '') : '';
+  filter[3].note.replaceChildren(note,
+    ...data.warnings.map((w) => h('div', {}, w)));
+  ctl.replace(items);
 }
 
 // --- Todo ---

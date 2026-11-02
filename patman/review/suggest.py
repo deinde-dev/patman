@@ -730,6 +730,32 @@ def show_suggestions(found, total, limit, urls, reads=0, complete=True):
     return lines
 
 
+# pylint: disable-next=R0913,R0917
+def suggestions_data(found, total, limit, sug, warnings, nrules):
+    """Get the series to suggest, for 'patman serve' to show
+
+    Args:
+        found (list of Suggestion): Series to suggest, the best first
+        total (int): Number of recent series looked at
+        limit (int): Most series to give
+        sug (Suggester): Suggester which found them
+        warnings (list of str): Problems with the rules
+        nrules (int): Number of rules
+
+    Returns:
+        dict: The number of 'rules', the 'total' looked at, the 'limit',
+            the number of series whose patches were read ('reads'), whether
+            every series was scored ('complete'), how many 'more' there are
+            beyond the limit, the 'warnings' and the 'suggestions', each with
+            its 'score', 'reasons' and 'series' as from patchwork or lore
+    """
+    return {'rules': nrules, 'total': total, 'limit': limit,
+            'reads': sug.reads, 'complete': sug.complete,
+            'more': max(0, len(found) - limit), 'warnings': warnings,
+            'suggestions': [{'score': item.score, 'reasons': item.reasons,
+                             'series': item.pws} for item in found[:limit]]}
+
+
 def upstream_ref(args, cser, rules):
     """Get the branch to use for the history of the tree, if the rules need it
 
@@ -791,25 +817,33 @@ def do_suggest(args, pwork, cser, own_emails, own_db):
     """Suggest series to review, by the rules in the settings
 
     Args:
-        args (Namespace): Command-line arguments (for limit)
+        args (Namespace): Command-line arguments (for limit and json)
         pwork (Patchwork or LoreList): Where the series come from
         cser (Cseries): Open cseries instance with the reviews
         own_emails (set of str): Your email addresses, in lower case
         own_db (Database): Database holding your own series
 
     Returns:
-        int: 0 on success, 1 if there are no rules
+        int: 0 on success, 1 if there are no rules (but 0 with --json,
+            which says so)
 
     Raises:
         ValueError: A rule or setting is not valid, or the series cannot be
             read
     """
     rules = suggest_rules.get_rules()
+    as_json = getattr(args, 'json', False)
     if not rules.rules:
+        if as_json:
+            print(json.dumps({'rules': 0}))
+            return 0
         tout.error(suggest_rules.show_rules(rules, settings.review_project())[0])
         return 1
-    for warning in suggest_rules.check_rules(rules, isinstance(pwork, lorelist.LoreList)):
-        tout.warning(warning)
+    warnings = suggest_rules.check_rules(rules,
+                                         isinstance(pwork, lorelist.LoreList))
+    if not as_json:
+        for warning in warnings:
+            tout.warning(warning)
     now = datetime.now(timezone.utc)
     series = _read_recent(pwork, (now - timedelta(days=rules.days)).strftime(
         '%Y-%m-%d'))
@@ -817,6 +851,10 @@ def do_suggest(args, pwork, cser, own_emails, own_db):
     sug = Suggester(rules, pwork, cser, own_emails, own_db, now, limit,
                     upstream_ref(args, cser, rules))
     found = sug.find(series)
+    if as_json:
+        print(json.dumps(suggestions_data(found, len(series), limit, sug,
+                                          warnings, len(rules.rules))))
+        return 0
     for line in show_suggestions(found, len(series), limit,
                                  _series_urls(pwork, found[:limit]),
                                  sug.reads, sug.complete):

@@ -343,8 +343,9 @@ patchwork whatever it has kept, and the series added to the inbox too.
 The response has ``ups``, ``page``, ``per_page``, ``feed`` (false for an
 upstream with no feed), ``more`` (true if there may be another page),
 ``fetched`` (when the server read the first page from
-patchwork, as a local time like ``2026-10-19 11:00:00``) and ``series``, a list
-of objects with:
+patchwork, as a local time like ``2026-10-19 11:00:00``), ``suggest`` (true
+if there are rules for suggesting series, so that `GET /api/inbox/suggest`_
+has something to give) and ``series``, a list of objects with:
 
 - ``id`` (int or str): patchwork series ID, or the Message-ID of a series on
   lore
@@ -379,6 +380,37 @@ of objects with:
 
 A series added to the inbox which cannot be read has just its ``id`` and
 ``name``, and no patches.
+
+``GET /api/inbox/suggest``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The series which the ``[suggest]`` rules suggest reviewing, from
+``patman review --suggest --json``, which the server runs in a process of its
+own. The ``ups`` query parameter gives the upstream, as for the inbox. The
+server keeps what it works out for ten minutes; ``refresh=1`` works it out
+again. Requests which come while it is being worked out wait for it.
+
+The response has ``ups``, ``rules`` (the number of rules, 0 if there are
+none), ``total`` (the number of recent series looked at), ``more`` (how many
+more there are beyond the ``limit`` setting), ``complete`` (false if some
+series were not scored, e.g. once ``max_reads`` was reached), ``warnings``
+(a list of strings, e.g. about a rule which can never match, or a series
+whose patches could not be read), ``made`` (when they were worked out, as a
+local time) and ``series``, the best first, each as for `GET /api/inbox`_
+with ``suggest``, an object with its ``score`` (int) and ``reasons`` (list
+of strings, e.g. ``boot +2``).
+
+``GET /api/inbox/explain``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+How the ``[suggest]`` rules score a series, from
+``patman review --explain --json``. The ``ups`` query parameter gives the
+upstream and ``series`` the series, as for ``patman review -s``. The
+response has ``title``, ``url``, ``rows`` (a list with one row for each
+rule: its name, its test, ``yes``, ``no`` or ``?`` for whether it matched,
+its score and what the test saw), ``score``, ``problems`` and ``warnings``
+(lists of strings) and ``verdict``, e.g. ``Score 7: suggested if among the
+best 10 recent series``.
 
 ``GET /api/search``
 ~~~~~~~~~~~~~~~~~~~
