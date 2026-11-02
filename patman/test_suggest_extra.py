@@ -5,6 +5,7 @@
 """Tests for the suggest rules which need git or extra requests, and for
 --explain"""
 
+import json
 import os
 import subprocess
 from unittest import mock
@@ -409,6 +410,21 @@ class TestSuggestExtra(SuggestHelper):
         self.assertEqual('Score 2: suggested if among the best 10 recent '
                          'series', lines[-1])
         self.assertEqual('100', pwork.get_series.call_args.args[1])
+
+        # For 'patman serve', the result is JSON
+        with mock.patch.dict(suggest.settings.suggest, values, clear=True), \
+                terminal.capture() as (out, _):
+            self.assertEqual(0, explain.do_explain(
+                Namespace(limit=None, json=True), pwork, cser, {ME}, cser.db,
+                '100'))
+        self.assertEqual(
+            {'title': 'boot: Fix it (v1, 2 patches)',
+             'rows': [['boot', 'prefix boot:', 'yes', '+2', 'boot:']],
+             'score': 2, 'problems': [],
+             'verdict': 'Score 2: suggested if among the best 10 recent series',
+             'url': 'https://my-fake-url/project/uboot/list/?series=100'
+                    '&state=*&archive=both'},
+            json.loads(out.getvalue()))
 
         # Your own series is not suggested
         with mock.patch.dict(suggest.settings.suggest, values, clear=True), \

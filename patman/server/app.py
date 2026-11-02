@@ -11,6 +11,7 @@ The API is described in doc/serve-protocol.rst
 import asyncio
 import hmac
 import ipaddress
+import json
 import mimetypes
 import os
 import re
@@ -38,7 +39,9 @@ from patman.review import checkout
 from patman.review import discuss
 from patman.review import given
 from patman.review import lookup
+from patman.review import scan
 from patman.review import stats
+from patman.review import suggest_rules
 from patman.server import info
 from patman.server import jobs
 from patman.server import params
@@ -69,6 +72,10 @@ MAX_STATS_WEEKS = 52
 # Seconds for which the inbox read from patchwork is kept, so that showing it
 # again does not read it again
 INBOX_KEEP = 10 * 60
+
+# Seconds to wait for 'patman review --suggest' or '--explain', which may
+# read the patches of many series
+SUGGEST_TIMEOUT = 5 * 60
 
 # Seconds after which the inbox fetches the upstream again, so that it can
 # show which patches have been applied since
@@ -157,6 +164,14 @@ class Server(jobs.JobRunner):
 
         # Reviewed versions which patchwork says have no cover letter
         self._no_cover = set()
+
+        # Suggestions for each upstream's inbox: key (str): upstream name;
+        # value: tuple: time they were worked out, and what 'patman review
+        # --suggest --json' gave
+        self._suggestions = {}
+
+        # Tasks working out suggestions, by upstream name
+        self._suggesting = {}
 
     def get_pw_url(self, ups):
         """Get the patchwork URL for an upstream
@@ -1066,7 +1081,169 @@ class Server(jobs.JobRunner):
             'more': more,
             'fetched': times.stamp_str(read) or times.now_str(),
             'upstream_fetched': self._fetched_str(ups),
+            'suggest': self._has_rules(),
             'series': series})
+
+    @staticmethod
+    def _has_rules():
+        """Check whether there are rules for suggesting series to review
+
+        Return:
+            bool: True if the [suggest] settings have rules, or cannot be
+                read, so that the inbox can say what is wrong
+        """
+        try:
+            return bool(suggest_rules.get_rules().rules)
+        except ValueError:
+            return True
+
+    async def _run_patman_json(self, *args):
+        """Run 'patman review' with --json, for what it finds
+
+        Args:
+            args (list of str): Arguments for 'patman review'
+
+        Return:
+            tuple:
+                dict: What it wrote, as JSON, on its last line
+                list of str: Warnings it gave
+
+        Raises:
+            ValueError: It fails, or takes more than SUGGEST_TIMEOUT
+        """
+        cmd = [interpreter.get_python(), '-m', 'patman', 'review', *args,
+               '--json', *self._review_db_args()]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, cwd=self.cser.topdir, env=scan.child_env(),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(),
+                                              SUGGEST_TIMEOUT)
+        except asyncio.TimeoutError as exc:
+            proc.kill()
+            await proc.wait()
+            raise ValueError(f"'patman review {args[0]}' took more than "
+                             f'{SUGGEST_TIMEOUT} seconds') from exc
+        lines = [line.strip() for line in err.decode('utf-8', 'replace')
+                 .splitlines() if line.strip()]
+        if proc.returncode:
+            raise ValueError(lines[-1] if lines else
+                             f'patman review failed: {proc.returncode}')
+        # Anything else it says, e.g. about updating the database, comes
+        # first
+        found = out.decode('utf-8', 'replace').strip().splitlines()
+        return json.loads(found[-1] if found else '{}'), lines
+
+    async def _work_out_suggestions(self, ups):
+        """Work out which series to suggest for an upstream's inbox
+
+        Args:
+            ups (str): Upstream name
+
+        Return:
+            dict: As from suggest.suggestions_data(), with any 'warnings'
+                which the command gave added
+        """
+        data, warnings = await self._run_patman_json('--suggest', '-U', ups)
+        data['warnings'] = data.get('warnings', []) + warnings
+        self._suggestions[ups] = self._clock(), data
+        return data
+
+    async def _get_suggestions(self, ups, refresh):
+        """Get the series to suggest for an upstream's inbox
+
+        What was worked out in the last INBOX_KEEP seconds is used again,
+        unless 'refresh' is set. Requests which come while they are being
+        worked out wait for the same result
+
+        Args:
+            ups (str): Upstream name
+            refresh (bool): True to work them out again
+
+        Return:
+            tuple:
+                dict: As from _work_out_suggestions()
+                float: Time when they were worked out
+        """
+        kept = self._suggestions.get(ups)
+        if kept and not refresh and self._clock() - kept[0] < INBOX_KEEP:
+            return kept[1], kept[0]
+        task = self._suggesting.get(ups)
+        if not task:
+            task = asyncio.ensure_future(self._work_out_suggestions(ups))
+            self._suggesting[ups] = task
+            task.add_done_callback(lambda _: self._suggesting.pop(ups, None))
+        data = await asyncio.shield(task)
+        return data, self._suggestions[ups][0]
+
+    async def _inbox_suggest(self, request):
+        """Handle 'GET /api/inbox/suggest': the series to suggest reviewing
+
+        The 'ups' query parameter selects the upstream, as for the inbox, and
+        'refresh=1' works them out again rather than using those worked out
+        in the last few minutes. They come from 'patman review --suggest',
+        run in a process of its own, so that it uses the current [suggest]
+        settings and its git commands do not hold up the server
+
+        Args:
+            request (web.Request): Request
+
+        Return:
+            web.Response: Object with the upstream, the number of 'rules',
+                the 'total' series looked at, how many 'more' there are
+                beyond the limit, whether every series was scored
+                ('complete'), any 'warnings', when they were 'made' and the
+                series, as for the inbox, each with its 'suggest' score and
+                reasons, the best first
+
+        Raises:
+            ValueError: The upstream has no patchwork project, or the rules
+                are not valid
+        """
+        ups = request.query.get('ups') or self._default_upstream()
+        pwork = self.get_pwork(ups)
+        data, made = await self._get_suggestions(
+            ups, request.query.get('refresh') == '1')
+        found = data.get('suggestions') or []
+        series = []
+        if found:
+            fetching = asyncio.ensure_future(self._fetch_upstream(ups))
+            series = await self._inbox_items([item['series'] for item in found],
+                                             ups, pwork, fetching)
+            for item, sug in zip(series, found):
+                item['suggest'] = {'score': sug['score'],
+                                   'reasons': sug['reasons']}
+        return web.json_response({
+            'ups': ups, 'rules': data.get('rules', 0),
+            'total': data.get('total', 0), 'more': data.get('more', 0),
+            'complete': data.get('complete', True),
+            'warnings': data.get('warnings', []),
+            'made': times.stamp_str(made), 'series': series})
+
+    async def _inbox_explain(self, request):
+        """Handle 'GET /api/inbox/explain': how the rules score a series
+
+        The 'ups' query parameter selects the upstream, as for the inbox, and
+        'series' gives the series. This runs 'patman review --explain'
+
+        Args:
+            request (web.Request): Request
+
+        Return:
+            web.Response: Object as from explain.explain_data(), with the
+                series' 'url' and any 'warnings'
+
+        Raises:
+            BadRequest: No series is given
+            ValueError: The series cannot be read, or the rules are not valid
+        """
+        ups = request.query.get('ups') or self._default_upstream()
+        link = request.query.get('series')
+        if not link:
+            raise params.BadRequest('Please give the series to explain')
+        data, warnings = await self._run_patman_json('--explain', link, '-U',
+                                                     ups)
+        return web.json_response({**data, 'warnings': warnings})
 
     # pylint: disable-next=R0913,R0917
     async def _read_inbox_page(self, pwork, ups, project, page, max_age,
@@ -2208,6 +2385,8 @@ class Server(jobs.JobRunner):
         app.router.add_get('/api/upstreams', self._upstreams)
         app.router.add_get('/api/inbox', self._inbox)
         app.router.add_post('/api/inbox/add', self._inbox_add)
+        app.router.add_get('/api/inbox/suggest', self._inbox_suggest)
+        app.router.add_get('/api/inbox/explain', self._inbox_explain)
         app.router.add_post('/api/inbox/remove', self._inbox_remove)
         app.router.add_get('/api/search', self._search)
         app.router.add_get('/api/jobs', self._job_list)

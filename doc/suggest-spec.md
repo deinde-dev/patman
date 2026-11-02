@@ -242,6 +242,7 @@ Made 2026-11-01:
 - A project's section adds to [suggest]: a rule there replaces the general
   one of the same name and 'off' removes it, as [linux_settings] works
 
-Open:
-
-- The inbox group, and any other UI, to be talked about later
+- The inbox shows the suggestions as a 'Suggested' filter, first, picked
+  the first time it shows, with each card's score and reasons; they are
+  worked out after the inbox shows, by 'patman review --suggest --json',
+  and kept with the inbox. Each series has an 'Explain' button

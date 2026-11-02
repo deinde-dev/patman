@@ -227,6 +227,8 @@ for a review of just the cover letter, e.g. after reviewing the patches::
 
     patman review -s 497923 -i 0
 
+.. _review_suggest:
+
 Rules for suggesting series
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -407,6 +409,11 @@ you wrote for ``blame``, and so on::
       fresh  newcomer           no     +2     has commits in the tree
       wrote  blame              yes    +2     10 in boot/bootm.c, 2 in boot/image-fit.c
     Score 7: suggested if among the best 10 recent series
+
+``patman serve`` shows the suggestions in its inbox, with an 'Explain'
+button on each series (see the Web server chapter). It runs these commands
+with ``--json``, which gives the result as JSON on the last line of the
+output.
 
 Choosing the model
 ~~~~~~~~~~~~~~~~~~

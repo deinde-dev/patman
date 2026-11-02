@@ -2498,6 +2498,135 @@ class TestWebServer(unittest.TestCase, TestCommon):
         self.assertEqual(5, inbox()[0])
         self.assertEqual(5, len(reads))
 
+    def test_inbox_suggest(self):
+        """The inbox suggests series to review, by the [suggest] rules"""
+        db = self.cser.db
+        db.upstream_add('us', 'https://us', 'https://pw.us')
+        db.upstream_set_default('us')
+        db.patchwork_update('U-Boot', 6, 'uboot', 'us')
+        db.commit()
+        found = {
+            'rules': 2, 'total': 9, 'limit': 5, 'reads': 1, 'complete': False,
+            'more': 0, 'warnings': ["Rule 'x' can never match"],
+            'suggestions': [{
+                'score': 5, 'reasons': ['boot +2', 'again +3'],
+                'series': {'id': 300, 'name': 'boot: Fix it', 'version': 2,
+                           'date': '2026-10-01T10:00:00', 'total': 1,
+                           'received_all': True, 'web_url': 'https://pw/300',
+                           'submitter': {'name': 'Fred', 'email': 'f@b.com'},
+                           'patches': [{'id': 3000, 'name': 'boot: Fix it'}]},
+            }]}
+        srv = self.make_server()
+        now = [1000.0]
+        srv._clock = lambda: now[0]  # pylint: disable=W0212
+        run = mock.AsyncMock(return_value=(found, ['Cannot read the patches']))
+
+        def suggest(args=''):
+            with mock.patch.object(srv, '_run_patman_json', run):
+                status, data = self.call(srv, 'GET',
+                                         f'/api/inbox/suggest{args}')
+            self.assertEqual(200, status)
+            return data
+
+        data = suggest()
+        self.assertEqual([(300, 'boot: Fix it',
+                           {'score': 5, 'reasons': ['boot +2', 'again +3']})],
+                         [(ser['id'], ser['name'], ser['suggest'])
+                          for ser in data['series']])
+        self.assertEqual(
+            ('us', 2, 9, False, ["Rule 'x' can never match",
+                                 'Cannot read the patches']),
+            (data['ups'], data['rules'], data['total'], data['complete'],
+             data['warnings']))
+        run.assert_called_once_with('--suggest', '-U', 'us')
+
+        # They are kept for a while, unless refreshed
+        now[0] += server.app.INBOX_KEEP - 1
+        self.assertEqual(times.stamp_str(1000.0), suggest()['made'])
+        self.assertEqual(1, run.call_count)
+        now[0] += 1
+        self.assertEqual(times.stamp_str(now[0]), suggest()['made'])
+        suggest('?refresh=1')
+        self.assertEqual(3, run.call_count)
+
+        # With no rules there is nothing to suggest
+        run.return_value = ({'rules': 0}, [])
+        self.assertEqual((0, []), (suggest('?refresh=1')['rules'],
+                                   suggest()['series']))
+
+        # The inbox says whether there are rules
+        def has_rules(values):
+            with mock.patch.dict(settings.suggest, values, clear=True):
+                return self.call(srv, 'GET', '/api/inbox?ups=us')[1]['suggest']
+
+        srv.pwork_for_testing.fake_request = lambda _: []
+        self.assertFalse(has_rules({}))
+        self.assertTrue(has_rules({'boot': 'prefix boot: +2'}))
+        self.assertTrue(has_rules({'boot': 'prefix +2'}))
+
+        # How the rules score a series
+        rows = [['boot', 'prefix boot:', 'yes', '+2', 'boot:']]
+        run.return_value = ({'title': 'boot: Fix it (v2, 1 patch)',
+                             'rows': rows, 'score': 2, 'problems': [],
+                             'verdict': 'Score 2', 'url': 'https://pw/300'},
+                            [])
+        with mock.patch.object(srv, '_run_patman_json', run):
+            status, data = self.call(srv, 'GET',
+                                     '/api/inbox/explain?series=300')
+            self.assertEqual((200, rows, []),
+                             (status, data['rows'], data['warnings']))
+            run.assert_called_with('--explain', '300', '-U', 'us')
+            status, data = self.call(srv, 'GET', '/api/inbox/explain')
+        self.assertEqual((400, 'Please give the series to explain'),
+                         (status, data['error']))
+
+    def test_run_patman_json(self):
+        """The server runs patman for what it suggests, reading its JSON"""
+        srv = self.make_server()
+        proc = mock.Mock(returncode=0)
+        proc.communicate = mock.AsyncMock(return_value=(
+            b'Update database to v1\n{"rules": 1}\n', b'Cannot read it\n'))
+        proc.wait = mock.AsyncMock()
+
+        def run(*args):
+            with mock.patch.object(asyncio, 'create_subprocess_exec',
+                                   mock.AsyncMock(return_value=proc)) as exe:
+                loop = asyncio.new_event_loop()
+                try:
+                    return loop.run_until_complete(
+                        srv._run_patman_json(*args)), exe  # pylint: disable=W0212
+                finally:
+                    loop.close()
+
+        (data, warnings), exe = run('--suggest')
+        self.assertEqual(({'rules': 1}, ['Cannot read it']), (data, warnings))
+        self.assertEqual(['-m', 'patman', 'review', '--suggest', '--json'],
+                         list(exe.call_args.args[1:6]))
+        # It finds this patman even when it is not installed
+        top = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.realpath(server.__file__))))
+        path = exe.call_args.kwargs['env']['PYTHONPATH'].split(os.pathsep)
+        self.assertEqual(top, os.path.realpath(path[0]))
+
+        # A failure gives its last line
+        proc.returncode = 1
+        proc.communicate.return_value = (
+            b'', b'Traceback\npatman: ValueError: Bad rule\n')
+        with self.assertRaises(ValueError) as exc:
+            run('--suggest')
+        self.assertEqual('patman: ValueError: Bad rule', str(exc.exception))
+
+        # One which takes too long is stopped
+        async def slow():
+            await asyncio.sleep(1)
+        proc.communicate = mock.AsyncMock(side_effect=slow)
+        with mock.patch.object(server.app, 'SUGGEST_TIMEOUT', 0.01), \
+                self.assertRaises(ValueError) as exc:
+            run('--explain', '1')
+        self.assertIn("'patman review --explain' took more than",
+                      str(exc.exception))
+        proc.kill.assert_called_once()
+
     def test_request_kind(self):
         """Each request to patchwork is counted by its kind"""
         for subpath, kind in (

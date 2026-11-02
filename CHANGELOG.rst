@@ -16,6 +16,13 @@ Added
   repo, are tested again after an hour or a day. ``max_reads`` now leaves
   out only the series which need reading, so a series whose results are
   cached is still scored.
+- The inbox in ``patman serve`` has a 'Suggested' filter when there are
+  ``[suggest]`` rules, listing the series which ``patman review --suggest``
+  suggests, best first, with each one's score and reasons on its card. They
+  are worked out once the inbox shows and kept with it. Each series in the
+  inbox has an 'Explain' button, showing how the rules score it. The new
+  ``--json`` option of ``--suggest`` and ``--explain`` gives the server
+  their results.
 - ``patman review --suggest`` runs the ``no-replies``, ``delegate`` and
   ``checks`` tests, so every test in ``[suggest]`` now works. ``delegate``
   and ``checks`` read the series' patch list from patchwork in one request,

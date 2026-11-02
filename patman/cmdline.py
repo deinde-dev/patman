@@ -1027,6 +1027,10 @@ def add_review_subparser(subparsers):
         help='Show how your rules for suggesting series score a series, '
              'given as for -s, with what each test saw')
     review.add_argument(
+        '--json', action='store_true',
+        help='With --suggest or --explain, write the result as JSON, for '
+             "'patman serve'")
+    review.add_argument(
         '--limit', type=int, metavar='N',
         help="With --suggest, suggest at most N series, rather than the "
              "'limit' setting")

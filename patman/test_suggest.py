@@ -5,6 +5,7 @@
 """Tests for the rules which suggest series to review"""
 
 from datetime import datetime, timedelta, timezone
+import json
 import os
 import re
 import subprocess
@@ -538,6 +539,29 @@ class TestSuggest(SuggestHelper):
             self.assertEqual(1, suggest.do_suggest(Namespace(limit=None),
                                                    pwork, cser, {ME}, cser.db))
         self.assertIn('No rules for suggesting', err.getvalue())
+
+        # For 'patman serve', the result is JSON, with the warnings in it
+        with mock.patch.dict(suggest.settings.suggest, values, clear=True), \
+                mock.patch.object(scan, 'recent_series', recent), \
+                mock.patch.object(suggest_rules, 'check_rules',
+                                  return_value=['It never matches']), \
+                terminal.capture() as (out, err):
+            self.assertEqual(0, suggest.do_suggest(
+                Namespace(limit=None, json=True), pwork, cser, {ME}, cser.db))
+        data = json.loads(out.getvalue())
+        self.assertEqual(
+            (2, 2, 10, 0, True, 0, [(5, ['boot +2', 'ci +3'], 100)]),
+            (data['rules'], data['total'], data['limit'], data['reads'],
+             data['complete'], data['more'],
+             [(sug['score'], sug['reasons'], sug['series']['id'])
+              for sug in data['suggestions']]))
+        self.assertEqual((['It never matches'], ''),
+                         (data['warnings'], err.getvalue()))
+        with mock.patch.dict(suggest.settings.suggest, {}, clear=True), \
+                terminal.capture() as (out, _):
+            self.assertEqual(0, suggest.do_suggest(
+                Namespace(limit=None, json=True), pwork, cser, {ME}, cser.db))
+        self.assertEqual({'rules': 0}, json.loads(out.getvalue()))
 
     def test_recent_series(self):
         """Recent series are read page by page until they are too old"""
