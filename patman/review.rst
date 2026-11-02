@@ -368,9 +368,20 @@ To keep the requests down, the tests which need only the list of series are
 run first, on every series. The patches are then read only for the series
 which could still reach ``min_score``, taking those which could reach the
 highest score first, and stopping once none left could get into the top
-``limit``, or ``max_reads`` series have been read. On patchwork, an mbox read
-in the last hour is used again. The tests which use git or extra requests
-come last, again only for the series which could still be suggested. A rule
+``limit``. Once ``max_reads`` series have been read, a series whose patches
+are needed is left out. On patchwork, an mbox read in the last hour is used
+again. The tests which use git or extra requests come last, again only for
+the series which could still be suggested.
+
+What each of these costly tests finds on a series is kept in the patchwork
+cache (see :ref:`patchwork_cache`), so that the next run, or the inbox in
+``patman serve``, uses it rather than reading and testing the series again.
+A result from the patches alone, e.g. ``path`` or ``word``, is kept as long
+as the cache keeps it, since the patches do not change. ``has``,
+``no-replies``, ``delegate`` and ``checks`` are tested again after an hour,
+since replies and CI change them, and ``maintainer``, ``fixes``, ``blame``
+and ``newcomer``, which look at your repo, after a day. A rule which is
+renamed or given a new score uses the result of the same test. A rule
 which says ``need`` with a cheap test is the best way to narrow the series
 down before any patches are read. A costly test with a high score does the
 opposite: until it has run, any series could gain that score, so the patches

@@ -10,6 +10,12 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman review --suggest`` keeps what each costly test finds on a
+  series in the patchwork cache, so that a later run does not read or test
+  the series again. Results which can change, e.g. from replies, CI or your
+  repo, are tested again after an hour or a day. ``max_reads`` now leaves
+  out only the series which need reading, so a series whose results are
+  cached is still scored.
 - ``patman review --suggest`` runs the ``no-replies``, ``delegate`` and
   ``checks`` tests, so every test in ``[suggest]`` now works. ``delegate``
   and ``checks`` read the series' patch list from patchwork in one request,

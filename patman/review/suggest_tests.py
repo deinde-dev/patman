@@ -224,14 +224,12 @@ def series_info(pws, now, reviewed_before, states):
         bool(re.search(r'\bRFC\b', tags, re.I)), reviewed_before, states)
 
 
-def score_series(rules, info, tests):
-    """Work out the score of a series, by the rules
+def score_results(rules, results):
+    """Work out the score of a series, from what the tests of the rules found
 
     Args:
-        rules (list of Rule): Rules to use, each with a test in 'tests'
-        info (Info or patchdata.PatchInfo): What the tests know about the
-            series
-        tests (dict): Tests to run, e.g. FREE_TESTS
+        rules (list of Rule): Rules used
+        results (list of Result): What the test of each rule found
 
     Returns:
         tuple or None: None if a rule leaves the series out, else:
@@ -240,8 +238,8 @@ def score_series(rules, info, tests):
     """
     score = 0
     reasons = []
-    for rule in rules:
-        matched = tests[rule.test](rule.args, info).matched != rule.negate
+    for rule, res in zip(rules, results):
+        matched = res.matched != rule.negate
         if rule.score == 'skip':
             if matched:
                 return None
@@ -252,6 +250,22 @@ def score_series(rules, info, tests):
             score += rule.score
             reasons.append(f'{rule.name} {rule.score:+d}')
     return score, reasons
+
+
+def score_series(rules, info, tests):
+    """Work out the score of a series, by the rules
+
+    Args:
+        rules (list of Rule): Rules to use, each with a test in 'tests'
+        info (Info or patchdata.PatchInfo): What the tests know about the
+            series
+        tests (dict): Tests to run, e.g. FREE_TESTS
+
+    Returns:
+        tuple or None: As for score_results()
+    """
+    return score_results(rules, [tests[rule.test](rule.args, info)
+                                 for rule in rules])
 
 
 def _paths(pats, info):

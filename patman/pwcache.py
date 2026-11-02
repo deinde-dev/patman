@@ -31,6 +31,10 @@ state of each patch, as last seen in a patch or an event, for the inbox in
 'patman serve'. Entries which are not used for KEEP_DAYS are dropped, which
 is checked once a day.
 
+It also holds what the tests of the rules for suggesting series found on
+each series (see suggest.Suggester), so that a series is not scored again
+each time, e.g. by reading its patches and running git blame on them.
+
 If the cache stops working, e.g. because the disk is full or the file is
 damaged, this is reported once and the cache is then left alone, so that
 patman reads patchwork as it would with no cache, rather than failing.
@@ -121,7 +125,7 @@ class Cache:
         if layout != LAYOUT:
             with self.con:
                 for table in ('objects', 'hits', 'follow', 'meta',
-                              'states'):
+                              'states', 'results'):
                     self.con.execute(f'DROP TABLE IF EXISTS {table}')
                 self.con.execute(f'PRAGMA user_version = {LAYOUT}')
         with self.con:
@@ -154,6 +158,10 @@ class Cache:
                 'PRIMARY KEY (server, patch))')
             if new_states:
                 self._fill_states()
+            self.con.execute(
+                'CREATE TABLE IF NOT EXISTS results (server TEXT, '
+                'series TEXT, key TEXT, matched INTEGER, seen TEXT, '
+                'made REAL, PRIMARY KEY (server, series, key))')
 
     def _fill_states(self):
         """Record the states of the patches which a new cache holds
@@ -357,6 +365,8 @@ class Cache:
                 now - keep_days * 86400),))
             self.con.execute('DELETE FROM states WHERE updated < ?',
                              (now - keep_days * 86400,))
+            self.con.execute('DELETE FROM results WHERE made < ?',
+                             (now - keep_days * 86400,))
         return cur.rowcount
 
     def _hour(self, when):
@@ -453,6 +463,53 @@ class Cache:
                 'SELECT patch, state FROM states WHERE server = ? AND patch '
                 f"IN ({', '.join('?' * len(chunk))})", (server, *chunk)))
         return out
+
+    @_safe({})
+    def get_results(self, server, series, keys):
+        """Get what the tests of the rules for suggesting found on a series
+
+        Args:
+            server (str): URL of the patchwork server, or of lore
+            series (str): Series link
+            keys (dict): key (str): Key of a test's result, as made by
+                    suggest.Suggester
+                value (float or None): Oldest result to accept, in seconds,
+                    or None to accept any
+
+        Returns:
+            dict: key (str): Key of each result which is recent enough
+                value (tuple): bool: True if the test matched
+                    str: What it saw
+        """
+        now = self._clock()
+        out = {}
+        for key, matched, seen, made in self.con.execute(
+                'SELECT key, matched, seen, made FROM results WHERE '
+                'server = ? AND series = ?', (server, series)):
+            if key in keys and (keys[key] is None or
+                                now - made <= keys[key]):
+                out[key] = bool(matched), seen
+        return out
+
+    @_safe(None)
+    def put_results(self, server, series, results):
+        """Store what the tests of the rules for suggesting found on a series
+
+        Args:
+            server (str): URL of the patchwork server, or of lore
+            series (str): Series link
+            results (dict): key (str): Key of a test's result
+                value (tuple): bool: True if the test matched
+                    str: What it saw
+        """
+        now = self._clock()
+        with self.con:
+            self.con.executemany(
+                'INSERT OR REPLACE INTO results '
+                '(server, series, key, matched, seen, made) '
+                'VALUES (?, ?, ?, ?, ?, ?)',
+                [(server, series, key, int(matched), seen, now)
+                 for key, (matched, seen) in results.items()])
 
     @_safe({})
     def contents(self, kind_of):

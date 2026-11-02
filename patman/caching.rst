@@ -31,7 +31,9 @@ The cache is a file of its own, ``~/.cache/patman/patchwork.db`` (or under
 ``$XDG_CACHE_HOME``), separate from patman's database. It is shared by all
 your repos, by each patman command and by ``patman serve``, so a review job
 started from the server finds what the server has just read, and the cache
-survives a restart of the server.
+survives a restart of the server. It also keeps what the rules of
+``patman review --suggest`` found on each series, so that a series is not
+tested again each time.
 
 ``patman patchwork cache`` shows what the cache holds and how much it saves
 (see `Seeing what the cache holds`_).
