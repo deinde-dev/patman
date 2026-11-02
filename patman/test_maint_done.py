@@ -210,8 +210,11 @@ class TestMaintDone(LoreTestCase):
     def test_draft_exists(self):
         """A draft exists only while it is a draft, though Gmail may still
         give it once it is sent"""
-        # pylint: disable-next=C0415
-        from googleapiclient.errors import HttpError
+        try:
+            # pylint: disable-next=C0415
+            from googleapiclient.errors import HttpError
+        except ImportError:
+            self.skipTest('googleapiclient is not installed')
 
         drafts = {'d1': ['DRAFT'], 'd2': ['IMPORTANT', 'SENT']}
 
