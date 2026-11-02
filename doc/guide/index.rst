@@ -39,8 +39,8 @@ Read them in order the first time. Each one follows on from the one before.
     with its own mailing list, patchwork server and send settings
 
 :doc:`reviewing`
-    Review someone else's series with a Claude agent: apply it, review each
-    patch, change a review with a note, and send the reviews
+    Find a series to review, then review it with a Claude agent: apply it,
+    review each patch, change a review with a note, and send the reviews
 
 :doc:`serve`
     Follow your series and reviews from a phone with ``patman serve``

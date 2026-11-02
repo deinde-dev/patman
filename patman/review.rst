@@ -229,6 +229,41 @@ for a review of just the cover letter, e.g. after reviewing the patches::
 
 .. _review_suggest:
 
+Finding series to review
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you are not sure which series to review, ask patman::
+
+    patman review --suggest
+
+This lists the recent series which you might want to review, best first,
+each with its score, its link and the reasons for the score. It needs no
+settings: until you write rules of your own, it uses these two::
+
+    [suggest]
+    similar:  similar  +2
+    small:    patches -5  +1
+
+``similar`` matches a series which is like those you reviewed before, so
+the suggestions fit better the more you review. ``small`` matches a series
+of five patches or fewer, which is a good place to start, so these come
+first when you have not reviewed anything yet.
+
+A series is like those you reviewed when the prefix of one of its patch
+subjects, such as ``dm: core:``, is on patches in at least two of them, or
+when you reviewed at least two series from its submitter. Once you have
+reviewed more than 200 series, this becomes one in 100 of them, so that
+only what you review often counts. Earlier versions of the series itself
+are left out, and ``reviewed-before`` (below) covers those. The submitters
+come from the headers of your reviews, kept once a review has a draft, and
+from the recent series. To choose for yourself, give a range of the number
+of series, e.g. ``similar 5-``. ``patman review --explain`` (below) shows
+what a series shares with those you reviewed, such as
+``dm: core: (6), from alice@example.com (2); needs 4``.
+
+``patman serve`` shows the same suggestions in its inbox, under the
+'Suggested' filter (see the Web server chapter).
+
 Rules for suggesting series
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -264,6 +299,10 @@ A project's section, such as ``[linux_suggest]``, adds to ``[suggest]``: a
 rule there replaces the one of the same name, and ``off`` turns it off for
 that project. A repo's ``.patman`` can add or replace rules in the same way.
 
+Your rules replace the default ``similar`` and ``small`` rules, so add
+``similar: similar +2`` to keep it. Turning one of them ``off``, with no
+rules of your own, keeps the other.
+
 The tests are, from the cheapest to the costliest to run:
 
 ========================  ====================================================
@@ -276,6 +315,8 @@ Test                      Matches when
 ``age RANGE``             the days since the series was sent are in the range
 ``rfc``                   the series is an RFC
 ``reviewed-before``       you reviewed an earlier version
+``similar [RANGE]``       it is like the series you reviewed before (see
+                          :ref:`review_suggest`)
 ``state S...``            a patch is in one of these patchwork states
 ``path GLOB...``          a patch touches a matching file
 ``only-path GLOB...``     every file touched matches

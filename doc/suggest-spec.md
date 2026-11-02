@@ -29,8 +29,9 @@ suggested.
    rules run first, and the costly ones only on the series still in the
    running
 
-Not goals for now: learning rules from past reviews, or sharing rules
-through a project's .patman-defaults (though nothing stops that later).
+Not goals for now: sharing rules through a project's .patman-defaults
+(though nothing stops that later). Learning from past reviews was one too,
+until the 'similar' test (see the decisions).
 
 ## 1. Settings
 
@@ -246,3 +247,16 @@ Made 2026-11-01:
   the first time it shows, with each card's score and reasons; they are
   worked out after the inbox shows, by 'patman review --suggest --json',
   and kept with the inbox. Each series has an 'Explain' button
+
+Made 2026-11-02:
+
+- A 'similar' test, free, matches a series whose patch-subject prefixes or
+  submitter are shared with series you reviewed: at least two of them, or
+  one in 100 once you have reviewed more than 200, else as many as its
+  range says. The prefixes come from the pcommit subjects of reviewed
+  versions and the submitters from the To: kept with each review, and from
+  the recent series. Prefixes from the series title alone, or from most of
+  its patches, give a little better precision but find half as many
+- With no rules in the settings (other than 'off'), the default rules
+  'similar: similar +2' and 'small: patches -5 +1' apply, so --suggest and
+  the inbox filter work from the start
