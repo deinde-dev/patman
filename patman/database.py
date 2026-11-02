@@ -12,6 +12,7 @@ and write some code in migrate_to() to call it.
 """
 
 from collections import namedtuple, OrderedDict
+from email.utils import getaddresses
 import fcntl
 import hashlib
 import json
@@ -1879,6 +1880,48 @@ class Database:  # pylint:disable=R0904
             "WHERE s.source = 'review' AND rp.refs IS NOT NULL")
         for series_id, refs in res.fetchall():
             out.setdefault(series_id, set()).update(refs.split())
+        return out
+
+    def review_get_subjects(self):
+        """Get the subjects of the patches in each series you reviewed
+
+        Return:
+            list of tuple: One for each patch in a version with a review:
+                int: Series ID
+                str: Link of the version, e.g. its patchwork ID
+                str: Subject of the patch, as from patchwork or lore
+        """
+        return self.execute(
+            'SELECT sv.series_id, sv.link, pc.subject FROM pcommit pc '
+            'JOIN ser_ver sv ON pc.svid = sv.id '
+            'JOIN series s ON sv.series_id = s.id '
+            "WHERE s.source = 'review' AND "
+            'sv.id IN (SELECT svid FROM review)').fetchall()
+
+    def review_get_recipients(self):
+        """Get who each series you reviewed was sent to in reply
+
+        These come from the headers kept for each review which has had a
+        draft, whose To: is the submitter of the series
+
+        Return:
+            dict: key (int): Series ID
+                value (set of str): Addresses, in lower case
+        """
+        out = {}
+        res = self.execute(
+            'SELECT sv.series_id, r.envelope FROM review r '
+            'JOIN ser_ver sv ON r.svid = sv.id '
+            'JOIN series s ON sv.series_id = s.id '
+            "WHERE s.source = 'review' AND r.envelope IS NOT NULL")
+        for series_id, envelope in res.fetchall():
+            try:
+                to = json.loads(envelope).get('to') or ''
+            except ValueError:
+                continue
+            addrs = [addr.lower() for _, addr in getaddresses([to]) if addr]
+            if addrs:
+                out.setdefault(series_id, set()).add(addrs[0])
         return out
 
     def series_get_review(self, series_id):
