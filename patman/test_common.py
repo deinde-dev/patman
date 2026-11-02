@@ -25,6 +25,7 @@ from patman import checkpatch
 from patman import cmdline
 from patman import control
 from patman import cseries
+from patman import lore
 from patman import patchstream
 from patman import patchwork
 from patman.patchwork import Patchwork
@@ -42,6 +43,19 @@ def clear_git_env():
                          capture_output=True, text=True, check=False)
     for var in res.stdout.split():
         os.environ.pop(var, None)
+
+
+def isolate():
+    """Keep the tests away from the user's settings, caches and network
+
+    This is used by 'patman test' and by pytest (see conftest.py). Besides
+    clear_git_env(), it turns off the patchwork cache, the request log and
+    lore, so that tests do not see each other's results or the user's
+    """
+    clear_git_env()
+    os.environ['PATMAN_PWCACHE'] = 'off'
+    os.environ['PATMAN_REQLOG'] = 'off'
+    lore.set_mode('off')
 
 
 def find_source_dir():

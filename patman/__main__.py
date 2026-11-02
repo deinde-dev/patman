@@ -18,7 +18,6 @@ sys.path.insert(0, os.path.join(our_path, '..'))
 # Our modules
 from patman import cmdline
 from patman import control
-from patman import lore
 from u_boot_pylib import test_util
 from u_boot_pylib import tout
 
@@ -63,12 +62,7 @@ def run_patman():
         from patman import test_workflow
         from u_boot_pylib import test_command
 
-        test_common.clear_git_env()
-        # Keep the tests away from the user's patchwork cache, request log and
-        # lore
-        os.environ['PATMAN_PWCACHE'] = 'off'
-        os.environ['PATMAN_REQLOG'] = 'off'
-        lore.set_mode('off')
+        test_common.isolate()
         to_run = args.testname if args.testname not in [None, 'test'] else None
         result = test_util.run_test_suites(
             'patman', False, args.verbose, args.no_capture,
