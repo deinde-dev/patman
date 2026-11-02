@@ -33,6 +33,21 @@ upstream and set its patchwork project, as in :doc:`upstreams`::
     $ patman patchwork set-project U-Boot ci
     Project 'U-Boot' patchwork-ID 1 link-name 'uboot' remote 'ci'
 
+Finding a series to review
+--------------------------
+
+If you are not sure which series to review, ask patman for some::
+
+    patman review --suggest
+
+With nothing set up, it picks small series first, then, as you review more,
+those like the ones you reviewed before: series touching the same parts of
+the tree, by their subject prefixes, or from the same people. Each comes
+with its link and the reasons it was picked. You can write your own rules
+too, for example for the files you look after or series from newcomers, as
+:ref:`review_suggest` explains, and ``patman serve`` shows the suggestions
+in its inbox.
+
 Reviewing the series
 --------------------
 

@@ -68,6 +68,12 @@ fetches the upstream at most every hour, unless you tap 'Refresh'; the top of
 the inbox says when it did each. 'Load more' at the bottom reads the next 50
 series, and going to another tab and back keeps them.
 
+'Suggested', the first filter, lists the series you might want to review,
+best first, with the reasons for each: to start with, small ones, and then
+those like the series you reviewed before. Tap a series and then 'Explain'
+to see why it was picked. :ref:`review_suggest` says how to write your own
+rules.
+
 For a series which is too old to be among them, tap 'Add a series' and search
 for it by name. 'Add' keeps it at the top of the inbox until you remove it
 (see :ref:`adding a series <serve_search>`).

@@ -98,14 +98,87 @@ def _reviewed(pws, cser, by_key):
         tuple:
             bool: True if you have reviewed this version
             bool: True if you have reviewed an earlier version
+            int or None: ID of the review series of the earlier version,
+                if any
     """
     version = int(pws.get('version') or 1)
     existing = cser.db.series_find_by_link(str(pws['id']))
     if existing and cser.db.review_get_for_version(existing[3]):
-        return True, False
+        return True, False, None
     earlier = scan.find_reviewed(cser, pws, by_key)
     return False, bool(earlier) and (
-        cser.db.series_get_max_version(earlier) or 0) < version
+        cser.db.series_get_max_version(earlier) or 0) < version, earlier
+
+
+# For a 'similar' rule with no range, a series must share its prefix or
+# submitter with at least SIMILAR_MIN of the series you reviewed, or with one
+# in SIMILAR_SHARE of them if that is more, so that the more you review, the
+# closer it must be
+SIMILAR_MIN = 2
+SIMILAR_SHARE = 100
+
+# What you reviewed before, for the 'similar' test:
+#   prefixes (dict): key (str): Prefix of a subject, e.g. 'dm: core:'
+#       value (set of int): IDs of the review series with it
+#   people (dict): key (str): Address of a submitter, in lower case
+#       value (set of int): IDs of the review series they sent
+#   total (int): Number of series you reviewed
+Profile = namedtuple('Profile', 'prefixes,people,total')
+
+
+def read_profile(db, series):
+    """Find the prefixes and submitters of the series you reviewed
+
+    The submitter of a series comes from the headers of your reviews of it,
+    else from the recent series
+
+    Args:
+        db (Database): Database with the reviews
+        series (list of dict): Recent series, as from patchwork or lore
+
+    Returns:
+        Profile: What you reviewed
+    """
+    prefixes = {}
+    people = {}
+    reviewed = set()
+    sent_by = {str(pws['id']): ((pws.get('submitter') or {}).get('email') or
+                                '').lower() for pws in series}
+    for series_id, link, subject in db.review_get_subjects():
+        reviewed.add(series_id)
+        prefix = suggest_tests.prefix_of(
+            suggest_tests.RE_TAGS.sub('', subject or '').strip())
+        if prefix:
+            prefixes.setdefault(prefix, set()).add(series_id)
+        if sent_by.get(str(link)):
+            people.setdefault(sent_by[str(link)], set()).add(series_id)
+    for series_id, addrs in db.review_get_recipients().items():
+        for addr in addrs:
+            people.setdefault(addr, set()).add(series_id)
+        reviewed.add(series_id)
+    return Profile(prefixes, people, len(reviewed))
+
+
+def _like(profile, info, earlier):
+    """Find what a series shares with the series you reviewed before
+
+    Args:
+        profile (Profile): What you reviewed
+        info (suggest_tests.Info): The series
+        earlier (int or None): ID of the review series of an earlier version
+            of it, which is left out
+
+    Returns:
+        list of suggest_tests.Like: What it shares, those shared with the
+            most series first
+    """
+    shared = [('prefix', prefix, profile.prefixes.get(prefix, set()))
+              for prefix in dict.fromkeys(filter(None, map(
+                  suggest_tests.prefix_of, info.subjects)))]
+    shared.append(('from', info.email, profile.people.get(info.email, set())))
+    found = [suggest_tests.Like(kind, what, len(ids - {earlier}))
+             for kind, what, ids in shared if ids - {earlier}]
+    return sorted(found, key=lambda like: -like.count)
 
 
 # A series which the free tests leave in the running: the series ('pws'),
@@ -177,6 +250,7 @@ class Suggester:  # pylint: disable=R0902
         self._keys = None
         self._rule_keys = {}
         self._capped = False
+        self._profile = None
 
     def _rules(self, tests):
         """Get the rules whose tests are in a set
@@ -230,11 +304,19 @@ class Suggester:  # pylint: disable=R0902
                 bool: True if you have reviewed this version
                 suggest_tests.Info: What is known
         """
-        done, before = _reviewed(pws, self.cser, self._by_key())
+        done, before, earlier = _reviewed(pws, self.cser, self._by_key())
         states = self.pwork.get_states([pat['id'] for pat in
                                         pws.get('patches') or []])
-        return done, suggest_tests.series_info(pws, self.now, before,
-                                 list(states.values()))
+        info = suggest_tests.series_info(pws, self.now, before,
+                                         list(states.values()))
+        if self._uses('similar'):
+            if self._profile is None:
+                self._profile = read_profile(self.cser.db, self.series)
+            info = info._replace(
+                like=_like(self._profile, info, earlier),
+                like_min=max(SIMILAR_MIN,
+                             self._profile.total // SIMILAR_SHARE))
+        return done, info
 
     def _by_key(self):
         """Get the series ID for each b4 key, reading them the first time

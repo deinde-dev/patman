@@ -2560,7 +2560,8 @@ class TestWebServer(unittest.TestCase, TestCommon):
                 return self.call(srv, 'GET', '/api/inbox?ups=us')[1]['suggest']
 
         srv.pwork_for_testing.fake_request = lambda _: []
-        self.assertFalse(has_rules({}))
+        self.assertFalse(has_rules({'similar': 'off', 'small': 'off'}))
+        self.assertTrue(has_rules({}))
         self.assertTrue(has_rules({'boot': 'prefix boot: +2'}))
         self.assertTrue(has_rules({'boot': 'prefix +2'}))
 

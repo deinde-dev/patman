@@ -10,6 +10,12 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman review --suggest`` works with no settings: until you write rules
+  of your own in ``[suggest]``, it suggests small series and those like the
+  series you reviewed before, by a new ``similar`` test, which compares the
+  prefixes of a series' patch subjects, and its submitter, with those of
+  your reviews. The inbox of ``patman serve`` has its 'Suggested' filter
+  whatever the settings, and the guide says how to find a series to review.
 - ``patman review --suggest`` keeps what each costly test finds on a
   series in the patchwork cache, so that a later run does not read or test
   the series again. Results which can change, e.g. from replies, CI or your

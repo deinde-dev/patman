@@ -245,24 +245,25 @@ prefix, and the same submitter. Pull requests are listed one by one, since
 they share their titles. A series is under 'Your move' if an older version is
 waiting for you.
 
-If you have rules for suggesting series to review, in the ``[suggest]``
-settings (see :ref:`review_suggest`), the inbox has a 'Suggested' filter
-first, which it picks the first time it shows. It lists the series which
-``patman review --suggest`` would, best first, each with its score and the
-rules which gave it, including those sent too long ago to be among the pages
-loaded. The suggestions are worked out once the inbox shows, by running
+The inbox has a 'Suggested' filter first, which it picks the first time it
+shows, using your rules for suggesting series to review in the ``[suggest]``
+settings, or the default ones, which pick small series and those like the
+series you reviewed before (see :ref:`review_suggest`). It lists the series
+which ``patman review --suggest`` would, best first, each with its score and
+the rules which gave it, including those sent too long ago to be among the
+pages loaded. The suggestions are worked out once the inbox shows, by running
 ``patman review --suggest --json`` in a process of its own, so the inbox does
 not wait for them, and a change to the rules is used without restarting the
 server. The server keeps them for ten minutes, as it does the inbox, and
-'Refresh' works them out again; what each test found on a series is kept in
-the cache, so this reads and tests only the series not seen before. Below
-the count, the filter says how many of the recent series are suggested and
-when, with any warnings, e.g. a series whose patches could not be read.
+'Refresh' works them out again; what each test found on a series is kept in the
+cache, so this reads and tests only the series not seen before. Below the
+count, the filter says how many of the recent series are suggested and when,
+with any warnings, e.g. a series whose patches could not be read.
 
-Tapping a series in the inbox shows an 'Explain' button, when there are
-rules, which runs ``patman review --explain`` on it and shows each rule,
-whether it matched and what its test saw, so that you can see why a series
-is or is not suggested.
+Tapping a series in the inbox shows an 'Explain' button, which runs
+``patman review --explain`` on it and shows each rule, whether it matched
+and what its test saw, so that you can see why a series is or is not
+suggested.
 
 The inbox is read from patchwork with one request for the 50 newest series.
 The server keeps what it reads for ten minutes, so going back to the Inbox tab,
