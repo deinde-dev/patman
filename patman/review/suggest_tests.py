@@ -32,8 +32,18 @@ RE_TAGS = re.compile(r'^(\[[^]]*\]\s*)+')
 #   rfc (bool): True if it is an RFC
 #   reviewed_before (bool): True if you reviewed an earlier version
 #   states (list of str): Patchwork states of its patches, where known
+#   like (list of Like): What it shares with the series you reviewed before,
+#       those shared with the most first
+#   like_min (int): Fewest of those series it must share something with to
+#       be like them, for a 'similar' rule with no range
 Info = namedtuple('Info', 'subjects,email,who,patches,version,age,rfc,'
-                          'reviewed_before,states')
+                          'reviewed_before,states,like,like_min',
+                  defaults=((), 2))
+
+# Something a series shares with series you reviewed before: its 'kind',
+# 'prefix' for the prefix of a subject or 'from' for the submitter, 'what'
+# it is, e.g. 'dm: core:', and the number ('count') of those series
+Like = namedtuple('Like', 'kind,what,count')
 
 
 # What a test finds: whether it 'matched', and what it 'seen', to show with
@@ -125,6 +135,41 @@ def _prefixes(subjects):
     return out
 
 
+def prefix_of(subject):
+    """Get the prefix of a subject, to compare with others
+
+    Args:
+        subject (str): Subject, without its tags
+
+    Returns:
+        str or None: Its prefix in lower case, e.g. 'boot: bootm:', or None
+            if it has none
+    """
+    match = RE_PREFIX.match(subject)
+    return match.group(0).strip().lower() if match else None
+
+
+def _similar(args, info):
+    """Check whether a series is like those you reviewed before
+
+    Args:
+        args (tuple): Range of the number of series it must be like, or ()
+            for at least info.like_min
+        info (Info): The series
+
+    Returns:
+        Result: Matched if it is like enough of them, showing what it shares
+            with them
+    """
+    best = max((like.count for like in info.like), default=0)
+    seen = _seen(
+        f"{'from ' if like.kind == 'from' else ''}{like.what} ({like.count})"
+        for like in info.like)
+    if args:
+        return Result(in_range(best, args), seen)
+    return Result(best >= info.like_min, f'{seen}; needs {info.like_min}')
+
+
 def _days(count):
     """Say how many days old a series is
 
@@ -170,6 +215,7 @@ FREE_TESTS = {
     'rfc': lambda args, info: Result(info.rfc, _yes_no(info.rfc)),
     'reviewed-before': lambda args, info: Result(
         info.reviewed_before, _yes_no(info.reviewed_before)),
+    'similar': _similar,
     'state': lambda args, info: _found(
         sorted({state for state in info.states if state in args}),
         sorted(set(info.states))),
@@ -196,7 +242,7 @@ def age_days(date, now):
     return max((now - when).days, 0)
 
 
-def series_info(pws, now, reviewed_before, states):
+def series_info(pws, now, reviewed_before, states, like=()):
     """Get what the free tests need to know about a series
 
     Args:
@@ -204,6 +250,8 @@ def series_info(pws, now, reviewed_before, states):
         now (datetime): The time now, with its time zone
         reviewed_before (bool): True if you reviewed an earlier version
         states (list of str): Patchwork states of its patches, where known
+        like (list of Like): What it shares with the series you reviewed
+            before
 
     Returns:
         Info: What is known
@@ -221,7 +269,8 @@ def series_info(pws, now, reviewed_before, states):
         (sub.get('email') or '').lower(), (sub.get('name') or '').lower(),
         pws.get('total') or len(patches), int(pws.get('version') or 1),
         age_days(pws.get('date'), now),
-        bool(re.search(r'\bRFC\b', tags, re.I)), reviewed_before, states)
+        bool(re.search(r'\bRFC\b', tags, re.I)), reviewed_before, states,
+        like)
 
 
 def score_results(rules, results):

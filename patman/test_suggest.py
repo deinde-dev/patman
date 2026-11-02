@@ -13,6 +13,7 @@ from unittest import mock
 
 from u_boot_pylib import terminal
 
+from patman import database
 from patman import lorelist
 from patman import patchwork
 from patman.review import common
@@ -363,7 +364,7 @@ class TestSuggest(SuggestHelper):
         self.assertEqual(['dm: core: Add a thing 1', 'dm: core: Add a thing 2'],
                          info.subjects)
         self.assertEqual(('ann@x.org', 'ann acker', 2, 3, 4, True, True,
-                          ['new']),
+                          ['new'], (), 2),
                          info[1:])
         self.assertFalse(suggest_tests.series_info(
             make_series(2, 'x'), NOW, False, []).rfc)
@@ -426,7 +427,9 @@ class TestSuggest(SuggestHelper):
         self.assertIsNone(score(name='dm: Fix it'))
         self.assertEqual((1, ['small +1']), score(name='bootstd: Fix it'))
 
-    def add_review(self, name, version, link, reviewed=True):
+    # pylint: disable-next=R0913
+    def add_review(self, name, version, link, reviewed=True, subjects=(),
+                   to=None):
         """Add a series which has been reviewed
 
         Args:
@@ -434,6 +437,8 @@ class TestSuggest(SuggestHelper):
             version (int): Version reviewed
             link (str): Its link
             reviewed (bool): True to add a review of its first patch
+            subjects (list of str): Subjects of its patches, with their tags
+            to (str or None): To: of the review's headers, if it has them
         """
         db = self.cser.db
         idnum = (db.series_find_review_by_name(name) or [None])[0]
@@ -441,9 +446,97 @@ class TestSuggest(SuggestHelper):
             idnum = db.series_add(f'r{link}', name)
             db.series_set_source(idnum, 'review')
         svid = db.ser_ver_add(idnum, version, link=link)
+        db.pcommit_add_list(svid, [
+            database.Pcommit(None, seq, subj, None, None, None, None, None)
+            for seq, subj in enumerate(subjects, 1)])
         if reviewed:
-            db.review_add(svid, 1, 'comment', False, 't')
+            rid = db.review_add(svid, 1, 'comment', False, 't')
+            if to:
+                db.review_set_envelope(rid, {'to': to, 'subject': 'Re: x'})
         self.cser.commit()
+
+    def test_similar(self):
+        """A series like those you reviewed before matches 'similar'"""
+        cser = self.get_database()
+        self.add_review('dm: core: One', 1, '200', subjects=[
+            '[v1,1/2] dm: core: One', '[v1,2/2] test: dm: Test it'])
+        self.add_review('dm: core: Two', 1, '210', subjects=[
+            '[PATCH] dm: core: Two'], to='Bob Builder <Bob@b.org>, x@y.org')
+        self.add_review('dm: core: Two', 2, '211', subjects=[
+            '[PATCH v2] dm: core: Two'])
+        self.add_review('video: Three', 1, '220', subjects=[
+            '[PATCH] video: Three'])
+        self.add_review('dm: core: Started', 1, '230', reviewed=False,
+                        subjects=['[PATCH] dm: core: Started'])
+        series = [make_series(300, 'dm: core: New', email='dan@d.org'),
+                  make_series(310, 'video: New', email='bob@b.org'),
+                  make_series(212, 'dm: core: Two', version=3,
+                              email='eve@e.org'),
+                  make_series(320, 'misc: Other', email='fay@f.org'),
+                  make_series(220, 'video: Three', email='carl@c.org'),
+                  make_series(330, 'misc: More', email='carl@c.org')]
+        rules = suggest_rules.get_rules({'like': 'similar +2'})
+        pwork = patchwork.Patchwork.for_testing(None)
+        sug = suggest.Suggester(rules, pwork, cser, {ME}, cser.db, NOW, 10)
+        sug.series = series
+        Like = suggest_tests.Like
+
+        # Two series have the prefix; the series counts once for both
+        # versions and the one only started does not count
+        info = sug.free_info(series[0])[1]
+        self.assertEqual([Like('prefix', 'dm: core:', 2)], info.like)
+        self.assertEqual(
+            suggest_tests.Result(True, 'dm: core: (2)'),
+            suggest_tests.FREE_TESTS['similar']((2, None), info))
+
+        # The submitter comes from the review's headers, else from the
+        # recent series
+        info = sug.free_info(series[1])[1]
+        self.assertEqual([Like('prefix', 'video:', 1),
+                          Like('from', 'bob@b.org', 1)], info.like)
+        self.assertEqual(
+            suggest_tests.Result(False, 'video: (1), from bob@b.org (1)'),
+            suggest_tests.FREE_TESTS['similar']((2, None), info))
+        self.assertEqual([Like('from', 'carl@c.org', 1)],
+                         sug.free_info(series[5])[1].like)
+
+        # A new version leaves out the reviews of the earlier ones
+        info = sug.free_info(series[2])[1]
+        self.assertTrue(info.reviewed_before)
+        self.assertEqual([Like('prefix', 'dm: core:', 1)], info.like)
+
+        # Nothing in common
+        info = sug.free_info(series[3])[1]
+        self.assertEqual([], info.like)
+        self.assertEqual(
+            suggest_tests.Result(False, 'none'),
+            suggest_tests.FREE_TESTS['similar']((2, None), info))
+
+        # With no range, it needs SIMILAR_MIN, or one in SIMILAR_SHARE of the
+        # series you reviewed, if more
+        like = suggest_tests.FREE_TESTS['similar']
+        info = sug.free_info(series[0])[1]
+        self.assertEqual(2, info.like_min)
+        self.assertEqual(suggest_tests.Result(True, 'dm: core: (2); needs 2'),
+                         like((), info))
+        with mock.patch.object(suggest, 'SIMILAR_SHARE', 1):
+            info = suggest.Suggester(rules, pwork, cser, {ME}, cser.db, NOW,
+                                     10).free_info(series[0])[1]
+        self.assertEqual(3, info.like_min)
+        self.assertFalse(like((), info).matched)
+
+        # The rule picks out the series like two you reviewed
+        found = suggest.Suggester(rules, pwork, cser, {ME}, cser.db, NOW,
+                                  10).find(series)
+        self.assertEqual([(300, 2, ['like +2'])],
+                         [(item.pws['id'], item.score, item.reasons)
+                          for item in found])
+
+        # Without a 'similar' rule, the reviews are not read
+        with mock.patch.object(suggest, 'read_profile') as read:
+            suggest.Suggester(suggest_rules.get_rules({'x': 'rfc +1'}), pwork,
+                              cser, {ME}, cser.db, NOW, 10).find(series)
+        read.assert_not_called()
 
     def test_find(self):
         """Series are found, scored and put in order, leaving out those which

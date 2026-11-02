@@ -53,6 +53,7 @@ COST_NAMES = {
 #   words: one or more words, e.g. 'boot:'
 #   regex: one or more regular expressions
 #   range: one number or range, e.g. '25-' (see common.split_range())
+#   count: a range, as for 'range', or none to leave it to the test
 #   roles: 'M' and 'R', or neither for both
 #   me-none: 'me' or 'none'
 #   pass-fail: 'pass' or 'fail'
@@ -69,6 +70,8 @@ TESTS = {
     'rfc': Test('none', FREE, False, 'the series is an RFC'),
     'reviewed-before': Test('none', FREE, False,
                             'you reviewed an earlier version'),
+    'similar': Test('count', FREE, False,
+                    'like series you reviewed before'),
     'state': Test('words', FREE, True,
                   'a patch is in one of these patchwork states'),
     'path': Test('globs', PATCH, False, 'a patch touches a matching file'),
@@ -180,8 +183,10 @@ def _parse_args(test, words):
         return ()
     if kind in ('globs', 'words', 'regex'):
         return _parse_list(test, kind, words)
-    if kind == 'range':
+    if kind == 'range' or (kind == 'count' and words):
         return _parse_range(test, words)
+    if kind == 'count':
+        return ()
     if kind == 'roles':
         roles = tuple(word.upper() for word in words)
         if any(role not in ('M', 'R') for role in roles):
@@ -322,7 +327,7 @@ def _show_args(rule):
         str: The arguments, e.g. 'drivers/i2c/**' or '25-'
     """
     kind = TESTS[rule.test].args
-    if kind == 'range':
+    if kind in ('range', 'count') and rule.args:
         start, end = rule.args
         if start == end:
             return str(start)
