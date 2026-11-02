@@ -8,6 +8,9 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+0.7.0 - 2026-11-02
+------------------
+
 Added
 ~~~~~
 - ``patman review --suggest`` works with no settings: until you write rules
