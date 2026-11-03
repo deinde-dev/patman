@@ -8,6 +8,17 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+Changed
+~~~~~~~
+- The ``patman maint`` steps are renamed and reordered, so that the five
+  taken for each series are numbered and their names sort in that order:
+  ``apply``, ``check``, ``ci``, ``publish`` and ``tidy``. The two needed
+  only now and then, ``audit`` and ``thanks``, follow after a gap.
+  ``maint check``, which checked the commits against the rules, is now
+  ``maint audit``; ``maint check`` now runs the tests, as ``maint test``
+  did; and ``maint done`` is now ``maint tidy``. ``test`` and ``done``
+  still work. Each step has a one-line summary in ``patman maint -h``.
+
 0.7.0 - 2026-11-02
 ------------------
 

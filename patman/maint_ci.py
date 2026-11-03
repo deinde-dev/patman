@@ -5,15 +5,15 @@
 """Test the queue which a maintainer is about to push, run CI on it and
 publish it
 
-'patman maint test' runs the project's test commands on the queue, in a
+'patman maint check' runs the project's test commands on the queue, in a
 worktree of its own, so that the tree you are working in is not touched.
 
-'patman maint ci' checks the queue, pushes it to the branches which run CI,
+'patman maint ci' audits the queue, pushes it to the branches which run CI,
 then waits for GitHub Actions and the GitLab pipeline to finish with the
 commit which was pushed. Any run for that commit counts, wherever it was
 started from.
 
-'patman maint publish' checks the queue again, makes sure that CI passed on
+'patman maint publish' audits the queue again, makes sure that CI passed on
 its last commit, then pushes it to the remotes, after asking.
 """
 
@@ -346,7 +346,7 @@ def do_ci(rules, dry_run=False, wait=True, git_dir=None,
                          "section of the settings, e.g. "
                          "'ci_push: david +{branch}:ci'")
     sha = _branch_commit(rules, git_dir)
-    if maint.do_check(rules, git_dir=git_dir):
+    if maint.do_audit(rules, git_dir=git_dir):
         print('Not pushed, since the check failed')
         return 1
     if not command.output('git', 'rev-list', '-1',
@@ -490,7 +490,7 @@ def _ready(rules, sha, git_dir):
     """
     if not maint.fetch([remote for remote, _ in rules.publish], git_dir):
         return [], 1
-    if maint.do_check(rules, git_dir=git_dir):
+    if maint.do_audit(rules, git_dir=git_dir):
         print('Not published, since the check failed')
         return [], 1
     upstream = command.output('git', 'rev-parse', rules.upstream,

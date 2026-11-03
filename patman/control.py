@@ -554,31 +554,33 @@ def do_maint(args):
     Return:
         int: Exit code: 0 if all is well, else 1
     """
-    if args.subcmd == 'check':
+    # The steps had these names in 0.7.0 and earlier
+    subcmd = {'test': 'check', 'done': 'tidy'}.get(args.subcmd, args.subcmd)
+    if subcmd == 'audit':
         rules = maint.get_rules(branch=args.branch)
-        return maint.do_check(rules, args.allow_merge)
-    if args.subcmd == 'test':
+        return maint.do_audit(rules, args.allow_merge)
+    if subcmd == 'check':
         return maint_ci.do_test(maint.get_rules(branch=args.branch,
                                                 queue=True))
-    if args.subcmd == 'ci':
+    if subcmd == 'ci':
         return maint_ci.do_ci(maint.get_rules(branch=args.branch, queue=True),
                               args.dry_run, args.wait)
-    if args.subcmd == 'publish':
+    if subcmd == 'publish':
         rules = maint.get_rules(branch=args.branch, queue=True)
         return maint_ci.do_publish(
             rules, args.dry_run, args.yes,
             after=lambda old, new: _thank_published(args, rules, old, new))
-    if args.subcmd == 'thanks':
+    if subcmd == 'thanks':
         rules = maint.get_rules()
         return maint_thanks.thank(
             rules, maint_list(rules), args.what, _closing(args),
             getattr(args, 'gmail_account', None), args.dry_run, args.redraft)
-    if args.subcmd == 'done':
+    if subcmd == 'tidy':
         rules = maint.get_rules()
         return maint_done.do_done(
             rules, maint_list(rules), args.what, args.force, args.yes,
             args.dry_run, getattr(args, 'gmail_account', None))
-    if args.subcmd == 'apply':
+    if subcmd == 'apply':
         rules = maint.get_rules()
         return maint_apply.apply_series(rules, maint_list(rules),
                                         maint_apply.find_link(args.link),
