@@ -232,12 +232,18 @@ class TestMaintThanks(LoreTestCase):
         self.assertEqual({'last': None, 'thanked': [], 'drafts': {}, 'done': []},
                          maint_thanks.read_state(self.repo))
 
-    def test_skipped(self):
-        """Your own series are not thanked, nor are commits not from the
-        list"""
+    def test_own(self):
+        """Your own series are thanked too, so that the thread shows that
+        they were applied, but commits not from the list are not"""
         self.apply(self.make_series(ME))
         self.assertEqual(2, len(self.trailers('main-push')))
-        self.assertEqual((0, 'No series to thank\n', []), self.thank())
+        ret, out, made = self.thank()
+        self.assertEqual((0, 'Drafted thanks for dtc: Tidy\n', 1),
+                         (ret, out, len(made)))
+        # There is no one to greet or thank
+        self.assertIn('Applied to main.\n', made[0][1])
+        self.assertNotIn('Hi ', made[0][1])
+        self.assertNotIn('thanks', made[0][1])
 
         self.commit('Direct', ME, [f'Signed-off-by: {ME}'])
         self.assertEqual((0, 'No series to thank\n', []), self.thank(
