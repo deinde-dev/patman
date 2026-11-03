@@ -569,7 +569,8 @@ def do_maint(args):
         rules = maint.get_rules(branch=args.branch, queue=True)
         return maint_ci.do_publish(
             rules, args.dry_run, args.yes,
-            after=lambda old, new: _thank_published(args, rules, old, new))
+            after=lambda old, new: _thank_published(args, rules, old, new),
+            force=args.force)
     if subcmd == 'thanks':
         rules = maint.get_rules()
         return maint_thanks.thank(
