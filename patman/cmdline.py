@@ -725,6 +725,10 @@ def add_maint_subparser(subparsers):
         '-n', '--dry-run', action='store_true',
         help='Say where the branch would be pushed, without pushing it')
     pub.add_argument(
+        '-f', '--force', action='store_true',
+        help='Publish even if CI has not passed, e.g. if it fails for a '
+             'reason which does not matter here')
+    pub.add_argument(
         '-y', '--yes', action='store_true',
         help='Push without asking first')
 

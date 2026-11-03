@@ -8,6 +8,11 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+Added
+~~~~~
+- ``patman maint publish -f`` publishes even if CI has not passed, e.g. if
+  it fails for a reason which does not matter here.
+
 Changed
 ~~~~~~~
 - The ``patman maint`` steps are renamed and reordered, so that the five

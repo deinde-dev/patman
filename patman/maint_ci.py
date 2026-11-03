@@ -446,16 +446,17 @@ def _has(remote, spec, sha, git_dir):
     return got == sha
 
 
-def _ci_passed(rules, sha):
+def _ci_passed(rules, sha, force=False):
     """Check that CI passed on a commit, everywhere it runs
 
     Args:
         rules (Rules): Rules, whose repos give the places
         sha (str): Full hash of the commit
+        force (bool): True to carry on even if CI has not passed
 
     Return:
-        bool: True if it passed, or there is no CI; if not, the state in
-            each place is shown
+        bool: True if it passed, there is no CI or force is True; if it did
+            not pass, the state in each place is shown
     """
     if not _ci_places(rules):
         return True
@@ -463,12 +464,15 @@ def _ci_passed(rules, sha):
     if all(res.state == SUCCESS for res in results):
         return True
     show_ci(results)
+    if force:
+        print(f'CI has not passed on {sha[:12]}, but publishing anyway')
+        return True
     print(f"Not published, since CI has not passed on {sha[:12]}: run "
-          "'patman maint ci'")
+          "'patman maint ci', or use -f to publish anyway")
     return False
 
 
-def _ready(rules, sha, git_dir):
+def _ready(rules, sha, git_dir, force=False):
     """Check that the queue can be published, and find where to
 
     Each remote to publish to is fetched first, so that the check is against
@@ -480,6 +484,7 @@ def _ready(rules, sha, git_dir):
         sha (str): Full hash of the branch's last commit
         git_dir (str or None): Directory of the git repo, or None for the
             current one
+        force (bool): True to publish even if CI has not passed
 
     Return:
         tuple:
@@ -505,16 +510,17 @@ def _ready(rules, sha, git_dir):
     # A branch which is behind the upstream has nothing to publish
     if not targets or not (ahead or sha == upstream):
         return [], 0
-    if not _ci_passed(rules, sha):
+    if not _ci_passed(rules, sha, force):
         return [], 1
     return targets, 0
 
 
-def do_publish(rules, dry_run=False, yes=False, git_dir=None, after=None):
+def do_publish(rules, dry_run=False, yes=False, git_dir=None, after=None,
+               force=False):
     """Publish the queue: push it to the remotes, once CI has passed on it
 
     The remotes are fetched and the branch is checked first, then CI must
-    have passed on its last commit. Then each place which does not have that
+    have passed on its last commit, unless forced. Then each place which does not have that
     commit yet is pushed to, in order, after asking, stopping at the first
     which fails. So once a problem is fixed, publishing again carries on
     where it stopped. Once the upstream has the commits, after is called,
@@ -531,6 +537,7 @@ def do_publish(rules, dry_run=False, yes=False, git_dir=None, after=None):
         after (function or None): Function to call once it is published,
             with the upstream commits before and after, e.g. to thank the
             submitters
+        force (bool): True to publish even if CI has not passed
 
     Return:
         int: 0 if it was published, or there is nothing to publish, else 1
@@ -547,7 +554,7 @@ def do_publish(rules, dry_run=False, yes=False, git_dir=None, after=None):
                          "section of the settings, e.g. "
                          "'publish: us {branch}:main'")
     sha = _branch_commit(rules, git_dir)
-    targets, ret = _ready(rules, sha, git_dir)
+    targets, ret = _ready(rules, sha, git_dir, force)
     if not targets:
         return ret
     old = _upstream()

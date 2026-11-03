@@ -298,7 +298,17 @@ class TestMaintCi(RepoTestCase):
         self.assertIn('  running github https://github/run\n', out)
         self.assertTrue(out.endswith(
             f'Not published, since CI has not passed on {commit[:12]}: run '
-            "'patman maint ci'\n"), out)
+            "'patman maint ci', or use -f to publish anyway\n"), out)
+
+        # Unless forced, which still shows the state of CI
+        ret, out = self.publish(maint_ci.FAILURE, None, dry_run=True,
+                                force=True)
+        self.assertEqual(0, ret)
+        self.assertIn('  FAIL    github https://github/run\n', out)
+        self.assertIn(f'CI has not passed on {commit[:12]}, but publishing '
+                      'anyway\n', out)
+        self.assertTrue(out.endswith(f'Would publish {commit[:12]} to '
+                                     f'{where}\n'), out)
 
         # Not if the answer is no, nor in a dry run
         ret, out = self.publish(maint_ci.SUCCESS, 'n')
