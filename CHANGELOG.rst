@@ -24,6 +24,13 @@ Changed
   did; and ``maint done`` is now ``maint tidy``. ``test`` and ``done``
   still work. Each step has a one-line summary in ``patman maint -h``.
 
+Fixed
+~~~~~
+- ``patman maint apply`` no longer refuses a series because an older one
+  with the same title has a higher version, e.g. when a series starts again
+  at v1 with one patch of an earlier v2: only a version sent later counts
+  as newer.
+
 0.7.0 - 2026-11-02
 ------------------
 
