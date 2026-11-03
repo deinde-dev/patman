@@ -468,6 +468,40 @@ def _restart(rules, dry_run, git_dir):
     return old
 
 
+def _catch_up(rules, dry_run, git_dir):
+    """Move the push branch up to the upstream, if it has nothing of its own
+
+    This happens once the queue is published and others push to the
+    upstream after it, so that the branch is left behind
+
+    Args:
+        rules (Rules): Rules to use
+        dry_run (bool): True to say what would be done, without doing it
+        git_dir (str or None): Directory of the git repo, or None for the
+            current one
+
+    Return:
+        str or None: The commit the push branch was at, so that it can be
+            put back, or None if it is not moved
+    """
+    branch = rules.push_branch
+    if not gitutil.ref_exists(f'refs/heads/{branch}', git_dir):
+        return None
+    behind = int(command.output('git', 'rev-list', '--count',
+                                f'{branch}..{rules.upstream}', cwd=git_dir))
+    ahead = int(command.output('git', 'rev-list', '--count',
+                               f'{rules.upstream}..{branch}', cwd=git_dir))
+    if ahead or not behind:
+        return None
+    old = command.output('git', 'rev-parse', branch, cwd=git_dir).strip()
+    verb = 'Would move' if dry_run else 'Moving'
+    print(f'{verb} {branch} up to {rules.upstream}, which is {behind} '
+          f"commit{'s' if behind > 1 else ''} ahead of it")
+    if not dry_run:
+        _set_branch(branch, rules.upstream, git_dir)
+    return old
+
+
 def find_link(series, test_db=None, git_dir=None, need=True,
               verb='apply'):
     """Get the link of the series which 'maint apply' is to apply
@@ -531,7 +565,8 @@ def apply_series(rules, llist, link, patches=None, force=False,
 
     The upstream remote is fetched first, since someone else may have pushed
     to it, so that the push branch is made from the upstream as it is, and
-    patches which are upstream already are known.
+    patches which are upstream already are known. A push branch which has
+    nothing of its own is moved up to the upstream first.
 
     Args:
         rules (Rules): Rules to use
@@ -559,7 +594,7 @@ def apply_series(rules, llist, link, patches=None, force=False,
     if check_series(rules, data, newer, sel, force, git_dir, redo):
         return 0
     trailers = plan(rules, data, tags, sel)
-    old = _restart(rules, dry_run, git_dir) if redo else None
+    old = (_restart if redo else _catch_up)(rules, dry_run, git_dir)
     if dry_run:
         print(f'Would apply {_count(sel, data)} to {rules.push_branch}')
         return 0

@@ -40,7 +40,9 @@ was ``done``. ``test`` and ``done`` still work.
 ``patman maint apply`` applies a series from the mailing list to the push
 branch, ``main-push`` for an upstream branch of ``main``, which it makes from
 the upstream branch if there is none. It fetches the upstream first, since
-someone else may have pushed to it. Give it the Message-ID of the cover
+someone else may have pushed to it, and moves the push branch up to the
+upstream if it has nothing of its own, e.g. once its commits are published
+and others have been pushed since. Give it the Message-ID of the cover
 letter, or of the first patch if there is none, or a link to it on lore::
 
     $ patman maint apply 20261102093012.81234-1-fred@x.org

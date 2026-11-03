@@ -437,6 +437,36 @@ class TestMaintApply(LoreTestCase):
         self.assertIn(f'Reviewed-by: {HERVE}', self.trailers('main-push')[0])
         self.assertEqual('main', maint.current_branch(self.repo))
 
+    def test_catch_up(self):
+        """A push branch left behind by the upstream is moved up to it"""
+        link = self.make_series()
+        self.git('branch', 'main-push', 'us/main')
+
+        # Someone pushes to the upstream after the queue is published
+        with open(os.path.join(self.repo, 'c.txt'), 'w',
+                  encoding='utf-8') as outf:
+            outf.write('upstream\n')
+        self.git('add', 'c.txt')
+        self.commit('dtc: Upstream', ME, [f'Signed-off-by: {ME}'])
+        self.git('update-ref', 'refs/remotes/us/main', 'HEAD')
+        before = self.git('rev-parse', 'main-push').strip()
+
+        ret, out = self.apply(link, dry_run=True)
+        self.assertEqual(0, ret, out)
+        self.assertIn('Would move main-push up to us/main, which is 1 commit '
+                      'ahead of it\n', out)
+        self.assertEqual(before, self.git('rev-parse', 'main-push').strip())
+
+        ret, out = self.apply(link)
+        self.assertEqual(0, ret, out)
+        self.assertIn('Moving main-push up to us/main, which is 1 commit '
+                      'ahead of it\n', out)
+        self.assertEqual(
+            ['dtc: Add a file', 'dtc: Grow the file'],
+            self.git('log', '--reverse', '--format=%s',
+                     'us/main..main-push').splitlines())
+        self.assertEqual('', self.git('rev-list', 'main-push..us/main'))
+
     def test_redo_fails(self):
         """-R leaves the push branch as it was if the series does not apply,
         or the branch is checked out with changes"""
