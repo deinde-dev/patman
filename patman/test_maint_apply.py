@@ -354,6 +354,21 @@ class TestMaintApply(LoreTestCase):
         ret, out = self.apply(link, llist, force=True)
         self.assertEqual(0, ret, out)
 
+    def test_restarted(self):
+        """A higher version sent earlier is not newer, e.g. on starting again"""
+        link = self.make_series()
+        llist = self.lore_list([{'id': 'v2@x.org', 'name': 'dtc: Tidy',
+                                 'version': 2, 'date': '2026-10-20T15:37:51'}])
+        ret, out = self.apply(link, llist)
+        self.assertEqual(0, ret, out)
+
+        # Sent later, it is newer
+        llist = self.lore_list([{'id': 'v2@x.org', 'name': 'dtc: Tidy',
+                                 'version': 2, 'date': '2026-10-28T09:36:20'}])
+        with self.assertRaises(ValueError) as exc:
+            self.apply(link, llist, redo=True)
+        self.assertIn('is not the latest version: v2', str(exc.exception))
+
     def test_conflict(self):
         """A series which does not apply leaves the push branch as it was"""
         link = self.make_series()

@@ -106,8 +106,28 @@ def _tags_of(content, comments):
     return {tag: people for tag, people in new.items() if tag in TAGS}
 
 
+def _sent_before(ser, data):
+    """Check whether a series was sent before another
+
+    Args:
+        ser (dict): Series, as from LoreList.query_series()
+        data (dict): Other series, as from LoreList.get_series()
+
+    Return:
+        bool: True if ser was sent first, False if it was not, or if either
+            date is not known
+    """
+    # Both are in UTC, as from lore.to_comment(), e.g. '2026-10-20T15:37:51'
+    return bool(ser.get('date') and data.get('date') and
+                ser['date'] < data['date'])
+
+
 async def read_series(llist, link):
     """Read a series from lore, with the tags given in reply to it
+
+    A version with the same title counts as newer only if it was also sent
+    later, since a series may start again at v1 after an earlier one reached
+    v2 or more, e.g. when it keeps just one patch of that one
 
     Args:
         llist (LoreList): List to read from
@@ -140,7 +160,8 @@ async def read_series(llist, link):
         title = _norm_title(data['name'])
         newer = [ser for ser in await llist.query_series(client, title)
                  if _norm_title(ser['name']) == title and
-                 (ser.get('version') or 1) > (data['version'] or 1)]
+                 (ser.get('version') or 1) > (data['version'] or 1) and
+                 not _sent_before(ser, data)]
         mbox = await llist.get_mbox(client, [pat['msgid']
                                              for pat in data['patches']])
     return data, tags, newer, mbox
