@@ -2153,7 +2153,7 @@ function chunkForm(comment, drafted, cancel, submit) {
     }
   }, title: 'Save the changed comment' }, 'Save');
   const form = h('div', { class: 'form' }, text,
-    h('label', { class: 'check', title: `Also update the Gmail draft of the ${what}` },
+    h('label', { class: 'check', title: 'Also update the Gmail draft of the review' },
       box, 'Update the Gmail draft'),
     h('div', { class: 'hint' }, 'Leave it empty to drop the comment and its quote'),
     h('div', { class: 'actions' }, save,
@@ -2180,7 +2180,7 @@ function editReview(card, r, header, show, target, refresh) {
     }
   }, title: 'Save the changed review' }, 'Save');
   fill(card, header, h('div', { class: 'form' }, text,
-    h('label', { class: 'check', title: `Also update the Gmail draft of the ${what}` },
+    h('label', { class: 'check', title: 'Also update the Gmail draft of the review' },
       box, 'Update the Gmail draft'),
     h('div', { class: 'hint' }, "Include a 'Reviewed-by:' line to approve the patch"),
     h('div', { class: 'actions' }, save,
