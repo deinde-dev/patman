@@ -295,11 +295,11 @@ class TestMaint(RepoTestCase):
         self.assertEqual([], dict((cmt.subject, probs) for cmt, probs in
                                   maint.check_commits(rules, commits))[merge])
 
-    def test_do_check(self):
+    def test_do_audit(self):
         """The check says what is wrong with the queue"""
         rules = self.rules()
         with terminal.capture() as (out, _):
-            self.assertEqual(0, maint.do_check(rules, git_dir=self.repo))
+            self.assertEqual(0, maint.do_audit(rules, git_dir=self.repo))
         self.assertEqual('Nothing to check: main has no commits which are not '
                          'in us/main\n', out.getvalue())
 
@@ -307,13 +307,13 @@ class TestMaint(RepoTestCase):
             f'Signed-off-by: {FRED}', 'Message-ID: <1@x.org>',
             f'Signed-off-by: {ME}'])
         with terminal.capture() as (out, _):
-            self.assertEqual(0, maint.do_check(rules, git_dir=self.repo))
+            self.assertEqual(0, maint.do_audit(rules, git_dir=self.repo))
         self.assertEqual(f'Checking 1 commit in us/main..main\n'
                          f'  ok   {good[:12]} good\n', out.getvalue())
 
         bad = self.commit('bad', FRED, [f'Signed-off-by: {FRED}'])
         with terminal.capture() as (out, _):
-            self.assertEqual(1, maint.do_check(rules, git_dir=self.repo))
+            self.assertEqual(1, maint.do_audit(rules, git_dir=self.repo))
         self.assertEqual(
             f'Checking 2 commits in us/main..main\n'
             f'  ok   {good[:12]} good\n'
@@ -326,7 +326,7 @@ class TestMaint(RepoTestCase):
         self.git('update-ref', 'refs/remotes/us/main', bad)
         self.git('reset', '-q', '--hard', 'HEAD~1')
         with terminal.capture() as (out, _):
-            self.assertEqual(0, maint.do_check(rules, git_dir=self.repo))
+            self.assertEqual(0, maint.do_audit(rules, git_dir=self.repo))
         self.assertEqual('Nothing to check: main is behind us/main; to bring '
                          'it up to date: git merge --ff-only us/main\n',
                          out.getvalue())
@@ -334,7 +334,7 @@ class TestMaint(RepoTestCase):
         # On another branch, the merge needs main checked out
         self.git('checkout', '-q', '-b', 'other')
         with terminal.capture() as (out, _):
-            self.assertEqual(0, maint.do_check(rules, git_dir=self.repo))
+            self.assertEqual(0, maint.do_audit(rules, git_dir=self.repo))
         self.assertEqual('Nothing to check: main is behind us/main; to bring '
                          'it up to date: git checkout main && git merge '
                          '--ff-only us/main\n', out.getvalue())
@@ -345,21 +345,21 @@ class TestMaint(RepoTestCase):
         self.git('reset', '-q', '--hard', 'HEAD~1')
         other = self.commit('other', ME, [f'Signed-off-by: {ME}'])
         with terminal.capture() as (out, _):
-            self.assertEqual(1, maint.do_check(rules, git_dir=self.repo))
+            self.assertEqual(1, maint.do_audit(rules, git_dir=self.repo))
         self.assertEqual("'main' does not contain us/main, so it cannot be "
                          'pushed; to rebase it: git rebase us/main main\n'
                          'Checking 1 commit in us/main..main\n'
                          f'  ok   {other[:12]} other\n', out.getvalue())
 
         with self.assertRaises(ValueError) as exc:
-            maint.do_check(maint.get_rules(DTC, self.repo, 'queue'),
+            maint.do_audit(maint.get_rules(DTC, self.repo, 'queue'),
                            git_dir=self.repo)
         self.assertEqual("No branch 'queue'", str(exc.exception))
 
         # With HEAD detached, the branch must be given
         self.git('checkout', '-q', '--detach')
         with self.assertRaises(ValueError) as exc:
-            maint.do_check(self.rules(), git_dir=self.repo)
+            maint.do_audit(self.rules(), git_dir=self.repo)
         self.assertEqual('No branch is checked out: use -b to say which to '
                          'check', str(exc.exception))
 
@@ -384,7 +384,7 @@ class TestMaint(RepoTestCase):
         self.assertEqual('main-push', self.rules().branch)
 
     def test_command(self):
-        """'patman maint check' checks the queue with the [maint] rules"""
+        """'patman maint audit' checks the queue with the [maint] rules"""
         self.commit('good', FRED, [
             f'Signed-off-by: {FRED}', 'Message-ID: <1@x.org>',
             f'Signed-off-by: {ME}'])
@@ -394,7 +394,7 @@ class TestMaint(RepoTestCase):
             with mock.patch.object(maint.settings, 'maint', DTC), \
                     terminal.capture() as (out, _):
                 self.assertEqual(0, control.do_maint(Namespace(
-                    subcmd='check', branch=None, allow_merge=False)))
+                    subcmd='audit', branch=None, allow_merge=False)))
         finally:
             os.chdir(orig)
         self.assertIn('  ok   ', out.getvalue())

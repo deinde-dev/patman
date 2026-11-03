@@ -663,10 +663,14 @@ def add_maint_subparser(subparsers):
         ArgumentParser: maint subparser
     """
     maint = subparsers.add_parser(
-        'maint', help="Apply and check patches as a project's maintainer")
-    maint_subparsers = maint.add_subparsers(dest='subcmd')
+        'maint', help="Apply and check patches as a project's maintainer",
+        description='The numbered steps are in the order you take them for '
+                    'each series, which is also alphabetical. The others are '
+                    'needed only now and then.')
+    maint_subparsers = maint.add_subparsers(dest='subcmd', metavar='step')
     apply = maint_subparsers.add_parser(
-        'apply', help='Apply a series from the list to the push branch')
+        'apply', help='1. Apply a series from the list to the push branch',
+        description='Apply a series from the list to the push branch')
     apply.add_argument(
         'link', nargs='?',
         help='Message-ID of the cover letter or first patch, a link to it on '
@@ -689,26 +693,17 @@ def add_maint_subparser(subparsers):
              'is on it, e.g. to apply a series again')
 
     check = maint_subparsers.add_parser(
-        'check',
-        help='Check the commits not yet upstream against the [maint] rules')
+        'check', aliases=['test'],
+        help="2. Run the project's tests on the push branch",
+        description="Run the project's tests on the push branch")
     check.add_argument(
-        '-b', '--branch',
-        help='Branch holding the commits to check (default: the one checked '
-             'out)')
-    check.add_argument(
-        '--allow-merge', action='store_true',
-        help="Allow merge commits, when the 'history' setting is "
-             "'prefer-linear'")
-
-    test = maint_subparsers.add_parser(
-        'test', help="Run the project's tests on the commits not yet upstream")
-    test.add_argument(
         '-b', '--branch',
         help='Branch to test (default: the push branch)')
 
     cip = maint_subparsers.add_parser(
-        'ci', help='Check the commits not yet upstream, push them to run CI '
-                   'and wait for it')
+        'ci', help='3. Audit the commits, push them to run CI and wait for it',
+        description='Audit the commits on the push branch, push them to run '
+                    'CI and wait for it')
     cip.add_argument(
         '-b', '--branch',
         help='Branch to push (default: the push branch)')
@@ -720,8 +715,9 @@ def add_maint_subparser(subparsers):
         help='Push without waiting for CI to finish')
 
     pub = maint_subparsers.add_parser(
-        'publish', help='Push the commits not yet upstream to the remotes, '
-                        'once CI has passed on them')
+        'publish', help='4. Push the commits upstream, once CI has passed',
+        description='Audit the commits on the push branch, push them to the '
+                    'remotes once CI has passed on them, and draft the thanks')
     pub.add_argument(
         '-b', '--branch',
         help='Branch to publish (default: the push branch)')
@@ -732,8 +728,44 @@ def add_maint_subparser(subparsers):
         '-y', '--yes', action='store_true',
         help='Push without asking first')
 
+    tidy = maint_subparsers.add_parser(
+        'tidy', aliases=['done'],
+        help='5. Tidy up a series once it is upstream and thanked',
+        description='Check that a series is upstream and its thanks were '
+                    'sent, delete any drafts of the thanks left in Gmail and '
+                    'archive the series if it is yours')
+    tidy.add_argument(
+        'what', nargs='?', metavar='series',
+        help="Series, by its Message-ID, link or name (default: the current "
+             "branch's series if patman sent it, else each series which is "
+             'thanked but not finished with)')
+    tidy.add_argument(
+        '-f', '--force', action='store_true',
+        help='Finish with it even if it is not all upstream, or the thanks '
+             'were not sent')
+    tidy.add_argument(
+        '-n', '--dry-run', action='store_true',
+        help='Say what would be done, without doing it')
+    tidy.add_argument(
+        '-y', '--yes', action='store_true',
+        help='Archive your series without asking first')
+
+    audit = maint_subparsers.add_parser(
+        'audit',
+        help='Check the commits against the rules; apply and ci do this too',
+        description='Check the commits against the [maint] rules')
+    audit.add_argument(
+        '-b', '--branch',
+        help='Branch holding the commits to check (default: the one checked '
+             'out)')
+    audit.add_argument(
+        '--allow-merge', action='store_true',
+        help="Allow merge commits, when the 'history' setting is "
+             "'prefer-linear'")
+
     thanks = maint_subparsers.add_parser(
-        'thanks', help='Draft the thanks for series which went upstream')
+        'thanks', help='Draft the thanks for a series; publish does this too',
+        description='Draft the thanks for series which went upstream')
     thanks.add_argument(
         'what', nargs='?', metavar='series|range',
         help="Series to thank, by its Message-ID, link or name, or commits "
@@ -748,23 +780,15 @@ def add_maint_subparser(subparsers):
         help='Draft the thanks again for series thanked already, deleting '
              'the drafts made before')
 
-    done = maint_subparsers.add_parser(
-        'done', help='Finish with a series once its thanks are sent')
-    done.add_argument(
-        'what', nargs='?', metavar='series',
-        help="Series, by its Message-ID, link or name (default: the current "
-             "branch's series if patman sent it, else each series which is "
-             'thanked but not finished with)')
-    done.add_argument(
-        '-f', '--force', action='store_true',
-        help='Finish with it even if it is not all upstream, or the thanks '
-             'were not sent')
-    done.add_argument(
-        '-n', '--dry-run', action='store_true',
-        help='Say what would be done, without doing it')
-    done.add_argument(
-        '-y', '--yes', action='store_true',
-        help='Archive your series without asking first')
+    # Show each step by its name only, leaving out the old names which
+    # still work: 'test' and 'done' (0.7.0 and earlier). Leave a blank line
+    # before the steps which are needed only now and then.
+    actions = maint_subparsers._choices_actions  # pylint: disable=W0212
+    for action in actions:
+        action.metavar = action.dest
+    gap = type(actions[0])('', [], '')
+    gap.metavar = ''
+    actions.insert([act.dest for act in actions].index('audit'), gap)
     return maint
 
 

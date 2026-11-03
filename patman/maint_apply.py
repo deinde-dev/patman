@@ -13,7 +13,7 @@ upstream branch if needed.
 The patches are applied in a temporary worktree, so that the tree you are
 working in is not touched. If the push branch is checked out somewhere, they
 are applied there instead, once it is clean. Then the push branch is checked
-(see maint.do_check()).
+(see maint.do_audit()).
 """
 
 from collections import defaultdict
@@ -559,7 +559,7 @@ def apply_series(rules, llist, link, patches=None, force=False,
               f'a rebase:\n{problem}')
         return 1
     print()
-    ret = maint.do_check(rules, git_dir=git_dir)
+    ret = maint.do_audit(rules, git_dir=git_dir)
     print(f'{_count(sel, data)} applied to {rules.branch}')
     return ret
 

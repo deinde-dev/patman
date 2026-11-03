@@ -5,11 +5,11 @@
 """Finish with a series which a maintainer has applied
 
 Once a series is upstream and the thanks for it are sent, 'patman maint
-done' checks that this is so, says if any issue which the commits close is
+tidy' checks that this is so, says if any issue which the commits close is
 still open, and archives the branch of your own series, after asking. The
 thanks are found on the list, however they were sent, and any of their
 drafts left in Gmail are deleted. It notes each series it has finished
-with, so that 'maint done' with no series can go through those which are
+with, so that 'maint tidy' with no series can go through those which are
 thanked but not finished with yet.
 """
 

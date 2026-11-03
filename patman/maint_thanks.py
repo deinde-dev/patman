@@ -89,7 +89,7 @@ def read_state(git_dir=None):
             drafts (dict): Drafts of the thanks for each series thanked,
                 by its Message-ID, see drafts_of()
             done (list of str): Message-IDs of the series finished with, see
-                'patman maint done'
+                'patman maint tidy'
     """
     try:
         with open(_state_path(git_dir), encoding='utf-8') as inf:

@@ -12,8 +12,30 @@ is mechanical, so patman holds them as settings, applies patches by them and
 checks the commits against them, rather than leaving you (or an AI assistant)
 to read them.
 
-Applying a series
------------------
+The ``patman maint`` subcommands are steps, taken in this order for each
+series, which is also the order of their names:
+
+1. ``apply`` applies the series to the push branch
+2. ``check`` runs the project's tests on it
+3. ``ci`` pushes it to run CI and waits for it
+4. ``publish`` pushes it upstream and drafts the thanks
+5. ``tidy`` checks that the series is upstream and the thanks were sent,
+   deletes any drafts of the thanks left in Gmail and archives the series
+   if it is yours
+
+Two more are needed only now and then, since other steps do their work:
+
+- ``audit`` checks the commits against the rules, as ``apply``, ``ci`` and
+  ``publish`` do, e.g. for patches applied some other way
+- ``thanks`` drafts the thanks, as ``publish`` does, e.g. for a series which
+  went upstream some other way, or to draft them again
+
+``patman maint -h`` lists the steps in this way. In 0.7.0 the steps had
+other names: ``audit`` was ``check``, ``check`` was ``test`` and ``tidy``
+was ``done``. ``test`` and ``done`` still work.
+
+1. Applying a series
+--------------------
 
 ``patman maint apply`` applies a series from the mailing list to the push
 branch, ``main-push`` for an upstream branch of ``main``, which it makes from
@@ -55,7 +77,7 @@ the replies to this version count: a tag given to an earlier version must be
 added to the new one by its author. Each patch gets these tags after its own,
 then the trailers which ``trailers_end`` gives, e.g. its ``Message-ID:`` and
 your sign-off, leaving out your sign-off on your own patches if
-``signoff_own`` is ``no``. Then the push branch is checked, as below.
+``signoff_own`` is ``no``. Then the push branch is audited, as below.
 
 The patches are applied in a temporary worktree, so the tree you are working
 in is not touched, whatever is checked out and whatever changes it has. If the
@@ -91,29 +113,10 @@ put back as it was::
       ok   e05c3a9b6d12 libfdt: Drop an unused variable
     2 of 2 patches applied to main-push
 
-Checking the queue
-------------------
+2. Testing the queue
+--------------------
 
-``patman maint check`` checks the queue: the commits which are not upstream
-yet. It checks the branch which is checked out, if that has commits of its
-own, else the push branch, or the branch given with ``-b``. Run it before
-pushing, however the patches were applied, e.g. with ``b4 am``::
-
-    $ patman maint check
-    Checking 3 commits in us/main..main
-      ok   1c3f0a2b9d4e libfdt: Add fdt_get_alias_namelen()
-      ok   7e21d9c0a3b5 tests: Check fdt_get_alias_namelen()
-      FAIL 0b9a8f3e6c12 dtc: Warn about a missing #size-cells
-           - No Signed-off-by from the author, Fred Bloggs <fred@x.org>
-    1 of 3 with problems
-
-It exits with 1 if any commit has a problem, so a script can stop before
-pushing.
-
-Testing the queue
------------------
-
-``patman maint test`` runs the project's tests, which the ``test`` setting
+``patman maint check`` runs the project's tests, which the ``test`` setting
 gives, on the push branch, which holds the queue, or the branch given with
 ``-b``; ``maint ci`` and ``maint publish`` use the same branch. The tests run
 one after the other in a temporary worktree of the branch's last commit, so
@@ -121,16 +124,16 @@ they see only what is committed, the build starts clean and the tree you are
 working in is not touched. They stop at the first which fails, showing the end
 of its output::
 
-    $ patman maint test
+    $ patman maint check
     Testing main-push at e5353eb4e214
       ok   make check
       ok   meson setup build
       ok   meson test -C build
 
-Running CI
-----------
+3. Running CI
+-------------
 
-``patman maint ci`` checks the push branch as ``maint check`` does, then
+``patman maint ci`` audits the push branch as ``maint audit`` does, then
 pushes it to each place which the ``ci_push`` setting gives and waits for CI
 to finish on the commit pushed, on GitHub (using ``gh``) and GitLab, as the
 ``github`` and ``gitlab`` settings say. Any run for that commit counts,
@@ -152,12 +155,12 @@ when CI does not start within five minutes, or does not finish within an hour.
 ``-n`` says where the branch would be pushed, and ``-W`` pushes it without
 waiting.
 
-Publishing the queue
---------------------
+4. Publishing the queue
+-----------------------
 
 ``patman maint publish`` pushes the push branch to the remotes which the
 ``publish`` setting gives, in order. First it fetches them, so that it knows
-what they have, and checks the branch as ``maint check`` does. Then CI must
+what they have, and audits the branch as ``maint audit`` does. Then CI must
 have passed on the branch's last commit, everywhere it runs; if anything was
 applied or changed since ``maint ci``, run that again. It asks before
 pushing::
@@ -176,6 +179,56 @@ branch would be pushed, and ``-y`` pushes without asking.
 
 Once the upstream has the commits, the submitters are thanked, as below,
 even if a push to another remote then fails.
+
+5. Tidying up a series
+----------------------
+
+Once you have sent the thanks, ``patman maint tidy`` finishes with the
+series. It checks that the whole series is upstream and that the thanks
+were sent. They are looked for on the list, as a reply from the ``signoff``
+address sent after the patches were applied, so they count however you
+sent them, e.g. as a reply you wrote yourself. Since the list may take a
+little while to have them, it then looks in Gmail, where a draft which has
+gone was sent if your reply is in its thread, as for reviews. Any draft of
+the thanks left in Gmail is deleted, so that it is not sent by mistake. It
+lists any issue which a ``Closes:`` trailer names and which is still open;
+GitHub and GitLab close these themselves when the commits reach the
+project's default branch, so there is normally none. Then, for your own
+series, it asks before archiving it, as ``patman series archive`` does,
+which tags its branches and deletes them::
+
+    $ patman maint tidy
+    Series 'readme-meson' v1: 20261028112007.3980089-1-sjg@chromium.org
+    Found the thanks on the list, sent 2026-10-30
+    Deleted 2 unsent draft(s) of the thanks
+    Archive series 'readme-meson'? [y/N] y
+    Finished with 'README: Explain how to build with meson (v1)'
+
+As with ``maint thanks`` (below), the series may be given by its Message-ID,
+link or name, and is the current branch's by default. On a branch with no
+series, such as the push branch, it goes through each series which is thanked
+but not finished with, which suits series from other people. It says why a
+series is not finished; ``-f`` finishes with it anyway, ``-n`` says what would
+be done and ``-y`` archives without asking.
+
+Auditing the queue
+------------------
+
+``patman maint audit`` checks the queue: the commits which are not upstream
+yet. It checks the branch which is checked out, if that has commits of its
+own, else the push branch, or the branch given with ``-b``. Run it before
+pushing, however the patches were applied, e.g. with ``b4 am``::
+
+    $ patman maint audit
+    Checking 3 commits in us/main..main
+      ok   1c3f0a2b9d4e libfdt: Add fdt_get_alias_namelen()
+      ok   7e21d9c0a3b5 tests: Check fdt_get_alias_namelen()
+      FAIL 0b9a8f3e6c12 dtc: Warn about a missing #size-cells
+           - No Signed-off-by from the author, Fred Bloggs <fred@x.org>
+    1 of 3 with problems
+
+It exits with 1 if any commit has a problem, so a script can stop before
+pushing.
 
 Thanking the submitters
 -----------------------
@@ -227,37 +280,6 @@ applied, with no greeting or thanks::
     $ patman maint thanks
     Series 'readme-meson' v1: 20261028112007.3980089-1-sjg@chromium.org
     Drafted thanks for README: Explain how to build with meson
-
-Finishing with a series
------------------------
-
-Once you have sent the thanks, ``patman maint done`` finishes with the
-series. It checks that the whole series is upstream and that the thanks
-were sent. They are looked for on the list, as a reply from the ``signoff``
-address sent after the patches were applied, so they count however you
-sent them, e.g. as a reply you wrote yourself. Since the list may take a
-little while to have them, it then looks in Gmail, where a draft which has
-gone was sent if your reply is in its thread, as for reviews. Any draft of
-the thanks left in Gmail is deleted, so that it is not sent by mistake. It
-lists any issue which a ``Closes:`` trailer names and which is still open;
-GitHub and GitLab close these themselves when the commits reach the
-project's default branch, so there is normally none. Then, for your own
-series, it asks before archiving it, as ``patman series archive`` does,
-which tags its branches and deletes them::
-
-    $ patman maint done
-    Series 'readme-meson' v1: 20261028112007.3980089-1-sjg@chromium.org
-    Found the thanks on the list, sent 2026-10-30
-    Deleted 2 unsent draft(s) of the thanks
-    Archive series 'readme-meson'? [y/N] y
-    Finished with 'README: Explain how to build with meson (v1)'
-
-As with ``maint thanks``, the series may be given by its Message-ID, link or
-name, and is the current branch's by default. On a branch with no series,
-such as the push branch, it goes through each series which is thanked but
-not finished with, which suits series from other people. It says why a
-series is not finished; ``-f`` finishes with it anyway, ``-n`` says what
-would be done and ``-y`` archives without asking.
 
 The rules
 ---------
@@ -336,7 +358,7 @@ The settings are:
     one of them. ``maint ci`` waits for CI in each of them
 
 ``test``
-    The commands which ``maint test`` runs, separated by semicolons. Each runs
+    The commands which ``maint check`` runs, separated by semicolons. Each runs
     in the shell, at the top of the tree
 
 ``ci_push``

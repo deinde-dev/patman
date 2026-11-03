@@ -19,7 +19,7 @@ them, e.g. for dtc:
     github: dgibson/dtc
     gitlab: dgibson/dtc
 
-'patman maint check' checks each commit in the queue, i.e. those on the
+'patman maint audit' checks each commit in the queue, i.e. those on the
 branch which are not upstream yet, against these rules, so that a mistake is
 caught before the commits are pushed, however they were applied.
 """
@@ -748,7 +748,7 @@ def _is_ancestor(commit, ref, git_dir):
                                raise_on_error=False).return_code
 
 
-def do_check(rules, allow_merge=False, git_dir=None):
+def do_audit(rules, allow_merge=False, git_dir=None):
     """Check the queue against the rules and say what is wrong
 
     Args:
