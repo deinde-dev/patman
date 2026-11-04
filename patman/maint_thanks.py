@@ -7,9 +7,9 @@
 Once a series from the list is upstream, the maintainer replies to it to say
 so. 'patman maint thanks' finds the series from the Message-ID: trailers of
 the commits which went upstream, reads each from lore, and makes a Gmail
-draft of the reply, for you to add any comments to and send. Your own
-series are left out. Which series have been thanked is noted, so that none
-is thanked twice.
+draft of the reply, for you to add any comments to and send. Your own series
+are included, so that everyone on the thread can see that they were applied.
+Which series have been thanked is noted, so that none is thanked twice.
 """
 
 from dataclasses import dataclass, field
@@ -129,11 +129,10 @@ def _msgid(cmt):
     return None
 
 
-async def find_applied(rules, llist, commits, thanked):
+async def find_applied(llist, commits, thanked):
     """Find the series which some commits came from
 
     Args:
-        rules (Rules): Rules, whose sign-off says which series are your own
         llist (LoreList): List to read the series from
         commits (list of maint.Commit): Commits, oldest first
         thanked (list of str): Message-IDs of series thanked already, which
@@ -143,12 +142,11 @@ async def find_applied(rules, llist, commits, thanked):
         list of Applied: Each series, in the order its first patch was
             applied
     """
-    own = maint.email_of(rules.signoff)
     found = {}
     async with aiohttp.ClientSession() as client:
         for cmt in commits:
             msgid = _msgid(cmt)
-            if not msgid or maint.email_of(cmt.email) == own:
+            if not msgid:
                 continue
             root = await llist.series_of(client, msgid)
             if not root or root in thanked:
@@ -418,8 +416,6 @@ def thank_series(rules, llist, link, closing=None, account=None,
                  dry_run=False, redraft=False, git_dir=None):
     """Draft the thanks for a series, for its patches which are upstream
 
-    The series is thanked even if it is your own, since it is asked for.
-
     Args:
         rules (Rules): Rules to use
         llist (LoreList): List to read the series from
@@ -581,7 +577,7 @@ def draft_thanks(rules, llist, rng, closing=None, account=None,
         rng = f"{state['last']}..{rules.upstream}"
     start, end = rng.split('..', 1)
     commits = maint.read_commits(start, end, git_dir)
-    apps = common.run(find_applied(rules, llist, commits,
+    apps = common.run(find_applied(llist, commits,
                                    [] if redraft else state['thanked']))
     if not dry_run:
         state['last'] = command.output('git', 'rev-parse', end,

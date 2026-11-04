@@ -15,6 +15,9 @@ Added
 
 Changed
 ~~~~~~~
+- ``patman maint publish`` drafts the reply for your own series too, so that
+  everyone on the thread can see that they were applied. It says ``Applied to
+  main.``, with no greeting or thanks.
 - The ``patman maint`` steps are renamed and reordered, so that the five
   taken for each series are numbered and their names sort in that order:
   ``apply``, ``check``, ``ci``, ``publish`` and ``tidy``. The two needed
