@@ -27,6 +27,7 @@ from u_boot_pylib import tout
 
 from patman import database
 from patman import interpreter
+from patman import lore
 from patman import lorelist
 from patman import patchwork
 from patman import pwcache
@@ -730,7 +731,11 @@ class Server(jobs.JobRunner):
         await self._find_covers(data)
         await self._find_lore_ids(data)
         data['patchwork_url'] = self.get_pw_url(data['upstream'])
-        data['lore_url'] = self.get_lore_url(data['upstream'])
+        # A series which patchwork lacks is reviewed from lore (see
+        # Patchwork.lore_list()), known by its Message-ID
+        data['lore_url'] = self.get_lore_url(data['upstream']) or (
+            lore.LORE_URL if any('@' in str(ver['link'])
+                                 for ver in data['versions']) else None)
         # Show where each reply being talked through is being discussed
         talks = discuss.discussions(self.rcser)
         for ver in data['versions']:

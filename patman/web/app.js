@@ -483,6 +483,8 @@ function commentToggle(card, kind, itemId, ups) {
 async function viewSeries(id, wantVer) {
   const ser = await api(`series/${id}`);
   const pw = ser.patchwork_url;
+  // A patch or cover letter which patchwork lacks is known as 'lore:<msgid>'
+  const onPw = (itemId) => pw && /^\d+$/.test(String(itemId));
   const versions = ser.versions;
   const sv = versions.find((v) => v.version === wantVer) || versions[0];
   const tabs = versionTabs(versions, sv, `#/series/${id}`, (n) => `Show version ${n}`);
@@ -498,7 +500,7 @@ async function viewSeries(id, wantVer) {
       h('div', { class: 'meta' },
         h('a', { class: 'extlink', href: mailHref('cover', sv.cover_id, ser.upstream),
                  title: 'Read the cover letter and its comments' }, 'Read'),
-        pw && extLink(`${pw}/cover/${sv.cover_id}/`, 'Open in patchwork',
+        onPw(sv.cover_id) && extLink(`${pw}/cover/${sv.cover_id}/`, 'Open in patchwork',
                       'Open the cover letter on patchwork, in a new tab')));
     card.addEventListener('click', commentToggle(card, 'cover', sv.cover_id, ser.upstream));
     cards.push(card);
@@ -516,7 +518,7 @@ async function viewSeries(id, wantVer) {
         p.patch_id && h('a', { class: 'extlink',
           href: mailHref('patch', p.patch_id, ser.upstream),
           title: 'Read the patch and its comments' }, 'Read'),
-        pw && p.patch_id && extLink(`${pw}/patch/${p.patch_id}/`, 'patchwork',
+        onPw(p.patch_id) && extLink(`${pw}/patch/${p.patch_id}/`, 'patchwork',
                                     'Open the patch on patchwork, in a new tab')));
     if (p.patch_id) {
       card.addEventListener('click', commentToggle(card, 'patch', p.patch_id, ser.upstream));
@@ -944,6 +946,12 @@ function renderComments(comments) {
 }
 
 // Link to a message on a list on lore, from its Message-ID
+// Whether a version of a series is read from lore, being known by its
+// Message-ID, though its upstream may use patchwork
+function onLore(sv) {
+  return String(sv.link || '').includes('@');
+}
+
 function loreHref(list, msgid) {
   const id = encodeURIComponent(msgid.replace(/^<|>$/g, '')).replace(/%40/g, '@');
   return `${list}/${id}/`;
@@ -1594,7 +1602,7 @@ async function viewReview(id, wantVer) {
                                       : 'Hide this series from the list of active reviews, ' +
                                         'e.g. once you have finished with it' },
         ser.hidden ? 'Unhide' : 'Hide'),
-      ser.patchwork_url && extLink(
+      ser.patchwork_url && !onLore(sv) && extLink(
         ser.project ? `${ser.patchwork_url}/project/${ser.project}/list/?series=${sv.link}`
                     : ser.patchwork_url,
         'patchwork', 'Open the series on patchwork, in a new tab', 'btn light small'),
@@ -1776,7 +1784,7 @@ function commentResponses(sv, seq) {
 // and the box which holds them
 function commentsToggle(ser, sv, seq, itemId) {
   const kind = seq ? 'patch' : 'cover';
-  const where = ser.lore_url ? 'lore' : 'patchwork';
+  const where = !ser.patchwork_url || onLore(sv) ? 'lore' : 'patchwork';
   const box = h('div', {});
   const responded = new Set(commentResponses(sv, seq).map((c) => c.comment_id));
   const item = (c) => {

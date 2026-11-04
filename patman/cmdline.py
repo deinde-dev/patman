@@ -916,10 +916,12 @@ def add_review_subparser(subparsers):
         help='Draft reviews of a patchwork series using an agent')
     review.add_argument(
         '-s', '--series', type=str, dest='pw_link',
-        help='Patchwork series link/ID number')
+        help='Patchwork series link/ID number, or the Message-ID of a '
+             'series on lore')
     review.add_argument(
         '-S', '--series-title', type=str, dest='title',
-        help='Search for a series by cover-letter title')
+        help='Search for a series by cover-letter title, on patchwork or '
+             'else on lore')
     review.add_argument(
         '-V', '--version', type=int, default=None,
         help='Series version to review when searching by title (-S); '

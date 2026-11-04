@@ -806,7 +806,8 @@ def _find_or_register(ctx, args, clean_name, link):
     ups = ctx.pwork.upstream if ctx.pwork else None
     result = _register_series(
         ctx.cser, clean_name, ctx.version, link, ctx.series_data,
-        upstream=ups, on_lore=isinstance(ctx.pwork, lorelist.LoreList))
+        upstream=ups, on_lore=(isinstance(ctx.pwork, lorelist.LoreList) or
+                               '@' in str(link)))
     if result is not None:
         return result
 
@@ -1255,7 +1256,8 @@ def do_review(args, pwork, cser, own_db=None):
     # is then restricted to just that patch; -w reviews the whole series
     whole = getattr(args, 'whole_series', False)
     link = args.pw_link
-    if link and isinstance(pwork, lorelist.LoreList):
+    # A series on lore is known by its Message-ID, perhaps in a link
+    if link and (isinstance(pwork, lorelist.LoreList) or '@' in link):
         link = lorelist.parse_link(link)
     if not link and has_patch:
         link, patch_seq = lookup.lookup_patch_series(pwork, args.patch)

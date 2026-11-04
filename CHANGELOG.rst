@@ -10,6 +10,10 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman review`` can review a series which is not on Patchwork, from
+  lore. If Patchwork has no series with the title given by ``-S``, lore is
+  searched instead; ``-s`` takes the series' Message-ID, or a link to it on
+  lore, as well as a Patchwork link.
 - ``patman maint publish -f`` publishes even if CI has not passed, e.g. if
   it fails for a reason which does not matter here.
 

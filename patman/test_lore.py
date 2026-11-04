@@ -431,6 +431,37 @@ class TestLore(unittest.TestCase):
         llist.lore.get_thread = get_thread
         return llist, reads
 
+    def test_patchwork_lore_series(self):
+        """A series which patchwork lacks is read from lore, by Message-ID"""
+        def fake(subpath):
+            raise AssertionError(f'Patchwork read: {subpath}')
+
+        pwork = Patchwork.for_testing(fake)
+        pwork.upstream = 'next'
+        self.assertEqual((lore.LORE_URL, 'next'),
+                         (pwork.lore_list().url, pwork.lore_list().upstream))
+        pwork._lore_list = self.lore_list()[0]  # pylint: disable=W0212
+        data = run(pwork.get_series(None, 'cover@x'))
+        self.assertEqual(('cover@x', 'dm: Tidy up', 2),
+                         (data['id'], data['name'], data['total']))
+        self.assertEqual(['new', 'new'],
+                         run(pwork.get_series_patch_states(None, 'cover@x')))
+        self.assertEqual('Second', run(pwork.get_patch(
+            None, 'lore:p2@x'))['content'].strip())
+        self.assertEqual(['<r4@x>'], [c['msgid'] for c in run(
+            pwork.get_patch_comments(None, 'lore:p2@x'))])
+        self.assertEqual('Some tidy-ups', run(pwork.get_cover(
+            None, 'lore:cover@x'))['content'].strip())
+        self.assertEqual(['<r3@x>'], [c['msgid'] for c in run(
+            pwork.get_cover_comments(None, 'lore:cover@x'))])
+        self.assertEqual('https://lore.kernel.org/my-list/cover@x/',
+                         run(pwork.get_series_url('cover@x')))
+        self.assertEqual(2, len(lore.parse_mbox(run(
+            pwork.get_series_mbox(None, 'cover@x')))))
+        _, patches = run(pwork.series_get_state(None, 'cover@x', True,
+                                                False))
+        self.assertEqual(2, len(patches))
+
     def test_lorelist_series(self):
         """A series is read from its thread on lore"""
         llist, reads = self.lore_list()

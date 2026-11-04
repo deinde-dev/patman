@@ -27,6 +27,7 @@ from patman import control
 from patman import cseries
 from patman import database
 from patman import interpreter
+from patman import lore
 from patman import lorelist
 from patman.database import Pcommit
 from patman.review import discuss
@@ -347,6 +348,25 @@ class TestWebServer(unittest.TestCase, TestCommon):
         _, data = self.call(srv, 'GET', f'/api/reviews/{ser_id}')
         self.assertEqual(('us', 'https://pw.us'),
                          (data['upstream'], data['patchwork_url']))
+
+    def test_review_lore_series(self):
+        """A review of a series which patchwork lacks links to it on lore"""
+        self.cser.db.upstream_add('us', 'https://us.git',
+                                  patchwork_url='https://pw.us')
+        ser_id, _ = self.add_series(
+            'rev', 'Somebody else', {1: [('a', 'new', 'lore:p1@x', 0)]},
+            source='review', ups='us')
+        srv = server.Server(self.cser, pw_url='https://pw.default')
+        _, data = self.call(srv, 'GET', f'/api/reviews/{ser_id}')
+        self.assertEqual(('https://pw.us', None),
+                         (data['patchwork_url'], data['lore_url']))
+
+        # Once its version is known by its Message-ID, lore has it
+        self.cser.db.ser_ver_set_link(ser_id, 1, 'p1@x')
+        self.cser.commit()
+        _, data = self.call(srv, 'GET', f'/api/reviews/{ser_id}')
+        self.assertEqual(('https://pw.us', lore.LORE_URL),
+                         (data['patchwork_url'], data['lore_url']))
 
     def test_review_lore_upstream(self):
         """A review whose upstream is on lore gives the list there"""
