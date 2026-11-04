@@ -469,6 +469,10 @@ class Patchwork(SeriesFinder):
         #   key (str): ID given to the patch, 'lore:<msgid>'
         #   value (tuple): (email.message.EmailMessage, list of replies)
         self._lore_patches = {}
+        # List on lore to read a series known by its Message-ID from, and its
+        # URL, or None for all of lore (see lore_list())
+        self._lore_list = None
+        self.lore_url = None
         # Messages of the thread on lore of a series filled in from it, by
         # Message-ID without angle brackets
         self._lore_thread = {}
@@ -1065,6 +1069,8 @@ class Patchwork(SeriesFinder):
                 "mbox": "https://patchwork.ozlabs.org/project/uboot/patch/
                     20170827080051.816-1-judge.packham@gmail.com/mbox/"
         """
+        if self._on_lore(link):
+            return await self.lore_list().get_series(client, link, max_age)
         # Once patchwork has all the patches, the series does not change
         return await self._cached_request(
             client, self.series_path(link), max_age,
@@ -1080,6 +1086,8 @@ class Patchwork(SeriesFinder):
         Returns:
             list of str: State slug for each patch, e.g. ['new', 'rfc']
         """
+        if self._on_lore(link):
+            return await self.lore_list().get_series_patch_states(client, link)
         res = await self._request(client, f'patches/?series={link}')
         return [patch.get('state') for patch in res]
 
@@ -1127,6 +1135,8 @@ class Patchwork(SeriesFinder):
                 dropping the connection
             asyncio.TimeoutError: The server does not respond in time
         """
+        if self._on_lore(link):
+            return await self.lore_list().get_series_mbox(client, link, max_age)
         subpath = f'series/{link}/mbox/'
         kept = self._from_cache(subpath, max_age)
         if kept is not None:
@@ -1244,6 +1254,9 @@ class Patchwork(SeriesFinder):
                 '''
             "prefixes": ["3/3", ...]
         """
+        if self._on_lore(patch_id):
+            return await self.lore_list().get_patch(client, patch_id, max_age,
+                                                  since)
         if str(patch_id) in self._lore_patches:
             return lore.to_patch(self._lore_patches[str(patch_id)][0],
                                  str(patch_id))
@@ -1293,6 +1306,9 @@ class Patchwork(SeriesFinder):
                 >...'
             headers: dict: email headers, see get_cover() for an example
         """
+        if self._on_lore(patch_id):
+            return await self.lore_list().get_patch_comments(client, patch_id,
+                                                           max_age)
         if str(patch_id) in self._lore_patches:
             return self._lore_patches[str(patch_id)][1]
         return await self._cached_request(
@@ -1345,6 +1361,8 @@ class Patchwork(SeriesFinder):
             content (str): Email content, e.g. 'This series adds a cover-coverage check to CI for Binman. The iMX8 tests
 are still not completed,...'
         """
+        if self._on_lore(cover_id):
+            return await self.lore_list().get_cover(client, cover_id, max_age)
         return await self._cached_request(client, f'covers/{cover_id}/',
                                           max_age)
 
@@ -1383,6 +1401,9 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
 > This '...
             headers: dict: email headers, see get_cover() for an example
         """
+        if self._on_lore(cover_id):
+            return await self.lore_list().get_cover_comments(client, cover_id,
+                                                           max_age)
         return await self._cached_request(
             client, self.comments_path('cover', cover_id), max_age)
 
@@ -1395,6 +1416,8 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
         Returns:
             str: URL for the series page
         """
+        if self._on_lore(link):
+            return await self.lore_list().get_series_url(link)
         return f'{self.url}/project/{self.link_name}/list/?series={link}&state=*&archive=both'
 
     # pylint: disable-next=R0913
@@ -1489,6 +1512,40 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
         if cache:
             cache.put(self.url, seen_path, [rep['msgid'] for rep in replies])
         return data
+
+    def _on_lore(self, item_id):
+        """Check whether a series, patch or cover letter is read from lore
+
+        Patchwork knows each by a number, so one known by its Message-ID,
+        or by 'lore:<msgid>', is not on patchwork. It is read from lore,
+        unless it is a patch which fill_from_lore() took from there.
+
+        Args:
+            item_id (int or str): Series link, or patch or cover-letter ID
+
+        Returns:
+            bool: True if it is read from lore
+        """
+        item_id = str(item_id)
+        return '@' in item_id and item_id not in self._lore_patches
+
+    def lore_list(self):
+        """Get the list on lore to read a series from, if patchwork lacks it
+
+        A series is sometimes not on patchwork at all, e.g. when the list
+        which patchwork reads holds back the first patch from a new sender.
+        Such a series is known by its Message-ID and read from lore instead.
+
+        Returns:
+            LoreList: List covering all of lore, or the upstream's list
+        """
+        if not self._lore_list:
+            # lorelist imports this module, so it cannot be imported above
+            from patman import lorelist  # pylint: disable=C0415
+            self._lore_list = lorelist.LoreList(self.lore_url or
+                                                lore.LORE_URL)
+            self._lore_list.upstream = self.upstream
+        return self._lore_list
 
     def _get_lore(self):
         """Get the Lore object to use, creating the default one if enabled
@@ -1736,6 +1793,9 @@ On Tue, 4 Mar 2025 at 06:09, Simon Glass <sjg@chromium.org> wrote:
             COVER object, or None if none or not read_cover_comments
             list of PATCH objects
         """
+        if self._on_lore(link):
+            return await self.lore_list().series_get_state(
+                client, link, read_comments, read_cover_comments)
         # A complete series does not change, but one which is still arriving
         # is read again, to see its new patches
         data = await self.get_series(client, link, max_age=0)
