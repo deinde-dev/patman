@@ -26,6 +26,10 @@ Changed
 
 Fixed
 ~~~~~
+- ``patman maint apply`` moves the push branch up to the upstream first if
+  it has nothing of its own, rather than applying the series to the old
+  upstream, which then cannot be pushed, e.g. once the queue is published
+  and others have pushed since.
 - ``patman maint apply`` no longer refuses a series because an older one
   with the same title has a higher version, e.g. when a series starts again
   at v1 with one patch of an earlier v2: only a version sent later counts
