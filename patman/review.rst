@@ -198,6 +198,15 @@ to review a specific version::
     patman review -S 'boot/bootm: Disable interrupts' -V 2 -U us \
         --reviewer 'Your Name <your@email>'
 
+A series is sometimes not on Patchwork at all, e.g. when the list which
+Patchwork reads holds back the first patch from a new sender, though lore
+has it from another list. If Patchwork has no series with the title, lore
+is searched instead, and the series is reviewed from there, known by its
+Message-ID. You can also give its Message-ID, or a link to it on lore,
+with ``-s``::
+
+    patman review -s 20261103164206.129723-1-info@daylightlinux.ch -U us
+
 To review a single patch by its Patchwork patch ID (the series is
 found automatically)::
 

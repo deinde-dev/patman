@@ -554,6 +554,61 @@ class TestReview(CseriesTester):
         result = cser.db.series_find_by_link(str(self.REVIEW_LINK_V2))
         self.assertIsNotNone(result)
 
+    def test_review_title_on_lore(self):
+        """A series which patchwork lacks is found on lore, by its title"""
+        cser = self.get_cser()
+
+        def fake(subpath):
+            if '&q=' in subpath:
+                return []
+            return self._fake_patchwork_review(subpath)
+
+        pwork = Patchwork.for_testing(fake)
+        pwork.project_set(self.PROJ_ID, self.PROJ_LINK_NAME)
+        found = []
+
+        async def query_series(_client, _desc):
+            return found
+        llist = mock.Mock()
+        llist.query_series = query_series
+        pwork._lore_list = llist  # pylint: disable=W0212
+        with terminal.capture():
+            with self.assertRaises(ValueError) as exc:
+                review.lookup.search_series(pwork, 'scripts: Fix')
+        self.assertEqual("No series found matching 'scripts: Fix'",
+                         str(exc.exception))
+
+        found.append({'id': 'm@x', 'name': 'scripts: Fix', 'version': 1,
+                      'date': '2026-11-03T16:42:09'})
+        with terminal.capture() as (out, _):
+            self.assertEqual('m@x',
+                             review.lookup.search_series(pwork, 'scripts: Fix'))
+        self.assertIn('Patchwork has no series with that title, but lore '
+                      'does', out.getvalue())
+
+        # Its Message-ID can be given too, perhaps as a link to lore
+        args = Namespace(
+            learn_voice=False, sync=False, scan=False, relink=False,
+            pw_link='https://lore.kernel.org/all/m@x/T/', title=None,
+            patch=None, patch_title=None, checkout=False,
+            respond_comment=None, show=False, revise=None, send=False,
+            delete=False, redraft=False, list_models=False)
+        with mock.patch.object(review.core, '_review_link',
+                               return_value=0) as review_link:
+            review.core.do_review(args, pwork, cser)
+        self.assertEqual('m@x', review_link.call_args.args[3])
+
+        # Its patches are recorded by their IDs on lore
+        ctx = mock.Mock(pwork=pwork, cser=cser, version=1, series_data={
+            'patches': [{'id': 'lore:m@x', 'name': 'scripts: Fix'}],
+            'cover_letter': None})
+        review.core._find_or_register(ctx, Namespace(force=False),
+                                      'scripts: Fix', 'm@x')
+        cser.commit()
+        svid = cser.db.series_find_by_link('m@x')[3]
+        self.assertEqual(['lore:m@x'], [pcm.patch_id for pcm in
+                                        cser.db.pcommit_get_list(svid)])
+
     def test_review_apply_all_upstream(self):
         """Applying 0 patches (all already upstream) is a clean skip"""
         ctx = mock.Mock()

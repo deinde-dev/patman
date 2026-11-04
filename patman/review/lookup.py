@@ -158,7 +158,9 @@ def search_series(pwork, title, version=None):
 
     Queries the patchwork API and returns the link for the best match.
     If multiple matches are found, shows them and picks the most recent,
-    unless a specific version is requested.
+    unless a specific version is requested. If patchwork has none, lore is
+    searched, since a series is sometimes not on patchwork at all; one
+    found there is known by its Message-ID.
 
     Args:
         pwork (Patchwork): Configured patchwork instance
@@ -167,7 +169,7 @@ def search_series(pwork, title, version=None):
             most recent
 
     Returns:
-        str: Patchwork series link/ID
+        str: Patchwork series link/ID, or Message-ID of a series on lore
 
     Raises:
         ValueError: if no matching series (or version) is found
@@ -176,6 +178,12 @@ def search_series(pwork, title, version=None):
         raise ValueError('Patchwork project not configured; use '
             "'patman patchwork set-project' or provide -l <link>")
     results = common.pw_call(pwork.query_series, title)
+    lore_list = getattr(pwork, 'lore_list', None)
+    if not results and lore_list:
+        results = common.pw_call(lore_list().query_series, title)
+        if results:
+            tout.notice('Patchwork has no series with that title, but lore '
+                        'does')
 
     if not results:
         raise ValueError(f"No series found matching '{title}'")
