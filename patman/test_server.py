@@ -690,7 +690,8 @@ class TestWebServer(unittest.TestCase, TestCommon):
              'state': 'new', 'content': 'Add a driver\n\nSigned-off-by: Fred',
              'diff': '--- a/x.c\n+++ b/x.c\n@@ -1 +1 @@\n-old\n+new\n',
              'web_url': 'https://pw/patch/1234/',
-             'series': [{'id': 99, 'name': 'video', 'version': 2}]}, data)
+             'series': [{'id': 99, 'name': 'video', 'version': 2}],
+             'mine': None}, data)
 
         status, data = self.call(srv, 'GET', '/api/cover/77')
         self.assertEqual(200, status)
@@ -1563,6 +1564,107 @@ class TestWebServer(unittest.TestCase, TestCommon):
              'review -s 100 --respond-comment 78 -i 1 -U us',
              'review -s 100 --respond-comment 77 -i 0 -U us'],
             [job['results'][0]['output'].strip() for job in reversed(jobs)])
+
+    def test_own_reply(self):
+        """A comment on your own series can be replied to"""
+        rdir = os.path.join(self.tmpdir, 'rev')
+        os.mkdir(rdir)
+        rcser = cseries.Cseries(self.tmpdir, terminal.COLOR_NEVER,
+                                db_dir=rdir)
+        with terminal.capture():
+            rcser.open_database()
+        try:
+            db = self.cser.db
+            sid = db.series_add('video', 'Add video', 'us')
+            svid = db.ser_ver_add(sid, 2, link='99')
+            rid = db.reply_add_comment(
+                svid, 1, 1, '<c1@x>', '<p1@x>', 'Tom <t@x>', 'me@x', '',
+                'Re: [PATCH v2 1/2] video', 'today', 'Why?', 'now')
+            db.commit()
+
+            # A reply in the review database has the same ID
+            rdb = rcser.db
+            rsid = rdb.series_add('rev', 'Somebody else', None)
+            rdb.series_set_source(rsid, 'review')
+            rsvid = rdb.ser_ver_add(rsid, 1, link='123')
+            self.assertEqual(rid, rdb.reply_add_comment(
+                rsvid, 0, 5, '<c5@x>', '', 'Fred <f@x>', '', '', 'Re: x',
+                'today', 'Hmm', 'now'))
+            rdb.commit()
+
+            srv = self.make_server(rcser=rcser)
+            srv.get_patman_cmd = lambda *args: ['echo', *args]
+            _, data = self.call(srv, 'GET', '/api/patch/1234')
+            mine = data['mine']
+            self.assertEqual((sid, 2, 1), (mine['series'], mine['version'],
+                                           mine['seq']))
+            self.assertEqual([(rid, 1, 'Why?')],
+                             [(rep['id'], rep['comment_id'], rep['body'])
+                              for rep in mine['replies']])
+
+            # The response is saved with your own series
+            _, data = self.call(srv, 'POST', f'/api/replies/{rid}?own=1',
+                                json={'response': 'Because'})
+            self.assertEqual('Because', data['response'])
+            self.assertEqual('Because', db.reply_get(rid).response)
+            self.assertIsNone(rdb.reply_get(rid).response)
+
+            path = f'/api/series/{sid}/respond'
+            res = self.run_jobs(srv, [
+                ('POST', path, {'seq': 1, 'comment': 1, 'note': 'Agree'}),
+                ('POST', f'/api/replies/{rid}/suggest?own=1', None),
+                ('POST', f'/api/replies/{rid}?own=1',
+                 {'response': 'Yes', 'draft': True}),
+                ('POST', f'/api/replies/{rid}/revise?own=1',
+                 {'note': 'Shorter', 'draft': True}),
+                ('POST', f'/api/replies/{rid}/send?own=1', None),
+                ('POST', f'/api/replies/{rid}/discuss?own=1', None),
+                ('POST', path, {'seq': 1}),
+                ('POST', '/api/series/999/respond', {'seq': 0, 'comment': 1}),
+            ])
+            self.assertEqual([202, 202, 202, 202, 202, 400, 400, 404],
+                             [status for status, _ in res])
+            self.assertEqual("Reply to a comment on patch 1 of 'Add video' v2",
+                             res[0][1]['title'])
+            self.assertEqual(
+                ['review -s 99 --respond-comment 1 -i 1 -U us -c Agree --own',
+                 'review -s 99 --respond-comment 1 -i 1 -U us --own',
+                 f'review --draft-reply {rid} --own',
+                 f'review --revise-reply {rid} --revise Shorter -d --own',
+                 f'review --send-reply {rid} --own'],
+                [job.state['results'][0]['output'].strip()
+                 for job in reversed(srv.get_jobs())])
+        finally:
+            rcser.close_database()
+
+    def test_own_place(self):
+        """A patch or cover letter on lore is found in your own series"""
+        db = self.cser.db
+        sid = db.series_add('forest', 'Merge fragments', 'us')
+        db.ser_ver_add(sid, 1, link='old@x')
+        db.ser_ver_add(sid, 2, link='cover@x')
+        rsid = db.series_add('rev', 'Somebody else', None)
+        db.series_set_source(rsid, 'review')
+        db.ser_ver_add(rsid, 1, link='fred@x')
+        db.commit()
+
+        def place(kind, msgid, subject, refs=''):
+            found = server.info.own_place(db, kind, {'headers': {
+                'Message-ID': f'<{msgid}>', 'Subject': subject,
+                'In-Reply-To': refs.split()[-1] if refs else '',
+                'References': refs}})
+            return found and (found['series'], found['version'],
+                              found['seq'])
+
+        # Sent in reply to the first version
+        self.assertEqual((sid, 2, 2), place(
+            'patch', 'p2@x', '[PATCH v2 2/3] dtc: Move it',
+            '<old@x> <cover@x>'))
+        self.assertEqual((sid, 2, 0), place(
+            'cover', 'cover@x', '[PATCH v2 0/3] Merge', '<old@x>'))
+        self.assertIsNone(place('patch', 'f2@x', '[PATCH 2/2] x',
+                                '<fred@x>'))
+        self.assertIsNone(place('patch', 'n@x', '[PATCH] x'))
 
     def test_replies(self):
         """Replies to reviews can be seen, and responses changed and drafted"""

@@ -16,6 +16,9 @@ import re
 import subprocess
 
 from patman import database
+from patman import gmail
+from patman import lore
+from patman import lorelist
 from patman.review import lookup
 from patman.server.params import BadRequest
 from patman.workflow import Wtype
@@ -236,6 +239,54 @@ def reply_info(reply):
         'seq': reply.seq,
         'comment_id': reply.comment_id,
     }
+
+
+def own_place(db, kind, data):
+    """Find where a patch or cover letter is in one of your own series
+
+    A series on patchwork is known by its ID, and one on lore by the
+    Message-ID of its first message, which the others reply to.
+
+    Args:
+        db (Database): Database holding your own series
+        kind (str): 'patch' or 'cover'
+        data (dict): Patch or cover letter, from patchwork or lore
+
+    Return:
+        dict or None: None if it is not in one of your own series, else:
+            series (int): Series ID
+            version (int): Version
+            seq (int): Number of the patch, 0 for the cover letter
+            replies (list of dict): Your replies to comments on it (see
+                reply_info())
+    """
+    hdrs = data.get('headers') or {}
+    links = [str(ser.get('id')) for ser in data.get('series') or []]
+    for name in ('Message-ID', 'In-Reply-To', 'References'):
+        val = gmail.get_header(hdrs, name) or ''
+        if isinstance(val, list):
+            val = ' '.join(val)
+        links += [lore.bare_msgid(msgid)
+                  for msgid in re.findall(r'<[^>]+>', val)]
+    if data.get('msgid'):
+        links.append(lore.bare_msgid(data['msgid']))
+    link = next((link for link in links if db.series_is_own(link)), None)
+    if not link:
+        return None
+    sid, _, version, svid = db.series_find_by_link(link)
+    seq = 0
+    if kind == 'patch':
+        subject = gmail.get_header(hdrs, 'Subject')
+        place = lorelist.parse_subject(str(subject)) if subject else None
+        if place:
+            seq = place[1]
+        else:
+            # Patchwork names it as e.g. '[v2,3/5] dm: Tidy up'
+            found = lore.RE_SEQ.search(data.get('name') or '')
+            seq = int(found.group(1)) if found else 1
+    return {'series': sid, 'version': version, 'seq': seq,
+            'replies': [reply_info(rep) for rep in db.reply_get_comments(svid)
+                        if rep.seq == seq]}
 
 
 def comment_info(comment, own=frozenset()):
