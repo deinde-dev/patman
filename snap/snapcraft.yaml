@@ -12,14 +12,17 @@ description: |
   tracks it on Patchwork, gathers review tags into your commits and keeps
   track of each version.
 
-  It can also draft reviews of other people's patches using a Claude agent,
-  and 'patman serve' shows your series and reviews on a mobile-friendly web
-  page.
+  'patman serve' shows your series and reviews on a mobile-friendly web
+  page. Installed with pip, patman can also draft reviews of other people's
+  patches using a Claude agent, which the snap leaves out.
 
-  patman works on your own git repositories and runs your git, git
-  send-email and editor, so it needs classic confinement. It uses git and
-  perl (for checkpatch.pl) from the host, and 'patman review' needs Claude
-  Code (the claude command) to be installed.
+  The snap is strictly confined, so it can only reach repositories in your
+  home directory, and in /media and /mnt once removable-media is connected.
+  It brings its own git, git send-email, perl and editor, so your git
+  configuration must not rely on programs from the host, such as a sendmail
+  program or a credential helper. See
+  https://patman.readthedocs.io/en/latest/guide/snap.html for what this
+  means.
 license: GPL-2.0-or-later
 website: https://deinde.dev/patman/
 source-code: https://github.com/deinde-dev/patman
@@ -29,46 +32,87 @@ icon: logo/patman-icon.svg
 adopt-info: patman
 base: core24
 grade: stable
-confinement: classic
+confinement: strict
 
 apps:
   patman:
     command: bin/patman
+    command-chain:
+      - bin/launcher
+    plugs:
+      - home
+      - removable-media
+      - network
+      - network-bind
+      - dot-patman
+      - dot-gitconfig
+plugs:
+  dot-patman:
+    interface: personal-files
+    write:
+      - $HOME/.patman
+      - $HOME/.config/patman.d
+  dot-gitconfig:
+    interface: personal-files
+    read:
+      - $HOME/.gitconfig
+      - $HOME/.config/git
 
 parts:
   patman:
     plugin: python
     source: .
-    # Install patman with all its optional features: Gmail, review and the
-    # parallel test runner
+    # Install patman with Gmail support. The review agent needs Claude Code,
+    # which is most of the size of the snap with it included, and which
+    # updates more often than patman, so leave it out
     python-packages:
-      - .[all]
-    # A classic snap runs on the host's libraries, so ship the Python which
-    # patman runs on and point its binaries at the snap's own copies
+      - .[gmail]
+    # The base snap has no Python, so ship the one which patman runs on
     stage-packages:
       - python3.12-minimal
       - libpython3.12-minimal
       - libpython3.12-stdlib
-    build-attributes:
-      - enable-patchelf
     override-pull: |
       craftctl default
       craftctl set version="$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")"
     override-build: |
       craftctl default
-      # 'patman send' runs this script again from git send-email, outside
-      # the snap's environment, so make it start with the snap's own Python
-      # rather than whichever python3 is first in the PATH
-      sed -i '1s|^#!.*|#!/snap/patman/current/bin/python3|' \
-        "$CRAFT_PART_INSTALL/bin/patman"
       site="$CRAFT_PART_INSTALL/lib/python3.12/site-packages"
       # Of the descriptions of 600 Google APIs which come with the client,
       # patman only uses Gmail's
       find "$site/googleapiclient/discovery_cache/documents" -type f \
         ! -name gmail.v1.json -delete
-      # 'patman review' runs the claude command from the host, as it does
-      # when installed with pip, so that updating Claude Code is enough to
-      # use the newest models. Drop the copy which the SDK bundles
-      rm -rf "$site/claude_agent_sdk/_bundled"
       # pip is only needed to build the snap
       rm -rf "$site"/pip "$site"/pip-*.dist-info
+
+  # The snap cannot run programs from the host, so it brings git and git
+  # send-email, perl for checkpatch.pl and get_maintainer.pl, and editors
+  # for 'git send-email --annotate'
+  tools:
+    plugin: nil
+    stage-packages:
+      - git
+      - git-email
+      - perl
+      - libauthen-sasl-perl
+      - libio-socket-ssl-perl
+      - libnet-ssleay-perl
+      - libmailtools-perl
+      - nano
+      - vim-tiny
+    override-prime: |
+      craftctl default
+      # git send-email is a perl script which names the host's perl
+      sed -i '1s|^#!.*|#!/usr/bin/env perl|' \
+        "$CRAFT_PRIME/usr/lib/git-core/git-send-email"
+      # Debian sets up these names when it installs the packages, which a
+      # snap does not do, and git falls back to 'editor'
+      ln -sf vim.tiny "$CRAFT_PRIME/usr/bin/vi"
+      ln -sf vim.tiny "$CRAFT_PRIME/usr/bin/vim"
+      ln -sf nano "$CRAFT_PRIME/usr/bin/editor"
+
+  launcher:
+    plugin: dump
+    source: snap/local
+    organize:
+      launcher: bin/launcher

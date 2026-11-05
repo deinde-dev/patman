@@ -1,0 +1,27 @@
+#!/bin/sh
+# Set up the environment for patman in its strictly confined snap
+#
+# snapd points HOME at the snap's own directory, but patman and git read
+# their settings from the real one, through the personal-files interface
+export HOME="$SNAP_REAL_HOME"
+
+# Keep caches in the snap's own directory, which it can write without any
+# extra interface
+export XDG_CACHE_HOME="$SNAP_USER_COMMON/cache"
+
+# Use the snap's git, its perl modules and its perl
+export GIT_EXEC_PATH="$SNAP/usr/lib/git-core"
+export GIT_TEMPLATE_DIR="$SNAP/usr/share/git-core/templates"
+export GITPERLLIB="$SNAP/usr/share/perl5"
+PERL5LIB=
+for dir in "$SNAP"/usr/lib/*/perl5/5.* "$SNAP"/usr/share/perl5 \
+	"$SNAP"/usr/lib/*/perl/5.* "$SNAP"/usr/share/perl/5.*; do
+	[ -d "$dir" ] && PERL5LIB="${PERL5LIB:+$PERL5LIB:}$dir"
+done
+export PERL5LIB
+
+# The base snap has no locales other than C.UTF-8, so perl would complain
+# about the host's
+export LC_ALL=C.UTF-8
+
+exec "$@"
