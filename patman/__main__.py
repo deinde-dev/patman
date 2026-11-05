@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.join(our_path, '..'))
 # Our modules
 from patman import cmdline
 from patman import control
+from patman import snap
 from u_boot_pylib import test_util
 from u_boot_pylib import tout
 
@@ -28,6 +29,10 @@ def run_patman():
     This is the main program. It collects arguments and runs either the tests or
     the control module.
     """
+    try:
+        snap.check_setup()
+    except ValueError as exc:
+        sys.exit(f'patman: {exc}')
     args = cmdline.parse_args()
 
     if not args.debug:
@@ -55,6 +60,7 @@ def run_patman():
         from patman import test_send
         from patman import test_server
         from patman import test_settings
+        from patman import test_snap
         from patman import test_status
         from patman import test_suggest
         from patman import test_suggest_extra
@@ -74,6 +80,7 @@ def run_patman():
              test_database.TestDatabase, test_discuss.TestDiscuss,
              test_review.TestReview,
              test_send.TestSend, test_settings.TestSettings,
+             test_snap.TestSnap,
              test_pwcache.TestPwCache, test_reqlog.TestReqLog, test_lore.TestLore,
              test_maint.TestMaint, test_maint_apply.TestMaintApply,
              test_maint_ci.TestMaintCi, test_maint_thanks.TestMaintThanks,
