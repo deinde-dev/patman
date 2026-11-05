@@ -98,7 +98,11 @@ def trailer_msgid(value):
     if value.startswith('<'):
         msgid = lore.bare_msgid(value)
     else:
-        url = urlparse(value)
+        # Not every Link: trailer is a URL, e.g. 'https://... [1]'
+        try:
+            url = urlparse(value)
+        except ValueError:
+            return None
         if url.hostname not in MSGID_HOSTS:
             return None
         parts = [unquote(part) for part in url.path.split('/') if part]

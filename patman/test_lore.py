@@ -574,6 +574,7 @@ class TestLore(unittest.TestCase):
                 ('https://patch.msgid.link/p1@x', 'p1@x'),
                 ('https://github.com/dgibson/dtc/pull/193', None),
                 ('https://lore.kernel.org/my-list/', None),
+                ('https://... [1]', None),
                 ('<no-at-sign>', None)):
             self.assertEqual(msgid, lorelist.trailer_msgid(value), value)
 

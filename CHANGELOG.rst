@@ -33,6 +33,9 @@ Changed
 
 Fixed
 ~~~~~
+- ``patman review`` and the inbox's suggestions no longer fail for an
+  upstream on lore whose history has a ``Link:`` trailer which is not a
+  URL, such as ``https://... [1]`` in Linux.
 - ``patman maint apply`` moves the push branch up to the upstream first if
   it has nothing of its own, rather than applying the series to the old
   upstream, which then cannot be pushed, e.g. once the queue is published
