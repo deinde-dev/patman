@@ -140,6 +140,16 @@ class TestDiscuss(CseriesTester):
             ret = replies.do_reply_cmd(args, cser)
         return ret, out.getvalue() + err.getvalue()
 
+    def test_discuss_snap(self):
+        """The patman snap cannot discuss a reply, and says so"""
+        cser, _, reply_id = self.add_reply()
+        with mock.patch.object(discuss.snap, 'is_strict', return_value=True):
+            with self.assertRaises(ValueError) as exc:
+                self.run_cmd(cser, '--discuss-reply', str(reply_id))
+        self.assertIn('The patman snap cannot discuss a reply',
+                      str(exc.exception))
+        self.assertFalse(self.tmux.sessions)
+
     def test_discuss(self):
         """A discussion starts in tmux, with the reply and how to finish"""
         cser, _, reply_id = self.add_reply()
