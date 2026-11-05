@@ -340,9 +340,10 @@ def other_drafts(service, draft_id):
         return {hdr['name'].lower(): hdr['value'] for hdr in
                 msg.get('payload', {}).get('headers', [])}.get('in-reply-to')
 
+    # Unlike threads().get(), this takes no metadataHeaders, so gives them all
     msg = service.users().drafts().get(
-        userId='me', id=draft_id, format='metadata',
-        metadataHeaders=['In-Reply-To']).execute().get('message', {})
+        userId='me', id=draft_id,
+        format='metadata').execute().get('message', {})
     parent = in_reply_to(msg)
     if not parent or not msg.get('threadId'):
         return 0
