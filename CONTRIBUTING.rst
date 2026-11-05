@@ -88,21 +88,32 @@ Building the package
 Building the snap
 -----------------
 
-``snap/snapcraft.yaml`` packages patman as a snap with classic confinement,
-since patman works on your own git trees and runs your git, git send-email
-and editor. Build it with::
+``snap/snapcraft.yaml`` packages patman as a strictly confined snap. Build
+it with::
 
     snapcraft pack
 
-which uses LXD to build it in a clean Ubuntu container. Install the result
-for testing with::
+which uses LXD to build it in a clean Ubuntu container. If a later build
+fails in ``ensurepip``, run ``snapcraft clean patman`` first. Install the
+result for testing, and connect the interfaces which let it read your
+settings, with::
 
-    sudo snap install --dangerous --classic patman_*.snap
+    sudo snap install --dangerous patman_*.snap
+    sudo snap connect patman:dot-patman
+    sudo snap connect patman:dot-gitconfig
 
-The snap takes git, perl (for ``checkpatch.pl``) and Claude Code (for
-``patman review``) from the host. It leaves out the copy of Claude Code which
-the Claude Agent SDK bundles, and the Google API client's descriptions of
-APIs other than Gmail's, which would make it considerably larger.
+A strict snap cannot run programs from the host, so the snap brings git,
+``git send-email`` and the perl modules it needs, perl (for
+``checkpatch.pl``), vim and nano. ``snap/local/launcher`` sets up the
+environment for these, and points ``HOME`` back at the real home directory,
+so that git and patman find their settings. The snap leaves out the review
+extra, since the Claude Code which the Claude Agent SDK bundles would make
+it four times the size, and the Google API client's descriptions of APIs
+other than Gmail's, which would make it considerably larger.
+
+``patman/snap.py`` checks for the setups which cannot work in the snap, so
+that patman can say what the limit is. ``doc/guide/snap.rst`` describes them
+for users.
 
 Continuous integration
 ----------------------

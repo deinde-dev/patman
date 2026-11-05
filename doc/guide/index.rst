@@ -53,6 +53,11 @@ Read them in order the first time. Each one follows on from the one before.
 :doc:`problems`
     Messages you may see along the way, what causes them and what to do
 
+:doc:`snap`
+    What is different when patman is installed as a snap, which only works
+    on repositories in your home directory and cannot run programs from the
+    host
+
 The :doc:`/reference/index` lists every command and its options. The manual
 covers each command and tag in full, along with features not shown here,
 such as syncing Gmail drafts and responding to replies to your reviews.
@@ -70,3 +75,4 @@ such as syncing Gmail drafts and responding to replies to your reviews.
    serve
    serve-reviews
    problems
+   snap

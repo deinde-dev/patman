@@ -24,6 +24,14 @@ Added
 
 Changed
 ~~~~~~~
+- The snap is strictly confined, rather than using classic confinement.
+  It brings its own git, ``git send-email``, perl, vim and nano, and
+  reaches repositories in your home directory, and on removable media. It
+  leaves out the review agent. Where your setup cannot work in the snap,
+  such as a repository elsewhere, an editor, sendmail program or credential
+  helper from the host, or settings it has not been allowed to read, or an
+  action needs the agent, patman says so. 'Using the snap' in the guide
+  describes the limits.
 - ``patman maint publish`` drafts the reply for your own series too, so that
   everyone on the thread can see that they were applied. It says ``Applied to
   main.``, with no greeting or thanks.
