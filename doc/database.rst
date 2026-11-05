@@ -183,7 +183,8 @@ draft which is threaded as a reply.
 A comment on patchwork which you respond to with ``patman review
 --respond-comment`` is recorded here too (added v15). It has no review_id or
 gmail_msg_id, but records the version and patch it is about, and its ID on
-patchwork.
+patchwork. A reply to a comment on one of your own series, made with
+``--own``, is kept in the main database in the same way.
 
 ================  ========  ==========================================
 Column            Type      Description
