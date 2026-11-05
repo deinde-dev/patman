@@ -331,7 +331,7 @@ async def revise_reviews(ctx, reviews, note, commits, others=None,
         dict or None: Map of seq to new review body text, for each review
             which changed, or None if the agent is not available or failed
     """
-    if not claude_mod.check_available():
+    if not common.agent_available():
         return None
     parts = []
     for seq in sorted(reviews):

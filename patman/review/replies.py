@@ -462,7 +462,7 @@ async def handle_reply(ctx, review_body, reply_from, reply_body):
             str or None: Response email body, if there is one
     """
 
-    if not claude_mod.check_available():
+    if not common.agent_available():
         return None, None
 
     # Write our review and the reply to temp files
@@ -536,7 +536,7 @@ async def revise_response(ctx, review_body, reply, note):
         str or None: New text of the response, or None if the agent is not
             available or failed
     """
-    if not claude_mod.check_available():
+    if not common.agent_available():
         return None
     paths = []
     def _write(prefix, text):
@@ -665,7 +665,7 @@ async def handle_comment(ctx, item, comment, others, branch=None):
                 agent is not available or failed
             str or None: Response email body, if there is one
     """
-    if not claude_mod.check_available():
+    if not common.agent_available():
         return None, None
 
     sub = comment.get('submitter') or {}

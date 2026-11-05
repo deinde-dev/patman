@@ -35,6 +35,7 @@ from patman import database
 from patman import lorelist
 from patman import patchstream
 from patman import patchwork
+from patman import snap
 from patman import workflow
 from patman.review import apply
 from patman.review import checkout
@@ -56,6 +57,15 @@ from patman.review import voice
 # Reported when the Claude Agent SDK, which runs the agents, is not installed
 AGENT_MISSING = ("The review agent is not available; install the 'review' "
                  'extra (pip install patch-manager[review])')
+
+
+def agent_missing():
+    """Say why the agent cannot run
+
+    Returns:
+        str: Message to report
+    """
+    return snap.NO_AGENT if snap.is_strict() else AGENT_MISSING
 
 
 def _bare_subject(subject):
@@ -370,7 +380,7 @@ async def review_patches(ctx):
     Returns:
         dict: Map of patch index (1-based) to review body
     """
-    if not claude_mod.check_available():
+    if not common.agent_available():
         return {}
 
     commit_range = f'{ctx.upstream_branch}..{ctx.branch_name}'
@@ -503,8 +513,8 @@ def review_series(cser, series_id, svid, version, branch, series,
         spelling (str): Spelling convention for comments
         context (str or None): Extra context for the review agent
     """
-    if not claude_mod.check_available():
-        raise ValueError(AGENT_MISSING)
+    if not common.agent_available():
+        raise ValueError(agent_missing())
 
     commits = series.commits
     if not commits:
@@ -1012,9 +1022,9 @@ def _review_link(args, pwork, cser, link, own_db=None):
 
         # The agent applies and reviews the patches, so check for it before
         # making the worktree, leaving no record of a review not done
-        if not claude_mod.check_available():
+        if not common.agent_available():
             ctx.drop_version()
-            raise ValueError(AGENT_MISSING)
+            raise ValueError(agent_missing())
 
         ctx.upstream_branch = apply.get_upstream_branch(args, cser)
         ctx.main_repo = main_repo

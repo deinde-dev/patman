@@ -14,6 +14,7 @@ from patman import checkpatch
 from patman import patchstream
 from patman import relay
 from patman import settings
+from patman import snap
 from u_boot_pylib import gitutil
 from u_boot_pylib import terminal
 from u_boot_pylib import tout
@@ -256,6 +257,8 @@ def email_patches(col, series, cover_fname, patch_files, process_tags, its_a_go,
     Return:
         Git command that was/would be run
     """
+    if its_a_go and not endpoint and not dry_run:
+        snap.check_send(identity, smtp_server, cwd)
     cc_file = series.MakeCcFile(process_tags, cover_fname, not ignore_bad_tags,
                                 add_maintainers, limit, get_maintainer_script,
                                 settings.alias, cwd)

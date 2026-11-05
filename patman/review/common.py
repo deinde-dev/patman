@@ -18,11 +18,13 @@ import uuid
 
 import aiohttp
 
+from u_boot_pylib import claude as claude_mod
 from u_boot_pylib import gitutil
 from u_boot_pylib import tools
 from u_boot_pylib import tout
 
 from patman import patchwork
+from patman import snap
 
 try:
     from claude_agent_sdk import ClaudeAgentOptions
@@ -115,6 +117,21 @@ def find_claude():
                      'the copy bundled with claude-agent-sdk is used, which '
                      "may be old; 'claude update' does not update it")
     return None
+
+
+def agent_available():
+    """Check that the Claude Agent SDK, which runs the agents, is installed
+
+    The patman snap leaves it out, so say that rather than suggesting that
+    it be installed with pip.
+
+    Returns:
+        bool: True if it is available
+    """
+    if not claude_mod.AGENT_AVAILABLE and snap.is_strict():
+        tout.error(snap.NO_AGENT)
+        return False
+    return claude_mod.check_available()
 
 
 def agent_options(**kwargs):

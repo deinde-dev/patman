@@ -31,6 +31,7 @@ from u_boot_pylib import tout
 
 from patman import database
 from patman import lore
+from patman import snap
 from patman.review import common
 from patman.review import stored
 
@@ -423,11 +424,16 @@ def start(args, cser, reply_id):
         int: 0 on success, 1 if the session could not be started
 
     Raises:
-        ValueError: The response has been sent, or tmux is missing
+        ValueError: The response has been sent, tmux is missing or patman
+            runs in a strict snap
     """
     reply = cser.db.reply_get(reply_id)
     if reply.status == database.REPLY_SENT:
         raise ValueError(f'The response to reply {reply_id} has been sent')
+    if snap.is_strict():
+        raise snap.limit('The patman snap cannot discuss a reply, since it '
+                         'does not include Claude Code or tmux, which run '
+                         'the discussion')
     if not shutil.which('tmux'):
         raise ValueError('Discussing a reply needs tmux')
     name = session_name(cser, reply_id)

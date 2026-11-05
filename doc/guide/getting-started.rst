@@ -30,6 +30,12 @@ This installs the command as both ``patman`` and ``patch-manager``. The
 Debian package installs only ``patch-manager``, since Debian already has an
 unrelated ``patman`` command; use that name in the commands below if needed.
 
+On Linux, you can install the snap instead, with ``sudo snap install
+patman``. It brings everything it needs for sending patches, including
+git, but it cannot review patches, it only works on repositories in your home
+directory or on removable media, and it cannot run programs from the host:
+see :doc:`snap` before using it.
+
 That is all you need for sending patches. Reviewing other people's patches
 with ``patman review`` needs extra packages, which you can add later with
 ``pip install patch-manager[review]``, or ``patch-manager[all]`` to include
