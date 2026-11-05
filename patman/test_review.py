@@ -2614,6 +2614,10 @@ class TestReview(CseriesTester):
                                 '--create-drafts', pwork=pwork)
         self.assertIn('You have a draft of your own replying to patch 1 in '
                       'Gmail too', out.getvalue() + err.getvalue())
+        # Gmail refuses metadataHeaders for a draft
+        self.assertEqual(
+            {'userId': 'me', 'id': 'draft123', 'format': 'metadata'},
+            users.drafts.return_value.get.call_args.kwargs)
         svid = cser.db.series_find_by_link(str(self.REVIEW_LINK))[3]
         rev = cser.db.review_get_for_version(svid)[0]
         self.assertTrue(cser.db.review_get_own_draft(rev.idnum))

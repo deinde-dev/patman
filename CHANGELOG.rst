@@ -33,6 +33,9 @@ Changed
 
 Fixed
 ~~~~~
+- ``patman review -d`` can tell whether you have a draft of your own beside
+  the one it makes, rather than warning that it cannot check: Gmail does
+  not take the list of headers to read for a draft.
 - ``patman review`` and the inbox's suggestions no longer fail for an
   upstream on lore whose history has a ``Link:`` trailer which is not a
   URL, such as ``https://... [1]`` in Linux.
