@@ -26,8 +26,10 @@ cover letters are not stored, so these are read from patchwork when asked for.
 Series IDs are those of the patman database: ``/api/series/<id>`` takes the ID
 of one of your series and ``/api/reviews/<id>`` the ID of a reviewed series, in
 the review database. ``/api/review-items/<id>`` takes the ID of a review, and
-``/api/replies/<id>`` the ID of a reply, as given in the reviews. IDs from
-patchwork, such as a patch or cover-letter ID, are named as such.
+``/api/replies/<id>`` the ID of a reply, as given in the reviews. A reply to a
+comment on one of your own series is in the main database, which the
+``own=1`` query parameter selects. IDs from patchwork, such as a patch or
+cover-letter ID, are named as such.
 
 Times are local to the server, in the form ``YYYY-MM-DD HH:MM:SS``, except
 where they come from patchwork (UTC) or email, which give their own form. Since
@@ -266,6 +268,14 @@ which defaults to the latest. This gives status 202 and the Job, 404 if the
 series or version does not exist or the version has no patchwork link, or 409
 if that version is already being synced.
 
+``POST /api/series/<id>/respond``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Have the agent suggest a reply, as the author, to a comment on one of your own
+series, running ``patman review --respond-comment --own``. The body is as for
+``POST /api/reviews/<id>/respond``. The reply then appears in the ``mine`` of
+the patch or cover letter.
+
 Patchwork
 ---------
 
@@ -302,6 +312,10 @@ hour is taken from the cache; with ``refresh=1``, it is read from patchwork:
   ``version``
 - ``fetched`` (str): when it was read from patchwork, as a local time like
   ``2026-10-19 11:00:00``
+- ``mine`` (object or null): where it is in one of your own series, found by
+  its patchwork series or by the Message-IDs it replies to, with ``series``
+  (int; the series ID), ``version`` (int), ``seq`` (int; 0 for the cover
+  letter) and ``replies`` (list of Reply; your replies to the comments on it)
 
 ``GET /api/cover/<id>``
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -652,7 +666,7 @@ does.
 Start a Claude session with Remote Control to talk through the response to a
 reply (see ``review --discuss-reply``), giving status 202 and the Job. With
 ``end``, end the discussion instead. A response which has been sent gives
-status 409.
+status 409, and a reply to a comment on your own series gives status 400.
 
 ``POST /api/replies/<id>/revise``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

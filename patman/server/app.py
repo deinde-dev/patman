@@ -912,7 +912,10 @@ class Server(jobs.JobRunner):
                 on lore
 
         Return:
-            web.Response: Information about the patch or cover letter
+            web.Response: Information about the patch or cover letter, with
+                'mine' saying where it is in one of your own series, with
+                your replies to the comments on it, or None (see
+                info.own_place())
 
         Raises:
             ValueError: No patchwork URL is known for the upstream
@@ -931,6 +934,8 @@ class Server(jobs.JobRunner):
                 data = await pwork.get_cover(client, item_id)
         out = info.mail_info(data)
         out['fetched'] = times.stamp_str(read) or times.now_str()
+        out['mine'] = info.own_place(self.cser.db,
+                                     request.match_info['kind'], data)
         return web.json_response(out)
 
     async def _blob(self, request):
@@ -1738,8 +1743,9 @@ class Server(jobs.JobRunner):
             raise params.BadRequest('Request must be a JSON object')
         return data
 
+    # pylint: disable-next=R0913
     def _review_job(self, title, *args, target=None, parallel=False,
-                    name=None):
+                    name=None, own=False):
         """Start a job which runs 'patman review'
 
         Args:
@@ -1748,11 +1754,14 @@ class Server(jobs.JobRunner):
             target (dict or None): Reviews which the job acts on (see Job)
             parallel (bool): True to run alongside other jobs (see Job)
             name (str or None): Name of the series, if known
+            own (bool): True if it acts on a reply to a comment on one of
+                your own series, which is in the main database
 
         Return:
             web.Response: Response giving the job state
         """
-        cmd = self.get_patman_cmd('review', *args, *self._review_db_args())
+        cmd = self.get_patman_cmd('review', *args, *(
+            ['--own'] if own else self._review_db_args()))
         job = self.add_job('review', title, [cmd], target, parallel)
         job.state['name'] = name or None
         return web.json_response(job.state, status=202)
@@ -1882,6 +1891,68 @@ class Server(jobs.JobRunner):
             raise params.BadRequest('Please give the comment to respond to')
         return self._respond_job(idnum, params.get_int(data, 'version'), seq,
                                  comment, params.get_str(data, 'note'))
+
+    async def _own_respond(self, request):
+        """Handle 'POST /api/series/<id>/respond': reply to a comment
+
+        This has the agent suggest a reply to a comment about the cover
+        letter or a patch of one of your own series, as a job, replying as
+        its author. The body is as for _respond(), with a 'note' saying what
+        you would like to say.
+
+        Args:
+            request (web.Request): Request, with the series ID as 'idnum'
+
+        Return:
+            web.Response: Job state, with status 202
+
+        Raises:
+            BadRequest: The request is invalid
+            ValueError: The series or version does not exist, or has no link
+        """
+        idnum = _idnum(request)
+        data = await self._read_json(request)
+        seq = params.get_seq(data)
+        comment = params.get_comment(data, 'comment')
+        if not comment:
+            raise params.BadRequest('Please give the comment to reply to')
+        return self._own_respond_job(idnum, params.get_int(data, 'version'),
+                                     seq, comment,
+                                     params.get_str(data, 'note'))
+
+    # pylint: disable-next=R0913,R0917
+    def _own_respond_job(self, idnum, version, seq, comment_id, note=None):
+        """Start a job which replies to a comment on one of your own series
+
+        Args:
+            idnum (int): Series ID in the main database
+            version (int or None): Version, or None for the latest
+            seq (int): Patch which the comment is about, 0 for the cover
+                letter
+            comment_id (int or str): ID of the comment on patchwork, or
+                'lore:<msgid>'
+            note (str or None): What you would like to say, for the agent
+
+        Return:
+            web.Response: Response giving the job state
+
+        Raises:
+            ValueError: The series or version does not exist, or has no link
+        """
+        db = self.cser.db
+        name, desc, ups = db.series_get_info(idnum)
+        version = version or db.series_get_max_version(idnum)
+        link = db.ser_ver_get_link(idnum, version)
+        if not link:
+            raise ValueError(f"Series '{name}' v{version} has no link")
+        args = ['-s', str(link), '--respond-comment', str(comment_id), '-i',
+                str(seq)] + (['-U', ups] if ups else [])
+        if note:
+            args += ['-c', note]
+        what = f'patch {seq}' if seq else 'the cover letter'
+        return self._review_job(
+            f"Reply to a comment on {what} of '{desc or name}' v{version}",
+            *args, own=True)
 
     async def _redraft(self, request):
         """Handle 'POST /api/reviews/<id>/redraft': recreate review drafts
@@ -2154,7 +2225,9 @@ class Server(jobs.JobRunner):
         a Gmail draft runs a job, which deletes the draft.
 
         Args:
-            request (web.Request): Request, with the reply ID as 'idnum'
+            request (web.Request): Request, with the reply ID as 'idnum';
+                the 'own=1' query parameter marks a reply to a comment on
+                one of your own series (see _reply_cser())
 
         Return:
             web.Response: Updated reply, or the state of the job with status
@@ -2164,7 +2237,8 @@ class Server(jobs.JobRunner):
             BadRequest: The response is invalid
             ValueError: The reply does not exist
         """
-        db = self.rcser.db
+        cser, own = self._reply_cser(request)
+        db = cser.db
         reply = db.reply_get(_idnum(request))
         data = await self._read_json(request)
         if reply.status == database.REPLY_SENT:
@@ -2173,10 +2247,10 @@ class Server(jobs.JobRunner):
             if reply.draft_id:
                 return self._review_job(
                     f'Drop the response to reply {reply.idnum}',
-                    '--skip-reply', str(reply.idnum))
+                    '--skip-reply', str(reply.idnum), own=own)
             db.reply_set_response(reply.idnum, None, database.REPLY_SKIP)
             db.reply_set_status(reply.idnum, database.REPLY_SKIP)
-            self.rcser.commit()
+            cser.commit()
             return web.json_response(info.reply_info(db.reply_get(reply.idnum)))
         if 'response' in data:
             response = data['response']
@@ -2186,11 +2260,12 @@ class Server(jobs.JobRunner):
                 reply.idnum, response if response.strip() else None,
                 database.REPLY_SUGGESTED if response.strip() else
                 database.REPLY_NEW)
-        self.rcser.commit()
+        cser.commit()
         # An empty response has nothing to draft
         if data.get('draft') and db.reply_get(reply.idnum).response:
             return self._review_job(f'Draft response to reply {reply.idnum}',
-                                    '--draft-reply', str(reply.idnum))
+                                    '--draft-reply', str(reply.idnum),
+                                    own=own)
         return web.json_response(info.reply_info(db.reply_get(reply.idnum)))
 
     async def _reply_suggest(self, request):
@@ -2199,7 +2274,9 @@ class Server(jobs.JobRunner):
         This has the agent suggest a response to a reply, as a job.
 
         Args:
-            request (web.Request): Request, with the reply ID as 'idnum'
+            request (web.Request): Request, with the reply ID as 'idnum';
+                the 'own=1' query parameter marks a reply to a comment on
+                one of your own series (see _reply_cser())
 
         Return:
             web.Response: Job state, with status 202
@@ -2207,12 +2284,14 @@ class Server(jobs.JobRunner):
         Raises:
             ValueError: The reply does not exist
         """
-        reply = self.rcser.db.reply_get(_idnum(request))
+        cser, own = self._reply_cser(request)
+        reply = cser.db.reply_get(_idnum(request))
         if reply.comment_id:
             # A comment on patchwork is read again, to respond to it
-            svr = self.rcser.db.ser_ver_get_by_id(reply.svid)
-            return self._respond_job(svr.series_id, svr.version, reply.seq,
-                                     reply.comment_id)
+            svr = cser.db.ser_ver_get_by_id(reply.svid)
+            respond = self._own_respond_job if own else self._respond_job
+            return respond(svr.series_id, svr.version, reply.seq,
+                           reply.comment_id)
         return self._review_job(f'Suggest a response to reply {reply.idnum}',
                                 '--suggest-reply', str(reply.idnum))
 
@@ -2224,7 +2303,9 @@ class Server(jobs.JobRunner):
         the Gmail draft of the response too.
 
         Args:
-            request (web.Request): Request, with the reply ID as 'idnum'
+            request (web.Request): Request, with the reply ID as 'idnum';
+                the 'own=1' query parameter marks a reply to a comment on
+                one of your own series (see _reply_cser())
 
         Return:
             web.Response: Job state, with status 202, or status 409 if the
@@ -2234,7 +2315,8 @@ class Server(jobs.JobRunner):
             BadRequest: The note is invalid, or there is no response to revise
             ValueError: The reply does not exist
         """
-        reply = self.rcser.db.reply_get(_idnum(request))
+        cser, own = self._reply_cser(request)
+        reply = cser.db.reply_get(_idnum(request))
         data = await self._read_json(request)
         note = params.get_str(data, 'note', 'Please say what to change')
         if reply.status == database.REPLY_SENT:
@@ -2245,7 +2327,7 @@ class Server(jobs.JobRunner):
         if data.get('draft'):
             args.append('-d')
         return self._review_job(f'Revise the response to reply {reply.idnum}',
-                                *args)
+                                *args, own=own)
 
     async def _reply_discuss(self, request):
         """Handle 'POST /api/replies/<id>/discuss': talk through a reply
@@ -2262,8 +2344,12 @@ class Server(jobs.JobRunner):
                 response has been sent
 
         Raises:
+            BadRequest: The reply is to a comment on your own series
             ValueError: The reply does not exist
         """
+        if self._reply_cser(request)[1]:
+            raise params.BadRequest('A reply to a comment on your own series '
+                                    'cannot be discussed')
         reply = self.rcser.db.reply_get(_idnum(request))
         data = await self._read_json(request)
         if data.get('end'):
@@ -2279,7 +2365,9 @@ class Server(jobs.JobRunner):
         """Handle 'POST /api/replies/<id>/send': send the response to a reply
 
         Args:
-            request (web.Request): Request, with the reply ID as 'idnum'
+            request (web.Request): Request, with the reply ID as 'idnum';
+                the 'own=1' query parameter marks a reply to a comment on
+                one of your own series (see _reply_cser())
 
         Return:
             web.Response: Job state, with status 202, or status 409 if the
@@ -2289,13 +2377,32 @@ class Server(jobs.JobRunner):
             BadRequest: There is no response to send
             ValueError: The reply does not exist
         """
-        reply = self.rcser.db.reply_get(_idnum(request))
+        cser, own = self._reply_cser(request)
+        reply = cser.db.reply_get(_idnum(request))
         if reply.status == database.REPLY_SENT:
             return _already_sent('The response')
         if not (reply.response or '').strip():
             raise params.BadRequest('There is no response to send')
         return self._review_job(f'Send the response to reply {reply.idnum}',
-                                '--send-reply', str(reply.idnum))
+                                '--send-reply', str(reply.idnum), own=own)
+
+    def _reply_cser(self, request):
+        """Get the database holding a reply
+
+        A reply to a comment on one of your own series, which the 'own=1'
+        query parameter marks, is in the main database, rather than with
+        the reviews
+
+        Args:
+            request (web.Request): Request
+
+        Return:
+            tuple:
+                Cseries: Cseries holding the reply
+                bool: True if it is a reply to a comment on your own series
+        """
+        own = request.query.get('own') == '1'
+        return self.cser if own else self.rcser, own
 
     async def _index(self, request):
         """Handle 'GET /': send the page
@@ -2373,6 +2480,8 @@ class Server(jobs.JobRunner):
                          self._save_traffic])
         app.router.add_get('/api/series', self._series_list)
         app.router.add_get(r'/api/series/{idnum:\d+}', self._series_detail)
+        app.router.add_post(r'/api/series/{idnum:\d+}/respond',
+                            self._own_respond)
         app.router.add_post(r'/api/series/{idnum:\d+}/sync',
                             self._series_sync)
         app.router.add_get('/api/reviews', self._review_list)

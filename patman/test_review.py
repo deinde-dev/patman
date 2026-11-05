@@ -292,6 +292,17 @@ class TestReview(CseriesTester):
         # The default upstream is only in the main database
         self.assertEqual('us', seen['ups'])
 
+        # A reply to a comment on your own series is kept with the series
+        args = cmdline.parse_args(['review', '--own', '--draft-reply', '1',
+                                   '--review-db-dir', rdir],
+                                  config_fname=False)
+        with mock.patch.object(review, 'do_review',
+                               side_effect=lambda args, pwork, cser:
+                               seen.update(path=cser.db.db_path)):
+            control.do_review(args, self.tmpdir)
+        self.assertEqual(os.path.join(self.tmpdir, '.patman.db'),
+                         seen['path'])
+
     # pylint: disable-next=R0911
     def _fake_patchwork_review(self, subpath):
         """Fake Patchwork server for review tests
@@ -1152,6 +1163,103 @@ class TestReview(CseriesTester):
             cmdline.parse_args(['review', '--respond-comment', 'abc'],
                                config_fname=False)
         self.assertIn("invalid comment ID 'abc'", err.getvalue())
+
+    def test_review_respond_comment_own(self):
+        """The agent can reply to a comment on your own series"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('forest', 'Merge fragments', None)
+        svid = db.ser_ver_add(sid, 2, link='cover@x')
+        db.pcommit_add_list(svid, [
+            Pcommit(None, seq, f'p{seq}', None, None, None, None, None)
+            for seq in range(2)])
+        rev_sid = db.series_add('rev', 'Fred series', None)
+        db.series_set_source(rev_sid, 'review')
+        db.ser_ver_add(rev_sid, 1, link='fred@x')
+        db.commit()
+        comment = {
+            'id': 'lore:c1@x', 'msgid': '<c1@x>', 'date': '2026-11-05T09:07',
+            'subject': 'Re: [PATCH v2 2/2] p1',
+            'submitter': {'name': 'Herve Codina', 'email': 'herve@x.com'},
+            'content': 'Please split this', 'headers': {}}
+
+        async def get_series(_client, _link):
+            return {'patches': [{'id': 'lore:p1@x'}, {'id': 'lore:p2@x'}]}
+
+        async def get_patch(_client, _patch_id):
+            return {'content': 'Commit message', 'diff': '+code'}
+
+        async def get_patch_comments(_client, _patch_id):
+            return [comment]
+
+        pwork = types.SimpleNamespace(get_series=get_series,
+                                      get_patch=get_patch,
+                                      get_patch_comments=get_patch_comments)
+
+        def run(link, *argv):
+            args = cmdline.parse_args(
+                ['review', '-s', link, '--reviewer',
+                 'Simon Glass <sjg@chromium.org>', '--respond-comment',
+                 'lore:c1@x', *argv], config_fname=False)
+            with mock.patch.object(review.replies, 'handle_comment_sync',
+                                   return_value=('suggested', 'Will do')) \
+                    as handle, terminal.capture():
+                ret = review.replies.respond_to_comment(args, pwork, cser,
+                                                        link)
+            return ret, handle
+
+        ret, handle = run('cover@x', '--own', '-i', '2')
+        self.assertEqual(0, ret)
+        item, _, _, branch = handle.call_args.args[1:]
+        self.assertEqual(('patch 2', None, 'forest2'),
+                         (item.what, item.review, branch))
+        rep, = db.reply_get_comments(svid)
+        self.assertEqual((2, 'lore:c1@x', 'Will do', 'suggested'),
+                         (rep.seq, rep.comment_id, rep.response, rep.status))
+
+        # The patch must be in the series
+        with self.assertRaises(ValueError) as exc:
+            run('cover@x', '--own', '-i', '3')
+        self.assertIn('no patch 3', str(exc.exception))
+
+        # A series which you reviewed is not your own
+        with self.assertRaises(ValueError) as exc:
+            run('fred@x', '--own', '-i', '1')
+        self.assertIn('Series fred@x is not one of your own',
+                      str(exc.exception))
+
+    def test_handle_comment_own(self):
+        """The agent replies as the author to a comment on your own series"""
+        ctx = review.common.ReviewContext(None, None, {})
+        ctx.reviewer_name = 'Simon Glass'
+        ctx.reviewer_email = 'sjg@chromium.org'
+        ctx.spelling = 'British'
+        item = types.SimpleNamespace(what='patch 2', text='+code',
+                                     review=None)
+        comment = {'submitter': {'name': 'Alex Ample',
+                                 'email': 'alex@x.com'},
+                   'date': '2026-11-05T09:07:14',
+                   'content': 'Please split this'}
+        seen = {}
+
+        async def mock_agent(prompt, _options):
+            seen['prompt'] = prompt
+            return True, ('GREETING: Alex\nCOMMENT:\n> Please split this\n\n'
+                          'Will do in v3\n\nVERDICT: changes_needed\n')
+
+        with mock.patch.object(review.replies.claude_mod, 'run_agent_collect',
+                               side_effect=mock_agent), \
+                mock.patch.object(review.replies.claude_mod,
+                                  'check_available', return_value=True), \
+                mock.patch.object(review.common, 'ClaudeAgentOptions',
+                                  mock.MagicMock()):
+            status, response = review.replies.handle_comment_sync(
+                ctx, item, comment, [], 'dt-forest2')
+        self.assertIn('You are the author of', seen['prompt'])
+        self.assertIn("'git show dt-forest2:<file>'", seen['prompt'])
+        self.assertNotIn('maintainer', seen['prompt'])
+        self.assertEqual('suggested', status)
+        self.assertIn('> Please split this\n\nWill do in v3', response)
 
     def test_review_replies(self):
         """Replies to a sent review are recorded and can be responded to"""

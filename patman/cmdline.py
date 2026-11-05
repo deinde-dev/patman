@@ -897,6 +897,12 @@ def _add_reply_args(review):
              "'lore:<msgid>' for a list on lore; use -i to say which patch "
              'it is about, with 0 for the cover letter')
     review.add_argument(
+        '--own', action='store_true',
+        help='The comment is on one of your own series: with '
+             '--respond-comment, reply as its author; the reply is kept in '
+             'the main database rather than the review database, so give '
+             '--own with the other reply options too')
+    review.add_argument(
         '--send-reply', type=int, metavar='ID',
         help='Send the response to a reply, creating its Gmail draft first if '
              'needed')

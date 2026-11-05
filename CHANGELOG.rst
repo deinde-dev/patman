@@ -10,6 +10,11 @@ Unreleased
 
 Added
 ~~~~~
+- The page for a patch or cover letter of one of your own series has
+  'Reply' on each comment, which has the agent suggest a reply as the
+  author. The reply can then be changed, drafted in Gmail or sent, as for a
+  reply to a review. ``patman review --respond-comment --own`` does the same
+  from the command line.
 - ``patman review`` can review a series which is not on Patchwork, from
   lore. If Patchwork has no series with the title given by ``-S``, lore is
   searched instead; ``-s`` takes the series' Message-ID, or a link to it on

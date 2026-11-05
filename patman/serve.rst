@@ -387,6 +387,17 @@ what you would like to say (``patman review --respond-comment``). The response
 then appears below the review, like a response to a reply, to change, draft or
 send.
 
+Replies to comments on your own series
+--------------------------------------
+
+On the page for a patch or cover letter of one of your own series, e.g. from
+the inbox, each comment from someone else has 'Reply'. This asks the agent to
+suggest a reply as the author of the series, optionally saying what you would
+like to say (``patman review --respond-comment --own``). The agent can read
+the code on the series' branch. The comment is then shown with the reply,
+which you can change, draft or send, as for a reply to a review. Such replies
+are kept in the main database, with the series, and cannot be discussed.
+
 Jobs
 ----
 

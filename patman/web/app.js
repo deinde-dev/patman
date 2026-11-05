@@ -945,6 +945,56 @@ function renderComments(comments) {
     : [h('div', { class: 'empty' }, 'No comments')];
 }
 
+// The comments on a patch or cover letter of one of your own series, each
+// with 'Reply' to have the agent suggest a reply as its author, or with your
+// reply if there is one. find(id) reads a reply again, and again() shows the
+// comments again, once a reply has been suggested
+function ownComments(mine, list, find, again) {
+  return list.map((c) => {
+    const rp = mine.replies.find((r) => String(r.comment_id) === String(c.id));
+    if (rp) {
+      return h('div', { class: 'card' },
+        replyBox(rp, null, null, { find: () => find(rp.id) }));
+    }
+    const slot = h('div', {});
+    const strip = h('div', { class: 'jobstrip' });
+    const reset = () => fill(slot, !c.own && h('div', { class: 'actions' },
+      h('button', { class: 'btn light small', onclick: () => ask(),
+                    title: 'Reply to this comment, with a suggestion from the agent' },
+        'Reply')));
+    const ask = () => {
+      const note = h('textarea', { class: 'note', spellcheck: 'true',
+                                   placeholder: 'What would you like to say? (optional)' });
+      const msg = h('div', { class: 'msg' });
+      const go = h('button', { class: 'btn small', onclick: async () => {
+        go.disabled = true;
+        msg.textContent = '';
+        let job;
+        try {
+          job = await api(`series/${mine.series}/respond`, { json: {
+            version: mine.version, seq: mine.seq, comment: c.id, note: note.value } });
+        } catch (err) {
+          msg.textContent = err.message;
+          go.disabled = false;
+          return;
+        }
+        fill(slot);
+        const st = await followJob(job, strip, 'Suggesting a reply');
+        if (st && jobStatus(st)[0] === 'ok') await again();
+        else if (st) reset();
+      }, title: 'Have the agent suggest a reply, as a job, which you can then change, ' +
+                'draft or send' }, 'Suggest a reply');
+      fill(slot, h('div', { class: 'form' }, note,
+        h('div', { class: 'actions' }, go,
+          h('button', { class: 'btn light small', onclick: reset,
+                        title: 'Close this without replying' }, 'Cancel')), msg));
+      note.focus();
+    };
+    reset();
+    return h('div', { class: 'card' }, commentHead(c), renderMail(c.content), strip, slot);
+  });
+}
+
 // Link to a message on a list on lore, from its Message-ID
 // Whether a version of a series is read from lore, being known by its
 // Message-ID, though its upstream may use patchwork
@@ -988,9 +1038,23 @@ async function mailParts(kind, id, ups, refresh, again, extra) {
   const comments = h('div', { class: 'list' },
                      h('div', { class: 'spinner' }, 'Loading comments…'));
   const ser = m.series[0];
+  // Read again where it is in one of your own series, with your replies
+  const readMine = async () => {
+    m.mine = (await api(`${kind}/${idPath(id)}${q}`)).mine;
+  };
+  const findOwnReply = async (replyId) => {
+    await readMine();
+    return ((m.mine || {}).replies || []).find((rp) => rp.id === replyId) || null;
+  };
   const readComments = async () => {
     try {
-      fill(comments, ...renderComments(await api(`comments/${kind}/${idPath(id)}${q}${rq}`)));
+      const list = await api(`comments/${kind}/${idPath(id)}${q}${rq}`);
+      fill(comments, ...(m.mine && list.length
+        ? ownComments(m.mine, list, findOwnReply, async () => {
+          await readMine();
+          await readComments();
+        })
+        : renderComments(list)));
     } catch (err) {
       fill(comments, errorBox(err));
     }
@@ -1936,9 +2000,13 @@ async function findReply(seriesId, replyId) {
 
 // Show a reply to one of our reviews of a series, with our response to it.
 // If given, 'changed' is called each time the reply is shown again, e.g.
-// when its status changes
-function replyBox(rp, seriesId, changed) {
+// when its status changes. For a comment on one of your own series, 'own'
+// has a find() function which reads the reply again
+function replyBox(rp, seriesId, changed, own) {
   const box = h('div', { class: 'comments' });
+  // A reply to a comment on your own series is kept with the series
+  const url = (sub = '') => `replies/${rp.id}${sub}${own ? '?own=1' : ''}`;
+  const refind = () => (own ? own.find() : findReply(seriesId, rp.id));
   const strip = h('div', { class: 'jobstrip' });
   // True while a job is acting on the reply
   let busy = false;
@@ -1966,7 +2034,7 @@ function replyBox(rp, seriesId, changed) {
     const st = await followJob(job, strip, verb);
     busy = false;
     if (st && jobStatus(st)[0] === 'ok') {
-      const fresh = await findReply(seriesId, rp.id).catch(() => null);
+      const fresh = await refind().catch(() => null);
       if (fresh) Object.assign(rp, fresh);
     }
     show();
@@ -1994,36 +2062,36 @@ function replyBox(rp, seriesId, changed) {
         rp.response && h('button', { class: 'btn light small', onclick: revise,
                                      title: 'Ask the agent to change your response' },
                          'Revise'),
-        rp.discussion
+        own ? null : rp.discussion
           ? confirmButton('End discussion', 'btn light small',
-                          () => run(`replies/${rp.id}/discuss`, { end: true },
+                          () => run(url('/discuss'), { end: true },
                                     'Ending the discussion'),
                           'Close the Claude session talking through this reply')
           : h('button', { class: 'btn light small',
                           title: 'Start a Claude session, which you can use from the Claude ' +
                                  'app, to talk through the response; it stores the response ' +
                                  'here once you agree on it',
-                          onclick: () => run(`replies/${rp.id}/discuss`, {},
+                          onclick: () => run(url('/discuss'), {},
                                              'Starting a discussion') }, 'Discuss'),
         rp.response && confirmButton('Send', 'btn small',
-                                     () => run(`replies/${rp.id}/send`, {}, 'Sending'),
+                                     () => run(url('/send'), {}, 'Sending'),
                                      'Send your response'),
         rp.response && confirmButton(
           rp.status === 'draft' ? 'Update Gmail draft' : 'Create Gmail draft',
           'btn light small',
-          () => run(`replies/${rp.id}`, { draft: true }, 'Drafting'),
+          () => run(url(), { draft: true }, 'Drafting'),
           'Put your response in a Gmail draft, to check or send from Gmail'),
         confirmButton('Suggest a response', 'btn light small',
-                      () => run(`replies/${rp.id}/suggest`, {}, 'Suggesting a response'),
+                      () => run(url('/suggest'), {}, 'Suggesting a response'),
                       'Have the agent suggest a response to this reply'),
         rp.status !== 'skip' && (rp.response
           ? confirmButton('No reply needed', 'btn light small',
-                          () => run(`replies/${rp.id}`, { skip: true }, 'Dropping the response'),
+                          () => run(url(), { skip: true }, 'Dropping the response'),
                           'Mark this reply as needing no response, dropping your response ' +
                           'and any Gmail draft of it')
           : h('button', { class: 'btn light small',
                           title: 'Mark this reply as needing no response',
-                          onclick: () => run(`replies/${rp.id}`, { skip: true },
+                          onclick: () => run(url(), { skip: true },
                                              'Dropping the response') },
               'No reply needed'))));
     if (changed) changed();
@@ -2041,7 +2109,7 @@ function replyBox(rp, seriesId, changed) {
         return;
       }
       if (busy || editing) return;
-      const fresh = await findReply(seriesId, rp.id).catch(() => null);
+      const fresh = await refind().catch(() => null);
       if (fresh && (fresh.response !== rp.response || fresh.status !== rp.status ||
                     !fresh.discussion)) {
         Object.assign(rp, fresh);
@@ -2054,7 +2122,7 @@ function replyBox(rp, seriesId, changed) {
     editing = true;
     fill(box, h('div', { class: 'who' }, `Response to ${rp.sender}`),
       reviseForm(null, rp.status === 'draft', show,
-                 (note, draft, msg) => run(`replies/${rp.id}/revise`, { note, draft },
+                 (note, draft, msg) => run(url('/revise'), { note, draft },
                                            'Revising the response', msg),
                  'response'));
   };
@@ -2068,7 +2136,7 @@ function replyBox(rp, seriesId, changed) {
                                onclick: async () => {
       save.disabled = true;
       msg.textContent = '';
-      await run(`replies/${rp.id}`, { response: text.value, draft: draft.checked },
+      await run(url(), { response: text.value, draft: draft.checked },
                 'Drafting', msg);
       save.disabled = false;
     } }, 'Save');
@@ -2076,12 +2144,12 @@ function replyBox(rp, seriesId, changed) {
     const send = confirmButton('Save and send', 'btn small', async () => {
       msg.textContent = '';
       try {
-        await api(`replies/${rp.id}`, { json: { response: text.value } });
+        await api(url(), { json: { response: text.value } });
       } catch (err) {
         msg.textContent = err.message;
         return;
       }
-      run(`replies/${rp.id}/send`, {}, 'Sending', msg);
+      run(url('/send'), {}, 'Sending', msg);
     }, 'Save your response and send it');
     fill(box, h('div', { class: 'who' }, `Response to ${rp.sender}`),
       h('div', { class: 'form' }, text,
