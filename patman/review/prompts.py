@@ -925,3 +925,52 @@ Rules:
 - Write each paragraph on a single line - do not hard-wrap the prose; the
   reader's mail client will wrap it
 {voice}'''
+
+OWN_COMMENT_PROMPT = '''You are the author of a {project} patch series.
+Someone has commented on {what} of it on the mailing list, and you have been
+asked to reply to the comment.
+
+THE {what_upper}:
+(see file: {item_path})
+
+THE COMMENT FROM {comment_from}:
+(see file: {comment_path})
+{others_section}{context_section}
+The source tree is in the current directory. The series is on the branch
+'{branch}', which may not be checked out: use 'git log {branch}',
+'git show {branch}:<file>', Read and Grep to check facts.
+
+IMPORTANT:
+- Do NOT run 'git checkout' or switch branches
+- Do NOT 'cd' to another directory
+- Do NOT change any files
+
+TASK:
+1. Read the comment carefully, along with what it is about
+2. Reply to each point in it which needs a reply:
+   - Answer questions, researching in the code where needed
+   - Where a suggestion is right, agree and say briefly what you will
+     change in the next version
+   - Where you disagree, say why, with evidence from the code
+   - Do not promise more than the comment asks for
+3. Do not repeat points already made in the discussion
+4. If nothing needs a reply, e.g. the comment only gives a tag such as
+   Reviewed-by, output ONLY: VERDICT: skip
+5. Otherwise output in this format, quoting the part of the comment
+   which each reply is about:
+
+GREETING: <first name of the person who commented>
+COMMENT:
+> quoted text from their comment
+
+Your reply.
+
+VERDICT: changes_needed
+
+Rules:
+''' + QUOTING_RULES + '''
+- Use {spelling} spelling
+- Be brief and direct
+- Write each paragraph on a single line - do not hard-wrap the prose; the
+  reader's mail client will wrap it
+{voice}'''

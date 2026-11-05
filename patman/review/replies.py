@@ -643,7 +643,7 @@ def _format_comment(comment):
             f"{comment.get('date')}:\n{comment.get('content') or ''}\n")
 
 
-async def handle_comment(ctx, item, comment, others):
+async def handle_comment(ctx, item, comment, others, branch=None):
     """Generate a response to a comment on a patch or cover letter
 
     Args:
@@ -655,6 +655,8 @@ async def handle_comment(ctx, item, comment, others):
             review (str or None): Our review of it, if any
         comment (dict): Comment from patchwork
         others (list of dict): The other comments on it, for context
+        branch (str or None): Branch holding the series, if it is one of
+            your own, so that the agent replies as its author
 
     Returns:
         tuple:
@@ -690,14 +692,20 @@ YOUR REVIEW OF IT:
 THE OTHER COMMENTS ON IT, for context:
 (see file: {files['others']})
 '''
-        prompt = prompts.COMMENT_PROMPT.format(
-            what=item.what, what_upper=item.what.upper(),
-            item_path=files['item'], review_section=review_section,
-            comment_from=sender, comment_path=files['comment'],
-            others_section=others_section,
-            context_section=prompts.context_section(ctx),
-            spelling=ctx.spelling, voice=prompts.voice_section(),
-            project=settings.review_project())
+        fields = {
+            'what': item.what, 'what_upper': item.what.upper(),
+            'item_path': files['item'], 'comment_from': sender,
+            'comment_path': files['comment'],
+            'others_section': others_section,
+            'context_section': prompts.context_section(ctx),
+            'spelling': ctx.spelling, 'voice': prompts.voice_section(),
+            'project': settings.review_project()}
+        if branch:
+            prompt = prompts.OWN_COMMENT_PROMPT.format(branch=branch,
+                                                       **fields)
+        else:
+            prompt = prompts.COMMENT_PROMPT.format(
+                review_section=review_section, **fields)
         options = common.agent_options(
             allowed_tools=['Bash', 'Read', 'Grep'], cwd=ctx.repo_path,
             max_buffer_size=claude_mod.MAX_BUFFER_SIZE)
@@ -722,9 +730,9 @@ THE OTHER COMMENTS ON IT, for context:
         ctx.em_dash)
 
 
-def handle_comment_sync(ctx, item, comment, others):
+def handle_comment_sync(ctx, item, comment, others, branch=None):
     """Synchronous wrapper for handle_comment()"""
-    return common.run(handle_comment(ctx, item, comment, others))
+    return common.run(handle_comment(ctx, item, comment, others, branch))
 
 
 def _find_comment(pwork, link, seq, comment_id):

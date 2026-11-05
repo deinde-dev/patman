@@ -1153,6 +1153,39 @@ class TestReview(CseriesTester):
                                config_fname=False)
         self.assertIn("invalid comment ID 'abc'", err.getvalue())
 
+    def test_handle_comment_own(self):
+        """The agent replies as the author to a comment on your own series"""
+        ctx = review.common.ReviewContext(None, None, {})
+        ctx.reviewer_name = 'Simon Glass'
+        ctx.reviewer_email = 'sjg@chromium.org'
+        ctx.spelling = 'British'
+        item = types.SimpleNamespace(what='patch 2', text='+code',
+                                     review=None)
+        comment = {'submitter': {'name': 'Alex Ample',
+                                 'email': 'alex@x.com'},
+                   'date': '2026-11-05T09:07:14',
+                   'content': 'Please split this'}
+        seen = {}
+
+        async def mock_agent(prompt, _options):
+            seen['prompt'] = prompt
+            return True, ('GREETING: Alex\nCOMMENT:\n> Please split this\n\n'
+                          'Will do in v3\n\nVERDICT: changes_needed\n')
+
+        with mock.patch.object(review.replies.claude_mod, 'run_agent_collect',
+                               side_effect=mock_agent), \
+                mock.patch.object(review.replies.claude_mod,
+                                  'check_available', return_value=True), \
+                mock.patch.object(review.common, 'ClaudeAgentOptions',
+                                  mock.MagicMock()):
+            status, response = review.replies.handle_comment_sync(
+                ctx, item, comment, [], 'dt-forest2')
+        self.assertIn('You are the author of', seen['prompt'])
+        self.assertIn("'git show dt-forest2:<file>'", seen['prompt'])
+        self.assertNotIn('maintainer', seen['prompt'])
+        self.assertEqual('suggested', status)
+        self.assertIn('> Please split this\n\nWill do in v3', response)
+
     def test_review_replies(self):
         """Replies to a sent review are recorded and can be responded to"""
         cser = self.get_database()
