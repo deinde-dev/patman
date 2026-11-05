@@ -724,7 +724,8 @@ def do_review(args, test_db=None, pwork=None, cser=None):
             pwork = _setup_patchwork(
                 cser, pwork, ups, args.patchwork_url, allow_lore=True)
 
-        if not review_db_dir:
+        # Replies to comments on your own series are kept with them
+        if not review_db_dir or getattr(args, 'own', False):
             return review_mod.do_review(args, pwork, cser)
 
         # Upstreams are only held in the main database, so note the default

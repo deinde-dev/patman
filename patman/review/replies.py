@@ -790,9 +790,12 @@ def respond_to_comment(args, pwork, cser, link):
     reviews. It is recorded along with the replies to our reviews, so that
     the response can be changed, drafted and sent in the same way.
 
+    With --own, the series is one of your own instead, and the agent
+    replies as its author, reading the code from the series' branch.
+
     Args:
         args (Namespace): Command-line arguments (uses respond_comment, the
-            patch to respond about in patches, and create_drafts)
+            patch to respond about in patches, own and create_drafts)
         pwork (Patchwork): Patchwork instance
         cser (Cseries): Open cseries instance holding the reviews
         link (str): Patchwork series link/ID
@@ -801,24 +804,30 @@ def respond_to_comment(args, pwork, cser, link):
         int: 0 on success, 1 on failure
 
     Raises:
-        ValueError: The series has not been reviewed, or the comment cannot
-            be found
+        ValueError: The series has not been reviewed, or is not your own
+            with --own, or the comment cannot be found
     """
     existing = cser.db.series_find_by_link(link)
+    own = getattr(args, 'own', False)
+    if own and not cser.db.series_is_own(link):
+        raise ValueError(f'Series {link} is not one of your own')
     if not existing:
         raise ValueError(f'Series {link} has not been reviewed')
-    svid = existing[3]
-    sel = common.parse_patch_selection(
-        args.patches, common.last_seq(cser.db.review_get_for_version(svid)))
+    _, name, version, svid = existing
+    if own:
+        last = len(cser.db.pcommit_get_list(svid))
+    else:
+        last = common.last_seq(cser.db.review_get_for_version(svid))
+    sel = common.parse_patch_selection(args.patches, last)
     if not sel or len(sel) != 1:
         raise ValueError('Use -i to say which patch the comment is about, '
                          'with 0 for the cover letter')
     seq = next(iter(sel))
     item, comment, others = _find_comment(pwork, link, seq,
                                           args.respond_comment)
-    item.review = next((rev.body for rev in
-                        cser.db.review_get_for_version(svid)
-                        if rev.seq == seq), None)
+    item.review = None if own else next(
+        (rev.body for rev in cser.db.review_get_for_version(svid)
+         if rev.seq == seq), None)
 
     hdrs = comment.get('headers') or {}
     sub = comment.get('submitter') or {}
@@ -839,7 +848,10 @@ def respond_to_comment(args, pwork, cser, link):
                    if getattr(args, 'context', None) else None)
     tout.notice(f"Responding to comment {comment['id']} from "
                 f"{sub.get('name') or sub.get('email')} on {item.what}")
-    status, response = handle_comment_sync(ctx, item, comment, others)
+    # The series' branch, as 'patman series' names it
+    branch = name + (str(version) if version > 1 else '') if own else None
+    status, response = handle_comment_sync(ctx, item, comment, others,
+                                           branch)
     if not status:
         tout.error('No response could be suggested')
         return 1
