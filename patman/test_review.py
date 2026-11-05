@@ -102,6 +102,22 @@ class TestReview(CseriesTester):
             self.assertEqual(1, err.getvalue().count(
                 'copy bundled with claude-agent-sdk is used'))
 
+    def test_agent_available_snap(self):
+        """The snap says that it has no review agent, rather than to use pip"""
+        with mock.patch.object(review.common.claude_mod, 'AGENT_AVAILABLE',
+                               False), \
+                terminal.capture() as (_, err):
+            self.assertFalse(review.common.agent_available())
+            self.assertIn('pip install claude-agent-sdk', err.getvalue())
+            self.assertIn('patch-manager[review]', review.core.agent_missing())
+            with mock.patch.object(review.common.snap, 'is_strict',
+                                   return_value=True):
+                self.assertFalse(review.common.agent_available())
+                self.assertEqual(review.common.snap.NO_AGENT,
+                                 review.core.agent_missing())
+        self.assertIn('The patman snap does not include the review agent',
+                      err.getvalue())
+
     def test_find_claude_local_bin(self):
         """Claude Code in ~/.local/bin is found when it is not on the PATH"""
         local = os.path.join(self.tmpdir, '.local', 'bin')

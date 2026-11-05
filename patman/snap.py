@@ -36,6 +36,11 @@ PLUGS = (
 # Credential helpers which come with git, and so are in the snap
 GIT_HELPERS = ('cache', 'store')
 
+# Reported when an agent is needed, since the snap leaves out the Claude Agent
+# SDK and Claude Code
+NO_AGENT = ('The patman snap does not include the review agent; install '
+            'patman with pip to review patches with it')
+
 
 def confinement():
     """Find how the snap which patman runs in is confined

@@ -164,7 +164,7 @@ async def learn_voice(vp):
     Returns:
         bool: True if the voice profile was created successfully
     """
-    if not claude_mod.check_available():
+    if not common.agent_available():
         return False
 
     if vp.source == 'patchwork':
@@ -273,7 +273,7 @@ async def refine_voice(draft_body, sent_body):
         bool: True if the voice profile was updated
     """
 
-    if not claude_mod.check_available():
+    if not common.agent_available():
         return False
 
     voice = get_voice()

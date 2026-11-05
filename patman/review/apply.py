@@ -139,7 +139,7 @@ async def apply_series(pwork, link, branch_name, upstream_branch,
         OtherProjectError: The series is for another project
     """
 
-    if not claude_mod.check_available():
+    if not common.agent_available():
         return False, None
 
     # Download the mbox, and check that the series is for this tree before
