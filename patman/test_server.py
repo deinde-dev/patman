@@ -2637,6 +2637,14 @@ class TestWebServer(unittest.TestCase, TestCommon):
             run('--suggest')
         self.assertEqual('patman: ValueError: Bad rule', str(exc.exception))
 
+        # patman reports the error which stops it on stdout
+        proc.communicate.return_value = (
+            b'Series: x\npatman: ValueError: Invalid IPv6 URL\n', b'')
+        with self.assertRaises(ValueError) as exc:
+            run('--suggest')
+        self.assertEqual('patman: ValueError: Invalid IPv6 URL',
+                         str(exc.exception))
+
         # One which takes too long is stopped
         async def slow():
             await asyncio.sleep(1)

@@ -1131,12 +1131,14 @@ class Server(jobs.JobRunner):
                              f'{SUGGEST_TIMEOUT} seconds') from exc
         lines = [line.strip() for line in err.decode('utf-8', 'replace')
                  .splitlines() if line.strip()]
-        if proc.returncode:
-            raise ValueError(lines[-1] if lines else
-                             f'patman review failed: {proc.returncode}')
         # Anything else it says, e.g. about updating the database, comes
         # first
         found = out.decode('utf-8', 'replace').strip().splitlines()
+        if proc.returncode:
+            # patman reports the error which stops it on stdout
+            why = [line for line in found if line.startswith('patman: ')]
+            raise ValueError((why or lines or
+                              [f'patman review failed: {proc.returncode}'])[-1])
         return json.loads(found[-1] if found else '{}'), lines
 
     async def _work_out_suggestions(self, ups):
