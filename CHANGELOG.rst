@@ -8,6 +8,9 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+0.8.0 - 2026-11-10
+------------------
+
 Added
 ~~~~~
 - The page for a patch or cover letter of one of your own series has
