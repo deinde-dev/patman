@@ -457,3 +457,19 @@ and start it with::
 Use ``journalctl --user -u patman-serve`` to see its output. Run ``loginctl
 enable-linger`` once if the server should keep running while you are not logged
 in.
+
+Each server shows one tree. To serve another as well, such as a tree where you
+review patches for a different project, give it a unit of its own, e.g.
+``~/.config/systemd/user/patman-serve-dtc.service``, like the first but with
+its own directory, port and token file::
+
+    [Service]
+    WorkingDirectory=%h/src/dtc
+    EnvironmentFile=%h/.config/patman-serve-dtc.env
+    ExecStart=%h/.local/bin/patman serve --host 100.64.1.2 --port 8041 \
+        -t ${PATMAN_TOKEN} -r --review-db-dir %h/src/dtc-review
+
+``--review-db-dir`` keeps that project's reviews in a database of their own
+(see :doc:`the Managing the database chapter </db>`). It can be left out if the
+tree's ``.patman`` sets ``review_db_dir``. Start it with ``systemctl --user
+enable --now patman-serve-dtc``.
