@@ -54,6 +54,10 @@ the snap can reach, and not hidden directly in your home directory.
 patman's caches go in ``~/snap/patman/common/cache`` rather than
 ``~/.cache``.
 
+When ``patman serve`` runs as a systemd service, its ``WorkingDirectory``
+must be somewhere the snap can reach as well. See 'Running it as a service'
+in :doc:`/serve`.
+
 What programs are in the snap
 -----------------------------
 

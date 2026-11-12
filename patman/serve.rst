@@ -473,3 +473,9 @@ its own directory, port and token file::
 (see :doc:`the Managing the database chapter </db>`). It can be left out if the
 tree's ``.patman`` sets ``review_db_dir``. Start it with ``systemctl --user
 enable --now patman-serve-dtc``.
+
+With the snap, use ``/snap/bin/patman`` in ``ExecStart``. The tree must be in
+your home directory, or under ``/media`` or ``/mnt`` (see :doc:`the snap guide
+</guide/snap>`). If it is not, the service stops as soon as it starts. The
+reason is in ``journalctl --user``, but may not show with ``-u patman-serve``,
+since patman exits before the journal can tell which service printed it.
