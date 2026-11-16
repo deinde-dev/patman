@@ -16,6 +16,7 @@ reply. Syncing finds new replies, as well as reviews which have been sent.
 from datetime import datetime, timedelta
 from email.utils import (formataddr, getaddresses, parseaddr,
                          parsedate_to_datetime)
+import json
 import os
 import tempfile
 from types import SimpleNamespace
@@ -827,6 +828,109 @@ def find_own_series(args, cser):
     args.upstream = args.upstream or cser.db.series_get_info(idnum)[2]
 
 
+def _comment_series(args, cser, link):
+    """Find the series version whose comments are to be responded to
+
+    Args:
+        args (Namespace): Command-line arguments (uses own)
+        cser (Cseries): Open cseries instance holding the reviews, or your
+            own series with --own
+        link (str): Patchwork series link/ID, or Message-ID on lore
+
+    Return:
+        tuple:
+            str: Name of the series
+            int: Version
+            int: ID of the series version
+            bool: True if the series is one of your own (--own)
+
+    Raises:
+        ValueError: The series has not been reviewed, or is not your own
+            with --own
+    """
+    existing = cser.db.series_find_by_link(link)
+    own = getattr(args, 'own', False)
+    if own and not cser.db.series_is_own(link):
+        raise ValueError(f'Series {link} is not one of your own')
+    if not existing:
+        raise ValueError(f'Series {link} has not been reviewed')
+    _, name, version, svid = existing
+    return name, version, svid, own
+
+
+def _series_comments(pwork, link):
+    """Read the comments on the cover letter and each patch of a series
+
+    Args:
+        pwork (Patchwork or LoreList): Where the series comes from
+        link (str): Patchwork series link/ID, or Message-ID on lore
+
+    Return:
+        list of tuple: The comments, those on the cover letter first, then
+            those on each patch in order:
+            int: Patch which the comment is about, 0 for the cover letter
+            dict: The comment
+    """
+    data = common.pw_call(pwork.get_series, link) or {}
+    found = []
+    cover = data.get('cover_letter')
+    if cover:
+        found += [(0, cmt) for cmt in
+                  common.pw_call(pwork.get_cover_comments, cover['id']) or []]
+    for seq, patch in enumerate(data.get('patches') or [], 1):
+        found += [(seq, cmt) for cmt in
+                  common.pw_call(pwork.get_patch_comments, patch['id']) or []]
+    return found
+
+
+def list_comments(args, pwork, cser, link):
+    """Print the comments on a series as JSON, for a tool to read
+
+    Each comment gives the patch it is about ('seq', 0 for the cover
+    letter), its 'id' as --respond-comment takes it, its 'msgid',
+    'in_reply_to', 'sender', 'date', 'subject' and 'body', whether we sent
+    it ('own') and the 'reply' to it which is recorded, if any, with that
+    reply's 'id' and 'status'.
+
+    Args:
+        args (Namespace): Command-line arguments (uses own and reviewer)
+        pwork (Patchwork or LoreList): Where the series comes from
+        cser (Cseries): Open cseries instance holding the reviews, or your
+            own series with --own
+        link (str): Patchwork series link/ID, or Message-ID on lore
+
+    Returns:
+        int: 0
+
+    Raises:
+        ValueError: The series has not been reviewed, or is not your own
+            with --own
+    """
+    svid = _comment_series(args, cser, link)[2]
+    replies = {rep.comment_id: rep for rep in cser.db.reply_get_comments(svid)}
+    try:
+        own_email = common.parse_reviewer(args)[1].lower()
+    except ValueError:
+        own_email = None
+    out = []
+    for seq, cmt in _series_comments(pwork, link):
+        sub = cmt.get('submitter') or {}
+        email = sub.get('email') or ''
+        rep = replies.get(cmt.get('id'))
+        out.append({
+            'seq': seq, 'id': cmt.get('id'), 'msgid': cmt.get('msgid'),
+            'in_reply_to': _unfold(gmail.get_header(cmt.get('headers') or {},
+                                                    'In-Reply-To')) or None,
+            'sender': formataddr((sub.get('name') or '', email)),
+            'date': cmt.get('date'), 'subject': _unfold(cmt.get('subject')),
+            'own': bool(email) and email.lower() == own_email,
+            'body': cmt.get('content'),
+            'reply': ({'id': rep.idnum, 'status': rep.status} if rep
+                      else None)})
+    print(json.dumps(out, indent=2))
+    return 0
+
+
 def respond_to_comment(args, pwork, cser, link):
     """Have the agent suggest a response to a comment on patchwork
 
@@ -852,13 +956,7 @@ def respond_to_comment(args, pwork, cser, link):
         ValueError: The series has not been reviewed, or is not your own
             with --own, or the comment cannot be found
     """
-    existing = cser.db.series_find_by_link(link)
-    own = getattr(args, 'own', False)
-    if own and not cser.db.series_is_own(link):
-        raise ValueError(f'Series {link} is not one of your own')
-    if not existing:
-        raise ValueError(f'Series {link} has not been reviewed')
-    _, name, version, svid = existing
+    name, version, svid, own = _comment_series(args, cser, link)
     if own:
         last = len(cser.db.pcommit_get_list(svid))
     else:

@@ -918,6 +918,30 @@ main database with the series, so give ``--own`` with ``--draft-reply`` and
 Without either, it is the latest version which has a link, since that is the
 one people comment on. The series' upstream is used unless ``-U`` is given.
 
+``--list-comments`` lists the comments on the series, for a tool to read, as a
+JSON list with an object for each comment::
+
+    patman review --own -s dt-forest -V 3 --list-comments
+
+=============== ===============================================================
+Field           Meaning
+=============== ===============================================================
+``seq``         Patch which the comment is about, 0 for the cover letter
+``id``          ID of the comment, as ``--respond-comment`` takes it
+``msgid``       Message-ID of the comment, e.g. ``<1234@x.com>``
+``in_reply_to`` Message-ID which the comment replies to, or ``null``
+``sender``      Who sent the comment, as ``Name <email>``
+``date``        When the comment was sent
+``subject``     Subject of the comment
+``own``         ``true`` if you sent the comment
+``body``        Text of the comment, including what it quotes
+``reply``       Your reply to the comment, if one is recorded, with its ``id``
+                (as ``--draft-reply`` takes it) and ``status`` (``new``,
+                ``suggested``, ``skip``, ``draft`` or ``sent``), else ``null``
+=============== ===============================================================
+
+This works without ``--own`` too, for a series you reviewed.
+
 Stats
 ~~~~~
 

@@ -1284,6 +1284,9 @@ def do_review(args, pwork, cser, own_db=None):
     if getattr(args, 'checkout', False):
         return checkout.do_checkout(args, pwork, cser, link)
 
+    if getattr(args, 'list_comments', False):
+        return replies.list_comments(args, pwork, cser, link)
+
     if getattr(args, 'respond_comment', None):
         return replies.respond_to_comment(args, pwork, cser, link)
 

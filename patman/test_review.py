@@ -1261,6 +1261,87 @@ class TestReview(CseriesTester):
         self.assertIn('Series fred@x is not one of your own',
                       str(exc.exception))
 
+    def _own_comment_pwork(self):
+        """Set up one of your own series with comments on lore
+
+        Return:
+            tuple:
+                Cseries: Open cseries instance holding the series
+                int: ID of the series version
+                SimpleNamespace: Fake LoreList for the series
+        """
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('forest', 'Merge fragments', None)
+        svid = db.ser_ver_add(sid, 3, link='cover@x')
+        db.pcommit_add_list(svid, [
+            Pcommit(None, seq, f'p{seq}', None, None, None, None, None)
+            for seq in range(2)])
+        db.commit()
+        david = {'name': 'David Gibson', 'email': 'david@x.com'}
+        comments = {
+            'lore:cover@x': [{
+                'id': 'lore:c0@x', 'msgid': '<c0@x>', 'date': '2026-11-07',
+                'subject': 'Re: [PATCH v3 0/2] Merge\n fragments',
+                'submitter': david, 'content': 'Why now?',
+                'headers': {'In-Reply-To': '<cover@x>',
+                            'References': '<cover@x>', 'To': 'sjg@x.com',
+                            'Cc': 'list@x.com'}}],
+            'lore:p1@x': [],
+            'lore:p2@x': [{
+                'id': 'lore:c2@x', 'msgid': '<c2@x>', 'date': '2026-11-08',
+                'subject': 'Re: [PATCH v3 2/2] p1', 'submitter': david,
+                'content': '> +code\n\nPlease split this',
+                'headers': {}}, {
+                'id': 'lore:c3@x', 'msgid': '<c3@x>', 'date': '2026-11-09',
+                'subject': 'Re: [PATCH v3 2/2] p1',
+                'submitter': {'name': 'Simon Glass', 'email': 'sjg@x.com'},
+                'content': 'OK', 'headers': {}}]}
+
+        async def get_series(_client, _link):
+            return {'cover_letter': {'id': 'lore:cover@x'},
+                    'patches': [{'id': 'lore:p1@x'}, {'id': 'lore:p2@x'}]}
+
+        async def get_comments(_client, item_id):
+            return comments[item_id]
+
+        pwork = types.SimpleNamespace(get_series=get_series,
+                                      get_cover_comments=get_comments,
+                                      get_patch_comments=get_comments)
+        return cser, svid, pwork
+
+    def test_list_comments(self):
+        """--list-comments gives the comments on a series as JSON"""
+        cser, svid, pwork = self._own_comment_pwork()
+        cser.db.reply_add_comment(svid, 2, 'lore:c2@x', '<c2@x>', '', '', '',
+                                  '', '', '', '', '')
+        cser.db.commit()
+        args = cmdline.parse_args(
+            ['review', '-s', 'cover@x', '--own', '--list-comments',
+             '--reviewer', 'Simon Glass <sjg@x.com>'], config_fname=False)
+        with terminal.capture() as (out, _):
+            self.assertEqual(0, review.replies.list_comments(
+                args, pwork, cser, 'cover@x'))
+        cover, patch, own = json.loads(out.getvalue())
+        self.assertEqual(
+            {'seq': 0, 'id': 'lore:c0@x', 'msgid': '<c0@x>',
+             'in_reply_to': '<cover@x>',
+             'sender': 'David Gibson <david@x.com>', 'date': '2026-11-07',
+             'subject': 'Re: [PATCH v3 0/2] Merge fragments', 'own': False,
+             'body': 'Why now?', 'reply': None}, cover)
+        self.assertEqual((2, 'lore:c2@x', None, '> +code\n\nPlease split this'),
+                         (patch['seq'], patch['id'], patch['in_reply_to'],
+                          patch['body']))
+        rep, = cser.db.reply_get_comments(svid)
+        self.assertEqual({'id': rep.idnum, 'status': 'new'}, patch['reply'])
+        self.assertEqual(('lore:c3@x', True), (own['id'], own['own']))
+
+        # The series must be one of your own
+        with self.assertRaises(ValueError) as exc:
+            review.replies.list_comments(args, pwork, cser, 'other@x')
+        self.assertIn('Series other@x is not one of your own',
+                      str(exc.exception))
+
     def test_find_own_series(self):
         """With --own, -s can give one of your own series by name"""
         cser = self.get_database()

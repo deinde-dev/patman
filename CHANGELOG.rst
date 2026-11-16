@@ -22,6 +22,9 @@ Added
 - ``patman review --own`` takes the name of one of your own series with
   ``-s``, e.g. ``-s dt-forest -V 3``, as well as its link. Without ``-V``,
   it uses the latest version which has a link.
+- ``patman review --list-comments`` lists the comments on a series as JSON,
+  with the patch each is about, its IDs, sender and text, and any reply to
+  it, so that a tool can work out what to reply to.
 
 0.8.0 - 2026-11-10
 ------------------

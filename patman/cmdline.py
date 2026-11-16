@@ -897,6 +897,10 @@ def _add_reply_args(review):
              "'lore:<msgid>' for a list on lore; use -i to say which patch "
              'it is about, with 0 for the cover letter')
     review.add_argument(
+        '--list-comments', action='store_true',
+        help='List the comments on a series, with their IDs for '
+             '--respond-comment, as JSON')
+    review.add_argument(
         '--own', action='store_true',
         help='The comment is on one of your own series: with '
              '--respond-comment, reply as its author; the reply is kept in '
