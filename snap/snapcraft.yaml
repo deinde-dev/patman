@@ -47,6 +47,7 @@ apps:
       - dot-patman
       - dot-gitconfig
       - password-manager-service
+      - ssh-keys
 plugs:
   dot-patman:
     interface: personal-files

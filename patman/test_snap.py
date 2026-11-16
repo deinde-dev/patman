@@ -170,3 +170,43 @@ class TestSnap(unittest.TestCase):
         self.git_config('credential.helper', 'no-such-helper')
         self.git_config('sendemail.smtpPass', 'secret')
         self.assertIsNone(self.check_send())
+
+    def test_is_ssh(self):
+        """Remotes reached with ssh are recognised"""
+        for url in ('git@github.com:me/repo.git', 'host:repo',
+                    'ssh://git@host/repo', 'git+ssh://host/repo'):
+            self.assertTrue(snap.is_ssh(url), url)
+        for url in ('https://github.com/me/repo', '/srv/repo.git',
+                    './a:b', 'file:///srv/repo', 'git://host/repo'):
+            self.assertFalse(snap.is_ssh(url), url)
+
+    def test_push_hint(self):
+        """A failed push over ssh says what the snap cannot do"""
+        self.git_config('remote.us.url', 'git@host:repo.git')
+        self.git_config('remote.web.url', 'https://host/repo.git')
+        with mock.patch('patman.snap._is_connected', return_value=False):
+            self.assertIn("connect its ssh-keys interface with 'sudo snap "
+                          "connect patman:ssh-keys'",
+                          snap.push_hint('us', '', self.repo))
+            self.assertIsNone(snap.push_hint('web', '', self.repo))
+
+            # A push URL is used in preference
+            self.git_config('remote.web.pushurl', 'git@host:repo.git')
+            self.assertIn('ssh-keys', snap.push_hint('web', '', self.repo))
+
+        with mock.patch('patman.snap._is_connected', return_value=True):
+            self.assertIn('cannot add a host to ~/.ssh/known_hosts',
+                          snap.push_hint('us', 'Host key verification '
+                                         'failed.', self.repo))
+            denied = 'git@host: Permission denied (publickey).'
+            with mock.patch.dict(os.environ, {'SSH_AUTH_SOCK': '/run/a'}):
+                self.assertIn('cannot reach your ssh agent',
+                              snap.push_hint('us', denied, self.repo))
+            with mock.patch.dict(os.environ):
+                os.environ.pop('SSH_AUTH_SOCK', None)
+                self.assertIsNone(snap.push_hint('us', denied, self.repo))
+            self.assertIsNone(snap.push_hint('us', 'other', self.repo))
+
+        # Outside the snap, nothing is added
+        self.set_confinement('classic')
+        self.assertIsNone(snap.push_hint('us', '', self.repo))

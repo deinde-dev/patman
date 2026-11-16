@@ -37,6 +37,9 @@ PLUGS = (
 # desktop's keyring
 KEYRING_PLUG = 'password-manager-service'
 
+# The snap's interface which lets ssh read the user's keys and settings
+SSH_PLUG = 'ssh-keys'
+
 # Reported when an agent is needed, since the snap leaves out the Claude Agent
 # SDK and Claude Code
 NO_AGENT = ('The patman snap does not include the review agent; install '
@@ -294,3 +297,54 @@ def check_send(identity, smtp_server, cwd):
         return
     _check_editor(cwd)
     _check_smtp(identity, smtp_server, cwd)
+
+
+def is_ssh(url):
+    """Check whether a git URL uses ssh
+
+    Args:
+        url (str): URL of a remote, e.g. 'git@github.com:me/repo.git'
+
+    Returns:
+        bool: True if git reaches it with ssh
+    """
+    if url.startswith(('ssh://', 'git+ssh://', 'ssh+git://')):
+        return True
+    # The scp-like form, host:path, with no '/' before the colon
+    if '://' in url or url.startswith('/'):
+        return False
+    return ':' in url.split('/', 1)[0]
+
+
+def push_hint(remote, stderr, cwd):
+    """Say why the snap may have failed to push to a remote over ssh
+
+    Args:
+        remote (str): Name of the remote, e.g. 'origin'
+        stderr (str): Output from git push
+        cwd (str or None): Directory to run git in
+
+    Returns:
+        str or None: Explanation, or None if patman is not in a strict snap,
+            the remote does not use ssh, or there is nothing to add
+    """
+    if not is_strict():
+        return None
+    urls = _git_config(f'remote.{remote}.pushurl', cwd) or _git_config(
+        f'remote.{remote}.url', cwd)
+    if not urls or not is_ssh(urls[-1]):
+        return None
+    if not _is_connected(SSH_PLUG):
+        return str(limit('The patman snap cannot run ssh to push: connect its '
+                         f"{SSH_PLUG} interface with 'sudo snap connect "
+                         f"patman:{SSH_PLUG}'"))
+    if 'Host key verification failed' in stderr:
+        return str(limit('The patman snap cannot add a host to '
+                         '~/.ssh/known_hosts: connect to it once with ssh '
+                         'from outside the snap'))
+    if 'Permission denied (publickey' in stderr and os.environ.get(
+            'SSH_AUTH_SOCK'):
+        return str(limit('The patman snap cannot reach your ssh agent, so ssh '
+                         'can only use key files in ~/.ssh: use an https '
+                         'remote, or a key file'))
+    return None
