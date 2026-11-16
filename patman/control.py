@@ -705,6 +705,10 @@ def do_review(args, test_db=None, pwork=None, cser=None):
     try:
         cser.open_database()
 
+        # Your own series can be given by name
+        if getattr(args, 'own', False):
+            review_mod.replies.find_own_series(args, cser)
+
         # Resolve patchwork URL
         if not pwork and not args.learn_voice and not args.sync \
                 and not args.relink \

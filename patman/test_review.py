@@ -319,6 +319,23 @@ class TestReview(CseriesTester):
         self.assertEqual(os.path.join(self.tmpdir, '.patman.db'),
                          seen['path'])
 
+        # Your own series can be given by name
+        cser = cseries.Cseries(self.tmpdir)
+        cser.open_database()
+        sid = cser.db.series_add('forest', 'Merge fragments', 'us')
+        cser.db.ser_ver_add(sid, 1, link='v1@x')
+        cser.db.commit()
+        cser.close_database()
+        args = cmdline.parse_args(['review', '--own', '-s', 'forest',
+                                   '--respond-comment', '5', '-i', '1'],
+                                  config_fname=False)
+        with mock.patch.object(review, 'do_review',
+                               side_effect=lambda args, pwork, cser:
+                               seen.update(link=args.pw_link,
+                                           ups=args.upstream)):
+            control.do_review(args, self.tmpdir, pwork=mock.MagicMock())
+        self.assertEqual(('v1@x', 'us'), (seen['link'], seen['ups']))
+
     # pylint: disable-next=R0911
     def _fake_patchwork_review(self, subpath):
         """Fake Patchwork server for review tests
@@ -1242,6 +1259,46 @@ class TestReview(CseriesTester):
         with self.assertRaises(ValueError) as exc:
             run('fred@x', '--own', '-i', '1')
         self.assertIn('Series fred@x is not one of your own',
+                      str(exc.exception))
+
+    def test_find_own_series(self):
+        """With --own, -s can give one of your own series by name"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('forest', 'Merge fragments', 'us')
+        for ver, link in ((1, 'v1@x'), (2, 'v2@x'), (3, None)):
+            db.ser_ver_add(sid, ver, link=link)
+        db.ser_ver_add(db.series_add('rk3399', 'Board', None), 1, link='rk@x')
+        db.commit()
+
+        def find(*argv):
+            args = cmdline.parse_args(['review', '--own', *argv],
+                                      config_fname=False)
+            review.replies.find_own_series(args, cser)
+            return args.pw_link, args.upstream
+
+        # The latest version with a link, and the series' upstream
+        self.assertEqual(('v2@x', 'us'), find('-s', 'forest'))
+        self.assertEqual(('v1@x', 'us'), find('-s', 'forest', '-V', '1'))
+        self.assertEqual(('v1@x', 'us'), find('-s', 'forest1'))
+        self.assertEqual(('v2@x', 'ups'), find('-s', 'forest', '-U', 'ups'))
+        self.assertEqual(('rk@x', None), find('-s', 'rk3399'))
+
+        # A link is left alone
+        self.assertEqual(('123', None), find('-s', '123'))
+        self.assertEqual(('c@x', None), find('-s', 'c@x'))
+
+        with self.assertRaises(ValueError) as exc:
+            find('-s', 'forest', '-V', '3')
+        self.assertIn("Series 'forest' v3 has no link", str(exc.exception))
+        with self.assertRaises(ValueError) as exc:
+            find('-s', 'oak')
+        self.assertIn("No series named 'oak'", str(exc.exception))
+        db.ser_ver_add(db.series_add('elm', 'Tree', None), 1)
+        db.commit()
+        with self.assertRaises(ValueError) as exc:
+            find('-s', 'elm')
+        self.assertIn("Series 'elm' has no version with a link",
                       str(exc.exception))
 
     def test_handle_comment_own(self):

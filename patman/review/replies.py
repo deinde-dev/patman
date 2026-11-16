@@ -27,6 +27,7 @@ from u_boot_pylib import tout
 
 from patman import database
 from patman import gmail
+from patman import patchstream
 from patman import settings
 from patman.review import common
 from patman.review import discuss
@@ -780,6 +781,50 @@ def _find_comment(pwork, link, seq, comment_id):
         raise ValueError(f'There is no comment {comment_id} on {item.what} '
                          f'of series {link}')
     return item, comment, [c for c in comments if c is not comment]
+
+
+def find_own_series(args, cser):
+    """Look up one of your own series given by name with -s
+
+    With --own, -s may give the name of the series, as for 'patman series',
+    rather than its link. A version given with -V, or at the end of the name
+    (e.g. 'forest3'), is used; otherwise it is the latest version which has
+    a link, since that is the one people comment on. Unless -U is given,
+    the series' own upstream is used.
+
+    Args:
+        args (Namespace): Command-line arguments (uses pw_link, version and
+            upstream); pw_link is set to the link and upstream to the
+            series' upstream, if it has one
+        cser (Cseries): Open cseries instance holding your own series
+
+    Raises:
+        ValueError: There is no such series, or the version has no link
+    """
+    link = args.pw_link
+    if not link or '@' in link or '/' in link or link.isdigit():
+        return
+    # The name may itself end in digits, e.g. 'rk3399'
+    name, version = link, None
+    idnum = cser.db.series_find_by_name(name, True)
+    if not idnum:
+        name, version = patchstream.split_name_version(link)
+        idnum = cser.db.series_find_by_name(name, True)
+    if not idnum:
+        raise ValueError(f"No series named '{name}'")
+    version = args.version or version
+    if not version:
+        version = next(
+            (ver for ver in range(cser.db.series_get_max_version(idnum), 0,
+                                  -1)
+             if cser.db.ser_ver_get_link(idnum, ver)), None)
+        if not version:
+            raise ValueError(f"Series '{name}' has no version with a link")
+    link = cser.db.ser_ver_get_link(idnum, version)
+    if not link:
+        raise ValueError(f"Series '{name}' v{version} has no link")
+    args.pw_link = link
+    args.upstream = args.upstream or cser.db.series_get_info(idnum)[2]
 
 
 def respond_to_comment(args, pwork, cser, link):

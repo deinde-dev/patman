@@ -903,6 +903,21 @@ The response can also be edited, drafted and sent from the Reviews tab of
 ``patman serve``: tap 'Send' under it, or 'Edit response' then 'Save and
 send'. Both need a second tap to confirm.
 
+Replying to comments on your own series
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Add ``--own`` to reply to a comment on one of your own series, as its author.
+The agent reads the code on the series' branch, and the reply is kept in the
+main database with the series, so give ``--own`` with ``--draft-reply`` and
+``--send-reply`` too. With ``--own``, ``-s`` can give the series' name, as for
+``patman series``, rather than its link::
+
+    patman review --own -s dt-forest -V 3 --respond-comment lore:1234@x.com -i 2
+
+``-V`` or a number at the end of the name (``dt-forest3``) gives the version.
+Without either, it is the latest version which has a link, since that is the
+one people comment on. The series' upstream is used unless ``-U`` is given.
+
 Stats
 ~~~~~
 

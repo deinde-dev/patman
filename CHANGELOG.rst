@@ -19,6 +19,9 @@ Added
   says whether the interface is not connected, the host is not in
   ``~/.ssh/known_hosts`` or the key is only in your ssh agent, which the
   snap cannot reach.
+- ``patman review --own`` takes the name of one of your own series with
+  ``-s``, e.g. ``-s dt-forest -V 3``, as well as its link. Without ``-V``,
+  it uses the latest version which has a link.
 
 0.8.0 - 2026-11-10
 ------------------

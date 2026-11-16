@@ -923,15 +923,16 @@ def add_review_subparser(subparsers):
     review.add_argument(
         '-s', '--series', type=str, dest='pw_link',
         help='Patchwork series link/ID number, or the Message-ID of a '
-             'series on lore')
+             'series on lore; with --own, also the name of the series')
     review.add_argument(
         '-S', '--series-title', type=str, dest='title',
         help='Search for a series by cover-letter title, on patchwork or '
              'else on lore')
     review.add_argument(
         '-V', '--version', type=int, default=None,
-        help='Series version to review when searching by title (-S); '
-             'defaults to the most recent')
+        help='Series version to review when searching by title (-S), or '
+             'of your own series given by name with --own; defaults to the '
+             'most recent')
     review.add_argument(
         '-p', '--patch', type=int,
         help='Patchwork patch ID (finds the series and reviews just '
