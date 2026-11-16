@@ -148,6 +148,17 @@ class TestSnap(unittest.TestCase):
                       self.check_send())
         self.git_config('credential.helper', 'store')
         self.assertIsNone(self.check_send())
+
+        # libsecret needs the snap's interface to the keyring
+        self.git_config('credential.helper', 'libsecret')
+        with mock.patch('patman.snap._git_helper', return_value=True):
+            with mock.patch('patman.snap._is_connected', return_value=False):
+                self.assertIn("connect its password-manager-service "
+                              "interface with 'sudo snap connect "
+                              "patman:password-manager-service'",
+                              self.check_send())
+            with mock.patch('patman.snap._is_connected', return_value=True):
+                self.assertIsNone(self.check_send())
         self.git_config('credential.helper', 'cache --timeout=600')
         self.assertIsNone(self.check_send())
         self.git_config('credential.helper', '!no-such-helper get')

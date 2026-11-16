@@ -33,6 +33,9 @@ PLUGS = (
     ('.config/git', 'dot-gitconfig'),
 )
 
+# The snap's interface which lets the libsecret credential helper reach the
+# desktop's keyring
+KEYRING_PLUG = 'password-manager-service'
 
 # Reported when an agent is needed, since the snap leaves out the Claude Agent
 # SDK and Claude Code
@@ -135,6 +138,23 @@ def check_setup():
     if is_strict():
         _check_cwd()
         _check_plugs()
+
+
+def _is_connected(plug):
+    """Check whether one of the snap's interfaces is connected
+
+    Args:
+        plug (str): Name of the snap's plug, e.g. 'password-manager-service'
+
+    Returns:
+        bool: True if it is connected
+    """
+    try:
+        res = subprocess.run(['snapctl', 'is-connected', plug],
+                             capture_output=True, check=False)
+    except FileNotFoundError:
+        return False
+    return res.returncode == 0
 
 
 def _git_config(key, cwd):
@@ -250,6 +270,11 @@ def _check_smtp(identity, smtp_server, cwd):
                         'patman snap cannot run programs from the host. Set '
                         'credential.helper to libsecret, store or cache, or '
                         'set sendemail.smtpPass')
+        if helper == 'libsecret' and not _is_connected(KEYRING_PLUG):
+            raise limit('The patman snap cannot reach your keyring, which '
+                        'git send-email asks for your SMTP password: connect '
+                        f"its {KEYRING_PLUG} interface with 'sudo snap "
+                        f"connect patman:{KEYRING_PLUG}'")
 
 
 def check_send(identity, smtp_server, cwd):

@@ -8,6 +8,13 @@ the project follows `Semantic Versioning <https://semver.org/>`_.
 Unreleased
 ----------
 
+Added
+~~~~~
+- The snap brings git's ``libsecret`` credential helper, so that ``git
+  send-email`` can find your SMTP password in your desktop's keyring once
+  the snap's ``password-manager-service`` interface is connected. patman
+  says so if it is not.
+
 0.8.0 - 2026-11-10
 ------------------
 
