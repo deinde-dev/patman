@@ -931,6 +931,31 @@ def list_comments(args, pwork, cser, link):
     return 0
 
 
+def _record_comment(cser, svid, seq, comment):
+    """Record a comment which we may respond to, with its headers
+
+    Args:
+        cser (Cseries): Open cseries instance holding the replies
+        svid (int): ID of the series version which the comment is about
+        seq (int): Patch which the comment is about, 0 for the cover letter
+        comment (dict): The comment
+
+    Return:
+        int: ID of the reply record holding the comment
+    """
+    hdrs = comment.get('headers') or {}
+    sub = comment.get('submitter') or {}
+    return cser.db.reply_add_comment(
+        svid, seq, comment['id'], comment.get('msgid'),
+        _unfold(gmail.get_header(hdrs, 'References')),
+        formataddr((sub.get('name') or '', sub.get('email') or '')),
+        _unfold(gmail.get_header(hdrs, 'To')),
+        _unfold(gmail.get_header(hdrs, 'Cc')),
+        _unfold(comment.get('subject')),
+        _unfold(gmail.get_header(hdrs, 'Date')) or comment.get('date'),
+        comment.get('content'), datetime.now().isoformat())
+
+
 def respond_to_comment(args, pwork, cser, link):
     """Have the agent suggest a response to a comment on patchwork
 
@@ -972,17 +997,8 @@ def respond_to_comment(args, pwork, cser, link):
         (rev.body for rev in cser.db.review_get_for_version(svid)
          if rev.seq == seq), None)
 
-    hdrs = comment.get('headers') or {}
     sub = comment.get('submitter') or {}
-    reply_id = cser.db.reply_add_comment(
-        svid, seq, comment['id'], comment.get('msgid'),
-        _unfold(gmail.get_header(hdrs, 'References')),
-        formataddr((sub.get('name') or '', sub.get('email') or '')),
-        _unfold(gmail.get_header(hdrs, 'To')),
-        _unfold(gmail.get_header(hdrs, 'Cc')),
-        _unfold(comment.get('subject')),
-        _unfold(gmail.get_header(hdrs, 'Date')) or comment.get('date'),
-        comment.get('content'), datetime.now().isoformat())
+    reply_id = _record_comment(cser, svid, seq, comment)
     cser.commit()
 
     ctx = _make_reply_ctx(args, cser)
