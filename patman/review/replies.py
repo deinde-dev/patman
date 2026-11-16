@@ -18,6 +18,7 @@ from email.utils import (formataddr, getaddresses, parseaddr,
                          parsedate_to_datetime)
 import json
 import os
+import sys
 import tempfile
 from types import SimpleNamespace
 
@@ -928,6 +929,155 @@ def list_comments(args, pwork, cser, link):
             'reply': ({'id': rep.idnum, 'status': rep.status} if rep
                       else None)})
     print(json.dumps(out, indent=2))
+    return 0
+
+
+def _read_replies(fname):
+    """Read the replies to import, from a JSON file
+
+    Args:
+        fname (str): File holding a JSON list of objects, each with the
+            'comment' replied to and the reply's 'body', or '-' for stdin
+
+    Return:
+        list of tuple:
+            str: The comment, by its ID or Message-ID
+            str: Body of the reply
+
+    Raises:
+        ValueError: The file is not a list of replies
+    """
+    if fname == '-':
+        text = sys.stdin.read()
+    else:
+        with open(fname, encoding='utf-8') as inf:
+            text = inf.read()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f'{fname} is not valid JSON: {exc}') from exc
+    if not isinstance(data, list):
+        raise ValueError(f'{fname} must hold a list of replies')
+    found = []
+    for num, item in enumerate(data):
+        if (not isinstance(item, dict) or not item.get('comment') or
+                not isinstance(item.get('body'), str) or
+                not item['body'].strip()):
+            raise ValueError(f"Reply {num} in {fname} needs a 'comment' and "
+                             "a 'body'")
+        found.append((str(item['comment']), item['body']))
+    return found
+
+
+def _comment_keys(comment):
+    """Get the ways in which a comment can be referred to
+
+    Args:
+        comment (dict): The comment
+
+    Return:
+        list of str: Its ID, and its Message-ID with and without angle
+            brackets
+    """
+    keys = [str(comment.get('id'))]
+    msgid = comment.get('msgid')
+    if msgid:
+        bare = msgid.strip().strip('<>')
+        keys += [bare, f'<{bare}>']
+    return keys
+
+
+def _format_import(ctx, comment, body):
+    """Format a reply given by the caller as a response to a comment
+
+    It has a greeting, the attribution of the comment and the signoff around
+    it, as for a response which the agent writes
+
+    Args:
+        ctx (ReviewContext): Context for replies, from _make_reply_ctx()
+        comment (dict): The comment replied to
+        body (str): Text of the reply, perhaps with lines quoted from the
+            comment
+
+    Return:
+        str: Response
+    """
+    sub = comment.get('submitter') or {}
+    reply_ctx = common.ReviewContext(None, ctx.cser, {
+        'submitter': {'name': sub.get('name') or '',
+                      'email': sub.get('email') or ''},
+        'date': comment.get('date') or ''})
+    reply_ctx.signoff = ctx.signoff
+    name = (sub.get('name') or '').split()
+    greeting = name[0] if name and '@' not in name[0] else ''
+    return emails.fix_dashes(
+        emails.format_review_email(reply_ctx, greeting, 'changes_needed',
+                                   [('', body.strip('\n').rstrip())]),
+        ctx.em_dash)
+
+
+def import_replies(args, pwork, cser, link):
+    """Store replies to comments on a series, as given in a file
+
+    This is for replies written outside patman, e.g. by a Claude session
+    working on the next version of the series. Each is stored as the
+    suggested response to its comment, as if the agent had suggested it
+    with --respond-comment, so that it can be changed, drafted and sent in
+    the same way. A suggested response is replaced, but one which has been
+    drafted or sent, or which was skipped, is left alone.
+
+    Args:
+        args (Namespace): Command-line arguments (uses import_replies, own
+            and create_drafts)
+        pwork (Patchwork or LoreList): Where the series comes from
+        cser (Cseries): Open cseries instance holding the reviews, or your
+            own series with --own
+        link (str): Patchwork series link/ID, or Message-ID on lore
+
+    Returns:
+        int: 0 on success, 1 on failure
+
+    Raises:
+        ValueError: The series has not been reviewed, or is not your own
+            with --own, the file is not valid or a comment cannot be found
+    """
+    svid = _comment_series(args, cser, link)[2]
+    wanted = _read_replies(args.import_replies)
+    by_key = {}
+    for seq, cmt in _series_comments(pwork, link):
+        for key in _comment_keys(cmt):
+            by_key[key] = (seq, cmt)
+    missing = [key for key, _ in wanted if key not in by_key]
+    if missing:
+        raise ValueError(f'Series {link} has no comment {missing[0]}')
+
+    ctx = _make_reply_ctx(args, cser)
+    existing = {rep.comment_id: rep for rep in cser.db.reply_get_comments(svid)}
+    stored = []
+    for key, body in wanted:
+        seq, cmt = by_key[key]
+        rep = existing.get(cmt['id'])
+        if rep and rep.status not in database.REPLY_WAITING:
+            tout.notice(f"Reply {rep.idnum}: left alone, since its status is "
+                        f"'{rep.status}' (comment {cmt['id']})")
+            continue
+        reply_id = _record_comment(cser, svid, seq, cmt)
+        cser.db.reply_set_response(reply_id, _format_import(ctx, cmt, body),
+                                   database.REPLY_SUGGESTED)
+        what = f'patch {seq}' if seq else 'the cover letter'
+        tout.notice(f"Reply {reply_id}: response stored for comment "
+                    f"{cmt['id']} on {what}")
+        stored.append(reply_id)
+    cser.commit()
+    tout.notice(f"{len(stored)} of {len(wanted)} "
+                f"repl{'y' if len(wanted) == 1 else 'ies'} stored")
+    if stored and args.create_drafts:
+        if not gmail.check_available():
+            return 1
+        account = getattr(args, 'gmail_account', None)
+        service = gmail.get_service(account)
+        for reply_id in stored:
+            _draft_response(service, ctx, reply_id, account)
     return 0
 
 

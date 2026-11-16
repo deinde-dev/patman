@@ -1287,6 +1287,9 @@ def do_review(args, pwork, cser, own_db=None):
     if getattr(args, 'list_comments', False):
         return replies.list_comments(args, pwork, cser, link)
 
+    if getattr(args, 'import_replies', None):
+        return replies.import_replies(args, pwork, cser, link)
+
     if getattr(args, 'respond_comment', None):
         return replies.respond_to_comment(args, pwork, cser, link)
 

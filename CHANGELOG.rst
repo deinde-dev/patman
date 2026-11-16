@@ -25,6 +25,10 @@ Added
 - ``patman review --list-comments`` lists the comments on a series as JSON,
   with the patch each is about, its IDs, sender and text, and any reply to
   it, so that a tool can work out what to reply to.
+- ``patman review --import-replies`` stores replies to comments on a series,
+  written outside patman and given in a JSON file, as if the agent had
+  suggested them, so that they can be checked, drafted and sent from
+  ``patman serve``. A response already drafted or sent is left alone.
 
 0.8.0 - 2026-11-10
 ------------------

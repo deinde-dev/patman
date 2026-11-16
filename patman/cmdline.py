@@ -901,6 +901,11 @@ def _add_reply_args(review):
         help='List the comments on a series, with their IDs for '
              '--respond-comment, as JSON')
     review.add_argument(
+        '--import-replies', type=str, metavar='FILE',
+        help='Store responses to comments on a series, as written in FILE '
+             "(JSON), or '-' for stdin, without asking the agent; with -d, "
+             'draft them too')
+    review.add_argument(
         '--own', action='store_true',
         help='The comment is on one of your own series: with '
              '--respond-comment, reply as its author; the reply is kept in '

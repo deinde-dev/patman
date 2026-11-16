@@ -1342,6 +1342,89 @@ class TestReview(CseriesTester):
         self.assertIn('Series other@x is not one of your own',
                       str(exc.exception))
 
+    def test_import_replies(self):
+        """--import-replies stores responses written outside patman"""
+        cser, svid, pwork = self._own_comment_pwork()
+        db = cser.db
+        fname = os.path.join(self.tmpdir, 'replies.json')
+
+        def run(replies, *argv):
+            tools.write_file(fname, replies if isinstance(replies, str)
+                             else json.dumps(replies), binary=False)
+            args = cmdline.parse_args(
+                ['review', '-s', 'cover@x', '--own', '--import-replies',
+                 fname, '--reviewer', 'Simon Glass <sjg@x.com>',
+                 '--signoff', 'Regards,\\nSimon', *argv],
+                config_fname=False)
+            with terminal.capture() as (out, _):
+                ret = review.replies.import_replies(args, pwork, cser,
+                                                    'cover@x')
+            return ret, out.getvalue()
+
+        # A comment can be given by its ID or its Message-ID
+        ret, out = run([
+            {'comment': 'lore:c2@x',
+             'body': '> Please split this\n\nDone in v4 \u2014 thanks\n'},
+            {'comment': '<c0@x>', 'body': 'To fix the bug'}])
+        self.assertEqual(0, ret)
+        self.assertIn('response stored for comment lore:c2@x on patch 2', out)
+        self.assertIn('2 of 2 replies stored', out)
+        patch, cover = db.reply_get_comments(svid)
+        self.assertEqual(
+            (2, 'lore:c2@x', '<c2@x>', 'David Gibson <david@x.com>',
+             'suggested'),
+            (patch.seq, patch.comment_id, patch.msgid, patch.sender,
+             patch.status))
+        self.assertEqual(
+            'Hi David,\n\n'
+            'On 2026-11-08, David Gibson <david@x.com> wrote:\n\n'
+            '> Please split this\n\nDone in v4 - thanks\n\n'
+            'Regards,\nSimon\n', patch.response)
+
+        # The headers are kept, for threading the response
+        self.assertEqual(
+            (0, '<cover@x>', 'sjg@x.com', 'list@x.com',
+             'Re: [PATCH v3 0/2] Merge fragments'),
+            (cover.seq, cover.refs, cover.to_addrs, cover.cc_addrs,
+             cover.subject))
+        self.assertIn('wrote:\n\nTo fix the bug\n\n', cover.response)
+
+        # Importing again replaces a suggestion, but not a draft
+        db.reply_set_status(cover.idnum, database.REPLY_DRAFT, 'd1')
+        db.commit()
+        ret, out = run([{'comment': 'c2@x', 'body': 'Now in v4'},
+                        {'comment': 'lore:c0@x', 'body': 'Changed'}])
+        self.assertIn(f"Reply {cover.idnum}: left alone, since its status is "
+                      "'draft'", out)
+        self.assertIn('1 of 2 replies stored', out)
+        patch, cover = db.reply_get_comments(svid)
+        self.assertIn('Now in v4', patch.response)
+        self.assertIn('To fix the bug', cover.response)
+
+        # Nothing is stored if a comment cannot be found
+        with self.assertRaises(ValueError) as exc:
+            run([{'comment': 'lore:c2@x', 'body': 'Again'},
+                 {'comment': 'lore:c9@x', 'body': 'Hmm'}])
+        self.assertIn('Series cover@x has no comment lore:c9@x',
+                      str(exc.exception))
+        self.assertIn('Now in v4', db.reply_get_comments(svid)[0].response)
+
+        for bad, msg in (('{', 'is not valid JSON'),
+                         ({'comment': 'c2@x', 'body': 'x'},
+                          'must hold a list of replies'),
+                         ([{'comment': 'c2@x'}], "Reply 0 in"),
+                         ([{'comment': 'c2@x', 'body': ' '}], "Reply 0 in")):
+            with self.assertRaises(ValueError) as exc:
+                run(bad)
+            self.assertIn(msg, str(exc.exception))
+
+        # With -d the responses are drafted
+        with mock.patch.object(gmail, 'check_available', return_value=True), \
+                mock.patch.object(gmail, 'get_service'), \
+                mock.patch.object(review.replies, '_draft_response') as draft:
+            run([{'comment': 'c2@x', 'body': 'Drafted'}], '-d')
+        self.assertEqual(patch.idnum, draft.call_args.args[2])
+
     def test_find_own_series(self):
         """With --own, -s can give one of your own series by name"""
         cser = self.get_database()

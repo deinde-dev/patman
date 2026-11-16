@@ -942,6 +942,43 @@ Field           Meaning
 
 This works without ``--own`` too, for a series you reviewed.
 
+Importing replies
+~~~~~~~~~~~~~~~~~
+
+If the replies are already written, e.g. by a Claude session which works on
+the next version of the series and knows what was changed for each comment,
+``--import-replies`` stores them without asking the agent::
+
+    patman review --own -s dt-forest -V 3 --import-replies replies.json
+
+The file holds a JSON list, with an object for each reply giving the
+``comment`` it replies to, by its ``id`` or ``msgid`` from
+``--list-comments``, and the reply's ``body``. Use ``-`` to read the list from
+stdin::
+
+    [
+      {"comment": "lore:20261107.1234@gibson.dropbear.id.au",
+       "body": "> Please split this patch\n\nDone in v4.\n"},
+      {"comment": "<20261108.5678@gibson.dropbear.id.au>",
+       "body": "I'd rather leave that for a follow-up, since ..."}
+    ]
+
+The body may quote lines from the comment, with ``>``, between the answers.
+patman adds the greeting, a line saying who wrote the comment and when, and
+your ``signoff``, as for a response which the agent writes, and threads it as
+a reply to the comment, to the person who made it, copied to everyone it went
+to.
+
+Each reply is stored as the suggested response to its comment, as with
+``--respond-comment``, so that it can be changed, drafted and sent from
+``patman serve``, or with ``--draft-reply`` and ``--send-reply``. Nothing is
+drafted or sent unless ``-d`` is given, which drafts each stored response in
+Gmail. If any comment cannot be found, nothing is stored.
+
+Importing again replaces the suggested response, including any change made to
+it on the page, but leaves alone a response which has been drafted or sent, or
+a comment marked as needing none.
+
 Stats
 ~~~~~
 
