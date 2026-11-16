@@ -139,13 +139,15 @@ class TestSnap(unittest.TestCase):
     def test_check_send_credential(self):
         """A credential helper which the snap cannot run is reported"""
         self.git_config('sendemail.smtpServer', 'smtp.example.com')
-        self.git_config('credential.helper', 'libsecret')
+        self.git_config('credential.helper', 'no-such-helper')
         # Without an SMTP user, no password is needed
         self.assertIsNone(self.check_send())
 
         self.git_config('sendemail.smtpUser', 'me')
-        self.assertIn("Cannot run the credential helper 'libsecret'",
+        self.assertIn("Cannot run the credential helper 'no-such-helper'",
                       self.check_send())
+        self.git_config('credential.helper', 'store')
+        self.assertIsNone(self.check_send())
         self.git_config('credential.helper', 'cache --timeout=600')
         self.assertIsNone(self.check_send())
         self.git_config('credential.helper', '!no-such-helper get')
@@ -154,6 +156,6 @@ class TestSnap(unittest.TestCase):
         self.assertIsNone(self.check_send())
 
         # With a password, the helper is not used
-        self.git_config('credential.helper', 'libsecret')
+        self.git_config('credential.helper', 'no-such-helper')
         self.git_config('sendemail.smtpPass', 'secret')
         self.assertIsNone(self.check_send())

@@ -33,8 +33,6 @@ PLUGS = (
     ('.config/git', 'dot-gitconfig'),
 )
 
-# Credential helpers which come with git, and so are in the snap
-GIT_HELPERS = ('cache', 'store')
 
 # Reported when an agent is needed, since the snap leaves out the Claude Agent
 # SDK and Claude Code
@@ -168,6 +166,26 @@ def _runnable(cmd):
     return bool(words) and bool(shutil.which(words[0]))
 
 
+def _git_helper(name, cwd):
+    """Check whether git has a credential helper of its own with a name
+
+    git looks for 'git-credential-<name>' in its exec path, where the snap
+    keeps the helpers it brings, as well as on the PATH.
+
+    Args:
+        name (str): Name of the helper, e.g. 'store'
+        cwd (str or None): Directory to run git in
+
+    Returns:
+        bool: True if git can run the helper
+    """
+    prog = f'git-credential-{name}'
+    res = subprocess.run(['git', '--exec-path'], cwd=cwd, capture_output=True,
+                         text=True, check=False)
+    path = os.path.join(res.stdout.strip(), prog)
+    return os.access(path, os.X_OK) or bool(shutil.which(prog))
+
+
 def _check_editor(cwd):
     """Check that git send-email can run the editor
 
@@ -225,14 +243,13 @@ def _check_smtp(identity, smtp_server, cwd):
             ok = _runnable(helper[1:])
         else:
             name = shlex.split(helper)[0]
-            ok = (name in GIT_HELPERS or
-                  _runnable(name if '/' in name else f'git-credential-{name}'))
+            ok = _runnable(name) if '/' in name else _git_helper(name, cwd)
         if not ok:
             raise limit(f"Cannot run the credential helper '{helper}', which "
                         'git send-email asks for your SMTP password: the '
                         'patman snap cannot run programs from the host. Set '
-                        'credential.helper to store or cache, or set '
-                        'sendemail.smtpPass')
+                        'credential.helper to libsecret, store or cache, or '
+                        'set sendemail.smtpPass')
 
 
 def check_send(identity, smtp_server, cwd):

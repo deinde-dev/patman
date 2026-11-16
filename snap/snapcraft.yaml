@@ -46,6 +46,7 @@ apps:
       - network-bind
       - dot-patman
       - dot-gitconfig
+      - password-manager-service
 plugs:
   dot-patman:
     interface: personal-files
@@ -110,6 +111,26 @@ parts:
       ln -sf vim.tiny "$CRAFT_PRIME/usr/bin/vi"
       ln -sf vim.tiny "$CRAFT_PRIME/usr/bin/vim"
       ln -sf nano "$CRAFT_PRIME/usr/bin/editor"
+
+  # Debian and Ubuntu ship the source of git's libsecret credential helper
+  # but not the helper, so build it, so that git send-email can find the
+  # SMTP password in the desktop's keyring
+  libsecret:
+    plugin: nil
+    source: https://github.com/git/git.git
+    source-tag: v2.43.0
+    source-depth: 1
+    build-packages:
+      - gcc
+      - make
+      - libsecret-1-dev
+      - pkg-config
+    stage-packages:
+      - libsecret-1-0
+    override-build: |
+      make -C contrib/credential/libsecret
+      install -D contrib/credential/libsecret/git-credential-libsecret \
+        "$CRAFT_PART_INSTALL/usr/lib/git-core/git-credential-libsecret"
 
   launcher:
     plugin: dump

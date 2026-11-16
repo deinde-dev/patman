@@ -88,10 +88,16 @@ Mail server
 
 Credential helper
     If ``git send-email`` would ask a credential helper for your SMTP
-    password, the helper must be one which comes with git, ``store`` or
-    ``cache``. Helpers such as ``libsecret`` or ``gh`` are not in the snap,
-    so set ``sendemail.smtpPass`` or use ``store`` instead. patman checks
-    this before sending too.
+    password, the helper must be one which the snap has: ``libsecret``,
+    which keeps the password in your desktop's keyring, or ``store`` or
+    ``cache``, which come with git. Helpers such as ``gh`` or
+    ``git-credential-manager`` are not in the snap, so use one of these or
+    set ``sendemail.smtpPass`` instead. ``libsecret`` needs the snap's
+    ``password-manager-service`` interface to reach the keyring::
+
+        sudo snap connect patman:password-manager-service
+
+    patman checks all this before sending too.
 
 Hooks
     Git hooks in your repositories run inside the snap as well, so a hook
