@@ -104,7 +104,9 @@ settings, with::
 
 A strict snap cannot run programs from the host, so the snap brings git,
 ``git send-email`` and the perl modules it needs, perl (for
-``checkpatch.pl``), vim and nano. ``snap/local/launcher`` sets up the
+``checkpatch.pl``), vim and nano. It also builds git's ``libsecret``
+credential helper from git's source, since Ubuntu does not package it.
+``snap/local/launcher`` sets up the
 environment for these, and points ``HOME`` back at the real home directory,
 so that git and patman find their settings. The snap leaves out the review
 extra, since the Claude Code which the Claude Agent SDK bundles would make
