@@ -104,9 +104,22 @@ Hooks
     which runs a program from the host fails.
 
 ssh and gpg
-    The snap cannot read your keys in ``~/.ssh``, so git cannot push over
-    ssh, as ``patman maint`` may when publishing. Use an https remote for
-    pushing. The snap has no gpg, so git cannot sign commits either.
+    ``patman maint`` pushes branches when publishing, and git uses ssh for
+    a remote such as ``git@github.com:me/repo.git``. To let the snap run
+    ssh with your keys and settings in ``~/.ssh``, connect its ``ssh-keys``
+    interface::
+
+        sudo snap connect patman:ssh-keys
+
+    The snap can only read ``~/.ssh``, so it cannot add a host to
+    ``~/.ssh/known_hosts``: connect to a new host once with ssh from
+    outside the snap first. It cannot reach your ssh agent either, so ssh
+    uses the key files in ``~/.ssh``, asking for the passphrase of each if
+    it has one. If your key is only in the agent, such as GNOME's, use an
+    https remote for pushing. patman says which of these is the problem if
+    a push fails.
+
+    The snap has no gpg, so git cannot sign commits.
 
 Reviewing patches
 -----------------

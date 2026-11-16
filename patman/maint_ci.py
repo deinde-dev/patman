@@ -32,6 +32,7 @@ from u_boot_pylib import command
 from u_boot_pylib import gitutil
 
 from patman import maint
+from patman import snap
 
 # Lines of a failing test's output to show
 TAIL_LINES = 20
@@ -419,7 +420,9 @@ def _push(targets, git_dir):
                                 cwd=git_dir, capture_output=True, text=True,
                                 check=False)
         if result.returncode:
-            return done, f'Cannot push to {remote}: {result.stderr.strip()}'
+            problem = f'Cannot push to {remote}: {result.stderr.strip()}'
+            hint = snap.push_hint(remote, result.stderr, git_dir)
+            return done, f'{problem}\n{hint}' if hint else problem
         done.append((remote, specs))
     return done, None
 

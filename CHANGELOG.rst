@@ -14,6 +14,11 @@ Added
   send-email`` can find your SMTP password in your desktop's keyring once
   the snap's ``password-manager-service`` interface is connected. patman
   says so if it is not.
+- The snap can push over ssh, as ``patman maint`` does when publishing,
+  once its ``ssh-keys`` interface is connected. If a push fails, patman
+  says whether the interface is not connected, the host is not in
+  ``~/.ssh/known_hosts`` or the key is only in your ssh agent, which the
+  snap cannot reach.
 
 0.8.0 - 2026-11-10
 ------------------
