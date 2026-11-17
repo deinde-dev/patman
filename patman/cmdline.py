@@ -897,6 +897,15 @@ def _add_reply_args(review):
              "'lore:<msgid>' for a list on lore; use -i to say which patch "
              'it is about, with 0 for the cover letter')
     review.add_argument(
+        '--list-comments', action='store_true',
+        help='List the comments on a series, with their IDs for '
+             '--respond-comment, as JSON')
+    review.add_argument(
+        '--import-replies', type=str, metavar='FILE',
+        help='Store responses to comments on a series, as written in FILE '
+             "(JSON), or '-' for stdin, without asking the agent; with -d, "
+             'draft them too')
+    review.add_argument(
         '--own', action='store_true',
         help='The comment is on one of your own series: with '
              '--respond-comment, reply as its author; the reply is kept in '
@@ -923,15 +932,16 @@ def add_review_subparser(subparsers):
     review.add_argument(
         '-s', '--series', type=str, dest='pw_link',
         help='Patchwork series link/ID number, or the Message-ID of a '
-             'series on lore')
+             'series on lore; with --own, also the name of the series')
     review.add_argument(
         '-S', '--series-title', type=str, dest='title',
         help='Search for a series by cover-letter title, on patchwork or '
              'else on lore')
     review.add_argument(
         '-V', '--version', type=int, default=None,
-        help='Series version to review when searching by title (-S); '
-             'defaults to the most recent')
+        help='Series version to review when searching by title (-S), or '
+             'of your own series given by name with --own; defaults to the '
+             'most recent')
     review.add_argument(
         '-p', '--patch', type=int,
         help='Patchwork patch ID (finds the series and reviews just '

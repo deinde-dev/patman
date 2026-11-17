@@ -16,7 +16,9 @@ reply. Syncing finds new replies, as well as reviews which have been sent.
 from datetime import datetime, timedelta
 from email.utils import (formataddr, getaddresses, parseaddr,
                          parsedate_to_datetime)
+import json
 import os
+import sys
 import tempfile
 from types import SimpleNamespace
 
@@ -27,6 +29,7 @@ from u_boot_pylib import tout
 
 from patman import database
 from patman import gmail
+from patman import patchstream
 from patman import settings
 from patman.review import common
 from patman.review import discuss
@@ -782,6 +785,327 @@ def _find_comment(pwork, link, seq, comment_id):
     return item, comment, [c for c in comments if c is not comment]
 
 
+def find_own_series(args, cser):
+    """Look up one of your own series given by name with -s
+
+    With --own, -s may give the name of the series, as for 'patman series',
+    rather than its link. A version given with -V, or at the end of the name
+    (e.g. 'forest3'), is used; otherwise it is the latest version which has
+    a link, since that is the one people comment on. Unless -U is given,
+    the series' own upstream is used.
+
+    Args:
+        args (Namespace): Command-line arguments (uses pw_link, version and
+            upstream); pw_link is set to the link and upstream to the
+            series' upstream, if it has one
+        cser (Cseries): Open cseries instance holding your own series
+
+    Raises:
+        ValueError: There is no such series, or the version has no link
+    """
+    link = args.pw_link
+    if not link or '@' in link or '/' in link or link.isdigit():
+        return
+    # The name may itself end in digits, e.g. 'rk3399'
+    name, version = link, None
+    idnum = cser.db.series_find_by_name(name, True)
+    if not idnum:
+        name, version = patchstream.split_name_version(link)
+        idnum = cser.db.series_find_by_name(name, True)
+    if not idnum:
+        raise ValueError(f"No series named '{name}'")
+    version = args.version or version
+    if not version:
+        version = next(
+            (ver for ver in range(cser.db.series_get_max_version(idnum), 0,
+                                  -1)
+             if cser.db.ser_ver_get_link(idnum, ver)), None)
+        if not version:
+            raise ValueError(f"Series '{name}' has no version with a link")
+    link = cser.db.ser_ver_get_link(idnum, version)
+    if not link:
+        raise ValueError(f"Series '{name}' v{version} has no link")
+    args.pw_link = link
+    args.upstream = args.upstream or cser.db.series_get_info(idnum)[2]
+
+
+def _comment_series(args, cser, link):
+    """Find the series version whose comments are to be responded to
+
+    Args:
+        args (Namespace): Command-line arguments (uses own)
+        cser (Cseries): Open cseries instance holding the reviews, or your
+            own series with --own
+        link (str): Patchwork series link/ID, or Message-ID on lore
+
+    Return:
+        tuple:
+            str: Name of the series
+            int: Version
+            int: ID of the series version
+            bool: True if the series is one of your own (--own)
+
+    Raises:
+        ValueError: The series has not been reviewed, or is not your own
+            with --own
+    """
+    existing = cser.db.series_find_by_link(link)
+    own = getattr(args, 'own', False)
+    if own and not cser.db.series_is_own(link):
+        raise ValueError(f'Series {link} is not one of your own')
+    if not existing:
+        raise ValueError(f'Series {link} has not been reviewed')
+    _, name, version, svid = existing
+    return name, version, svid, own
+
+
+def _series_comments(pwork, link):
+    """Read the comments on the cover letter and each patch of a series
+
+    Args:
+        pwork (Patchwork or LoreList): Where the series comes from
+        link (str): Patchwork series link/ID, or Message-ID on lore
+
+    Return:
+        list of tuple: The comments, those on the cover letter first, then
+            those on each patch in order:
+            int: Patch which the comment is about, 0 for the cover letter
+            dict: The comment
+    """
+    data = common.pw_call(pwork.get_series, link) or {}
+    found = []
+    cover = data.get('cover_letter')
+    if cover:
+        found += [(0, cmt) for cmt in
+                  common.pw_call(pwork.get_cover_comments, cover['id']) or []]
+    for seq, patch in enumerate(data.get('patches') or [], 1):
+        found += [(seq, cmt) for cmt in
+                  common.pw_call(pwork.get_patch_comments, patch['id']) or []]
+    return found
+
+
+def list_comments(args, pwork, cser, link):
+    """Print the comments on a series as JSON, for a tool to read
+
+    Each comment gives the patch it is about ('seq', 0 for the cover
+    letter), its 'id' as --respond-comment takes it, its 'msgid',
+    'in_reply_to', 'sender', 'date', 'subject' and 'body', whether we sent
+    it ('own') and the 'reply' to it which is recorded, if any, with that
+    reply's 'id' and 'status'.
+
+    Args:
+        args (Namespace): Command-line arguments (uses own and reviewer)
+        pwork (Patchwork or LoreList): Where the series comes from
+        cser (Cseries): Open cseries instance holding the reviews, or your
+            own series with --own
+        link (str): Patchwork series link/ID, or Message-ID on lore
+
+    Returns:
+        int: 0
+
+    Raises:
+        ValueError: The series has not been reviewed, or is not your own
+            with --own
+    """
+    svid = _comment_series(args, cser, link)[2]
+    replies = {rep.comment_id: rep for rep in cser.db.reply_get_comments(svid)}
+    try:
+        own_email = common.parse_reviewer(args)[1].lower()
+    except ValueError:
+        own_email = None
+    out = []
+    for seq, cmt in _series_comments(pwork, link):
+        sub = cmt.get('submitter') or {}
+        email = sub.get('email') or ''
+        rep = replies.get(cmt.get('id'))
+        out.append({
+            'seq': seq, 'id': cmt.get('id'), 'msgid': cmt.get('msgid'),
+            'in_reply_to': _unfold(gmail.get_header(cmt.get('headers') or {},
+                                                    'In-Reply-To')) or None,
+            'sender': formataddr((sub.get('name') or '', email)),
+            'date': cmt.get('date'), 'subject': _unfold(cmt.get('subject')),
+            'own': bool(email) and email.lower() == own_email,
+            'body': cmt.get('content'),
+            'reply': ({'id': rep.idnum, 'status': rep.status} if rep
+                      else None)})
+    print(json.dumps(out, indent=2))
+    return 0
+
+
+def _read_replies(fname):
+    """Read the replies to import, from a JSON file
+
+    Args:
+        fname (str): File holding a JSON list of objects, each with the
+            'comment' replied to and the reply's 'body', or '-' for stdin
+
+    Return:
+        list of tuple:
+            str: The comment, by its ID or Message-ID
+            str: Body of the reply
+
+    Raises:
+        ValueError: The file is not a list of replies
+    """
+    if fname == '-':
+        text = sys.stdin.read()
+    else:
+        with open(fname, encoding='utf-8') as inf:
+            text = inf.read()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f'{fname} is not valid JSON: {exc}') from exc
+    if not isinstance(data, list):
+        raise ValueError(f'{fname} must hold a list of replies')
+    found = []
+    for num, item in enumerate(data):
+        if (not isinstance(item, dict) or not item.get('comment') or
+                not isinstance(item.get('body'), str) or
+                not item['body'].strip()):
+            raise ValueError(f"Reply {num} in {fname} needs a 'comment' and "
+                             "a 'body'")
+        found.append((str(item['comment']), item['body']))
+    return found
+
+
+def _comment_keys(comment):
+    """Get the ways in which a comment can be referred to
+
+    Args:
+        comment (dict): The comment
+
+    Return:
+        list of str: Its ID, and its Message-ID with and without angle
+            brackets
+    """
+    keys = [str(comment.get('id'))]
+    msgid = comment.get('msgid')
+    if msgid:
+        bare = msgid.strip().strip('<>')
+        keys += [bare, f'<{bare}>']
+    return keys
+
+
+def _format_import(ctx, comment, body):
+    """Format a reply given by the caller as a response to a comment
+
+    It has a greeting, the attribution of the comment and the signoff around
+    it, as for a response which the agent writes
+
+    Args:
+        ctx (ReviewContext): Context for replies, from _make_reply_ctx()
+        comment (dict): The comment replied to
+        body (str): Text of the reply, perhaps with lines quoted from the
+            comment
+
+    Return:
+        str: Response
+    """
+    sub = comment.get('submitter') or {}
+    reply_ctx = common.ReviewContext(None, ctx.cser, {
+        'submitter': {'name': sub.get('name') or '',
+                      'email': sub.get('email') or ''},
+        'date': comment.get('date') or ''})
+    reply_ctx.signoff = ctx.signoff
+    name = (sub.get('name') or '').split()
+    greeting = name[0] if name and '@' not in name[0] else ''
+    return emails.fix_dashes(
+        emails.format_review_email(reply_ctx, greeting, 'changes_needed',
+                                   [('', body.strip('\n').rstrip())]),
+        ctx.em_dash)
+
+
+def import_replies(args, pwork, cser, link):
+    """Store replies to comments on a series, as given in a file
+
+    This is for replies written outside patman, e.g. by a Claude session
+    working on the next version of the series. Each is stored as the
+    suggested response to its comment, as if the agent had suggested it
+    with --respond-comment, so that it can be changed, drafted and sent in
+    the same way. A suggested response is replaced, but one which has been
+    drafted or sent, or which was skipped, is left alone.
+
+    Args:
+        args (Namespace): Command-line arguments (uses import_replies, own
+            and create_drafts)
+        pwork (Patchwork or LoreList): Where the series comes from
+        cser (Cseries): Open cseries instance holding the reviews, or your
+            own series with --own
+        link (str): Patchwork series link/ID, or Message-ID on lore
+
+    Returns:
+        int: 0 on success, 1 on failure
+
+    Raises:
+        ValueError: The series has not been reviewed, or is not your own
+            with --own, the file is not valid or a comment cannot be found
+    """
+    svid = _comment_series(args, cser, link)[2]
+    wanted = _read_replies(args.import_replies)
+    by_key = {}
+    for seq, cmt in _series_comments(pwork, link):
+        for key in _comment_keys(cmt):
+            by_key[key] = (seq, cmt)
+    missing = [key for key, _ in wanted if key not in by_key]
+    if missing:
+        raise ValueError(f'Series {link} has no comment {missing[0]}')
+
+    ctx = _make_reply_ctx(args, cser)
+    existing = {rep.comment_id: rep for rep in cser.db.reply_get_comments(svid)}
+    stored = []
+    for key, body in wanted:
+        seq, cmt = by_key[key]
+        rep = existing.get(cmt['id'])
+        if rep and rep.status not in database.REPLY_WAITING:
+            tout.notice(f"Reply {rep.idnum}: left alone, since its status is "
+                        f"'{rep.status}' (comment {cmt['id']})")
+            continue
+        reply_id = _record_comment(cser, svid, seq, cmt)
+        cser.db.reply_set_response(reply_id, _format_import(ctx, cmt, body),
+                                   database.REPLY_SUGGESTED)
+        what = f'patch {seq}' if seq else 'the cover letter'
+        tout.notice(f"Reply {reply_id}: response stored for comment "
+                    f"{cmt['id']} on {what}")
+        stored.append(reply_id)
+    cser.commit()
+    tout.notice(f"{len(stored)} of {len(wanted)} "
+                f"repl{'y' if len(wanted) == 1 else 'ies'} stored")
+    if stored and args.create_drafts:
+        if not gmail.check_available():
+            return 1
+        account = getattr(args, 'gmail_account', None)
+        service = gmail.get_service(account)
+        for reply_id in stored:
+            _draft_response(service, ctx, reply_id, account)
+    return 0
+
+
+def _record_comment(cser, svid, seq, comment):
+    """Record a comment which we may respond to, with its headers
+
+    Args:
+        cser (Cseries): Open cseries instance holding the replies
+        svid (int): ID of the series version which the comment is about
+        seq (int): Patch which the comment is about, 0 for the cover letter
+        comment (dict): The comment
+
+    Return:
+        int: ID of the reply record holding the comment
+    """
+    hdrs = comment.get('headers') or {}
+    sub = comment.get('submitter') or {}
+    return cser.db.reply_add_comment(
+        svid, seq, comment['id'], comment.get('msgid'),
+        _unfold(gmail.get_header(hdrs, 'References')),
+        formataddr((sub.get('name') or '', sub.get('email') or '')),
+        _unfold(gmail.get_header(hdrs, 'To')),
+        _unfold(gmail.get_header(hdrs, 'Cc')),
+        _unfold(comment.get('subject')),
+        _unfold(gmail.get_header(hdrs, 'Date')) or comment.get('date'),
+        comment.get('content'), datetime.now().isoformat())
+
+
 def respond_to_comment(args, pwork, cser, link):
     """Have the agent suggest a response to a comment on patchwork
 
@@ -807,13 +1131,7 @@ def respond_to_comment(args, pwork, cser, link):
         ValueError: The series has not been reviewed, or is not your own
             with --own, or the comment cannot be found
     """
-    existing = cser.db.series_find_by_link(link)
-    own = getattr(args, 'own', False)
-    if own and not cser.db.series_is_own(link):
-        raise ValueError(f'Series {link} is not one of your own')
-    if not existing:
-        raise ValueError(f'Series {link} has not been reviewed')
-    _, name, version, svid = existing
+    name, version, svid, own = _comment_series(args, cser, link)
     if own:
         last = len(cser.db.pcommit_get_list(svid))
     else:
@@ -829,17 +1147,8 @@ def respond_to_comment(args, pwork, cser, link):
         (rev.body for rev in cser.db.review_get_for_version(svid)
          if rev.seq == seq), None)
 
-    hdrs = comment.get('headers') or {}
     sub = comment.get('submitter') or {}
-    reply_id = cser.db.reply_add_comment(
-        svid, seq, comment['id'], comment.get('msgid'),
-        _unfold(gmail.get_header(hdrs, 'References')),
-        formataddr((sub.get('name') or '', sub.get('email') or '')),
-        _unfold(gmail.get_header(hdrs, 'To')),
-        _unfold(gmail.get_header(hdrs, 'Cc')),
-        _unfold(comment.get('subject')),
-        _unfold(gmail.get_header(hdrs, 'Date')) or comment.get('date'),
-        comment.get('content'), datetime.now().isoformat())
+    reply_id = _record_comment(cser, svid, seq, comment)
     cser.commit()
 
     ctx = _make_reply_ctx(args, cser)

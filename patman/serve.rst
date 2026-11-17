@@ -398,6 +398,11 @@ the code on the series' branch. The comment is then shown with the reply,
 which you can change, draft or send, as for a reply to a review. Such replies
 are kept in the main database, with the series, and cannot be discussed.
 
+Replies written elsewhere, e.g. by a Claude session working on the next
+version, can be stored with ``patman review --own --import-replies`` (see
+:doc:`the Assisted patch review chapter </review>`). They then appear under
+their comments in the same way, to check, draft and send.
+
 Jobs
 ----
 

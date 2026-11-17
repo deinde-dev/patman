@@ -319,6 +319,23 @@ class TestReview(CseriesTester):
         self.assertEqual(os.path.join(self.tmpdir, '.patman.db'),
                          seen['path'])
 
+        # Your own series can be given by name
+        cser = cseries.Cseries(self.tmpdir)
+        cser.open_database()
+        sid = cser.db.series_add('forest', 'Merge fragments', 'us')
+        cser.db.ser_ver_add(sid, 1, link='v1@x')
+        cser.db.commit()
+        cser.close_database()
+        args = cmdline.parse_args(['review', '--own', '-s', 'forest',
+                                   '--respond-comment', '5', '-i', '1'],
+                                  config_fname=False)
+        with mock.patch.object(review, 'do_review',
+                               side_effect=lambda args, pwork, cser:
+                               seen.update(link=args.pw_link,
+                                           ups=args.upstream)):
+            control.do_review(args, self.tmpdir, pwork=mock.MagicMock())
+        self.assertEqual(('v1@x', 'us'), (seen['link'], seen['ups']))
+
     # pylint: disable-next=R0911
     def _fake_patchwork_review(self, subpath):
         """Fake Patchwork server for review tests
@@ -1242,6 +1259,210 @@ class TestReview(CseriesTester):
         with self.assertRaises(ValueError) as exc:
             run('fred@x', '--own', '-i', '1')
         self.assertIn('Series fred@x is not one of your own',
+                      str(exc.exception))
+
+    def _own_comment_pwork(self):
+        """Set up one of your own series with comments on lore
+
+        Return:
+            tuple:
+                Cseries: Open cseries instance holding the series
+                int: ID of the series version
+                SimpleNamespace: Fake LoreList for the series
+        """
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('forest', 'Merge fragments', None)
+        svid = db.ser_ver_add(sid, 3, link='cover@x')
+        db.pcommit_add_list(svid, [
+            Pcommit(None, seq, f'p{seq}', None, None, None, None, None)
+            for seq in range(2)])
+        db.commit()
+        david = {'name': 'David Gibson', 'email': 'david@x.com'}
+        comments = {
+            'lore:cover@x': [{
+                'id': 'lore:c0@x', 'msgid': '<c0@x>', 'date': '2026-11-07',
+                'subject': 'Re: [PATCH v3 0/2] Merge\n fragments',
+                'submitter': david, 'content': 'Why now?',
+                'headers': {'In-Reply-To': '<cover@x>',
+                            'References': '<cover@x>', 'To': 'sjg@x.com',
+                            'Cc': 'list@x.com'}}],
+            'lore:p1@x': [],
+            'lore:p2@x': [{
+                'id': 'lore:c2@x', 'msgid': '<c2@x>', 'date': '2026-11-08',
+                'subject': 'Re: [PATCH v3 2/2] p1', 'submitter': david,
+                'content': '> +code\n\nPlease split this',
+                'headers': {}}, {
+                'id': 'lore:c3@x', 'msgid': '<c3@x>', 'date': '2026-11-09',
+                'subject': 'Re: [PATCH v3 2/2] p1',
+                'submitter': {'name': 'Simon Glass', 'email': 'sjg@x.com'},
+                'content': 'OK', 'headers': {}}]}
+
+        async def get_series(_client, _link):
+            return {'cover_letter': {'id': 'lore:cover@x'},
+                    'patches': [{'id': 'lore:p1@x'}, {'id': 'lore:p2@x'}]}
+
+        async def get_comments(_client, item_id):
+            return comments[item_id]
+
+        pwork = types.SimpleNamespace(get_series=get_series,
+                                      get_cover_comments=get_comments,
+                                      get_patch_comments=get_comments)
+        return cser, svid, pwork
+
+    def test_list_comments(self):
+        """--list-comments gives the comments on a series as JSON"""
+        cser, svid, pwork = self._own_comment_pwork()
+        cser.db.reply_add_comment(svid, 2, 'lore:c2@x', '<c2@x>', '', '', '',
+                                  '', '', '', '', '')
+        cser.db.commit()
+        args = cmdline.parse_args(
+            ['review', '-s', 'cover@x', '--own', '--list-comments',
+             '--reviewer', 'Simon Glass <sjg@x.com>'], config_fname=False)
+        with terminal.capture() as (out, _):
+            self.assertEqual(0, review.replies.list_comments(
+                args, pwork, cser, 'cover@x'))
+        cover, patch, own = json.loads(out.getvalue())
+        self.assertEqual(
+            {'seq': 0, 'id': 'lore:c0@x', 'msgid': '<c0@x>',
+             'in_reply_to': '<cover@x>',
+             'sender': 'David Gibson <david@x.com>', 'date': '2026-11-07',
+             'subject': 'Re: [PATCH v3 0/2] Merge fragments', 'own': False,
+             'body': 'Why now?', 'reply': None}, cover)
+        self.assertEqual((2, 'lore:c2@x', None, '> +code\n\nPlease split this'),
+                         (patch['seq'], patch['id'], patch['in_reply_to'],
+                          patch['body']))
+        rep, = cser.db.reply_get_comments(svid)
+        self.assertEqual({'id': rep.idnum, 'status': 'new'}, patch['reply'])
+        self.assertEqual(('lore:c3@x', True), (own['id'], own['own']))
+
+        # The series must be one of your own
+        with self.assertRaises(ValueError) as exc:
+            review.replies.list_comments(args, pwork, cser, 'other@x')
+        self.assertIn('Series other@x is not one of your own',
+                      str(exc.exception))
+
+    def test_import_replies(self):
+        """--import-replies stores responses written outside patman"""
+        cser, svid, pwork = self._own_comment_pwork()
+        db = cser.db
+        fname = os.path.join(self.tmpdir, 'replies.json')
+
+        def run(replies, *argv):
+            tools.write_file(fname, replies if isinstance(replies, str)
+                             else json.dumps(replies), binary=False)
+            args = cmdline.parse_args(
+                ['review', '-s', 'cover@x', '--own', '--import-replies',
+                 fname, '--reviewer', 'Simon Glass <sjg@x.com>',
+                 '--signoff', 'Regards,\\nSimon', *argv],
+                config_fname=False)
+            with terminal.capture() as (out, _):
+                ret = review.replies.import_replies(args, pwork, cser,
+                                                    'cover@x')
+            return ret, out.getvalue()
+
+        # A comment can be given by its ID or its Message-ID
+        ret, out = run([
+            {'comment': 'lore:c2@x',
+             'body': '> Please split this\n\nDone in v4 \u2014 thanks\n'},
+            {'comment': '<c0@x>', 'body': 'To fix the bug'}])
+        self.assertEqual(0, ret)
+        self.assertIn('response stored for comment lore:c2@x on patch 2', out)
+        self.assertIn('2 of 2 replies stored', out)
+        patch, cover = db.reply_get_comments(svid)
+        self.assertEqual(
+            (2, 'lore:c2@x', '<c2@x>', 'David Gibson <david@x.com>',
+             'suggested'),
+            (patch.seq, patch.comment_id, patch.msgid, patch.sender,
+             patch.status))
+        self.assertEqual(
+            'Hi David,\n\n'
+            'On 2026-11-08, David Gibson <david@x.com> wrote:\n\n'
+            '> Please split this\n\nDone in v4 - thanks\n\n'
+            'Regards,\nSimon\n', patch.response)
+
+        # The headers are kept, for threading the response
+        self.assertEqual(
+            (0, '<cover@x>', 'sjg@x.com', 'list@x.com',
+             'Re: [PATCH v3 0/2] Merge fragments'),
+            (cover.seq, cover.refs, cover.to_addrs, cover.cc_addrs,
+             cover.subject))
+        self.assertIn('wrote:\n\nTo fix the bug\n\n', cover.response)
+
+        # Importing again replaces a suggestion, but not a draft
+        db.reply_set_status(cover.idnum, database.REPLY_DRAFT, 'd1')
+        db.commit()
+        ret, out = run([{'comment': 'c2@x', 'body': 'Now in v4'},
+                        {'comment': 'lore:c0@x', 'body': 'Changed'}])
+        self.assertIn(f"Reply {cover.idnum}: left alone, since its status is "
+                      "'draft'", out)
+        self.assertIn('1 of 2 replies stored', out)
+        patch, cover = db.reply_get_comments(svid)
+        self.assertIn('Now in v4', patch.response)
+        self.assertIn('To fix the bug', cover.response)
+
+        # Nothing is stored if a comment cannot be found
+        with self.assertRaises(ValueError) as exc:
+            run([{'comment': 'lore:c2@x', 'body': 'Again'},
+                 {'comment': 'lore:c9@x', 'body': 'Hmm'}])
+        self.assertIn('Series cover@x has no comment lore:c9@x',
+                      str(exc.exception))
+        self.assertIn('Now in v4', db.reply_get_comments(svid)[0].response)
+
+        for bad, msg in (('{', 'is not valid JSON'),
+                         ({'comment': 'c2@x', 'body': 'x'},
+                          'must hold a list of replies'),
+                         ([{'comment': 'c2@x'}], "Reply 0 in"),
+                         ([{'comment': 'c2@x', 'body': ' '}], "Reply 0 in")):
+            with self.assertRaises(ValueError) as exc:
+                run(bad)
+            self.assertIn(msg, str(exc.exception))
+
+        # With -d the responses are drafted
+        with mock.patch.object(gmail, 'check_available', return_value=True), \
+                mock.patch.object(gmail, 'get_service'), \
+                mock.patch.object(review.replies, '_draft_response') as draft:
+            run([{'comment': 'c2@x', 'body': 'Drafted'}], '-d')
+        self.assertEqual(patch.idnum, draft.call_args.args[2])
+
+    def test_find_own_series(self):
+        """With --own, -s can give one of your own series by name"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('forest', 'Merge fragments', 'us')
+        for ver, link in ((1, 'v1@x'), (2, 'v2@x'), (3, None)):
+            db.ser_ver_add(sid, ver, link=link)
+        db.ser_ver_add(db.series_add('rk3399', 'Board', None), 1, link='rk@x')
+        db.commit()
+
+        def find(*argv):
+            args = cmdline.parse_args(['review', '--own', *argv],
+                                      config_fname=False)
+            review.replies.find_own_series(args, cser)
+            return args.pw_link, args.upstream
+
+        # The latest version with a link, and the series' upstream
+        self.assertEqual(('v2@x', 'us'), find('-s', 'forest'))
+        self.assertEqual(('v1@x', 'us'), find('-s', 'forest', '-V', '1'))
+        self.assertEqual(('v1@x', 'us'), find('-s', 'forest1'))
+        self.assertEqual(('v2@x', 'ups'), find('-s', 'forest', '-U', 'ups'))
+        self.assertEqual(('rk@x', None), find('-s', 'rk3399'))
+
+        # A link is left alone
+        self.assertEqual(('123', None), find('-s', '123'))
+        self.assertEqual(('c@x', None), find('-s', 'c@x'))
+
+        with self.assertRaises(ValueError) as exc:
+            find('-s', 'forest', '-V', '3')
+        self.assertIn("Series 'forest' v3 has no link", str(exc.exception))
+        with self.assertRaises(ValueError) as exc:
+            find('-s', 'oak')
+        self.assertIn("No series named 'oak'", str(exc.exception))
+        db.ser_ver_add(db.series_add('elm', 'Tree', None), 1)
+        db.commit()
+        with self.assertRaises(ValueError) as exc:
+            find('-s', 'elm')
+        self.assertIn("Series 'elm' has no version with a link",
                       str(exc.exception))
 
     def test_handle_comment_own(self):

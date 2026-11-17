@@ -19,6 +19,16 @@ Added
   says whether the interface is not connected, the host is not in
   ``~/.ssh/known_hosts`` or the key is only in your ssh agent, which the
   snap cannot reach.
+- ``patman review --own`` takes the name of one of your own series with
+  ``-s``, e.g. ``-s dt-forest -V 3``, as well as its link. Without ``-V``,
+  it uses the latest version which has a link.
+- ``patman review --list-comments`` lists the comments on a series as JSON,
+  with the patch each is about, its IDs, sender and text, and any reply to
+  it, so that a tool can work out what to reply to.
+- ``patman review --import-replies`` stores replies to comments on a series,
+  written outside patman and given in a JSON file, as if the agent had
+  suggested them, so that they can be checked, drafted and sent from
+  ``patman serve``. A response already drafted or sent is left alone.
 
 0.8.0 - 2026-11-10
 ------------------

@@ -903,6 +903,82 @@ The response can also be edited, drafted and sent from the Reviews tab of
 ``patman serve``: tap 'Send' under it, or 'Edit response' then 'Save and
 send'. Both need a second tap to confirm.
 
+Replying to comments on your own series
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Add ``--own`` to reply to a comment on one of your own series, as its author.
+The agent reads the code on the series' branch, and the reply is kept in the
+main database with the series, so give ``--own`` with ``--draft-reply`` and
+``--send-reply`` too. With ``--own``, ``-s`` can give the series' name, as for
+``patman series``, rather than its link::
+
+    patman review --own -s dt-forest -V 3 --respond-comment lore:1234@x.com -i 2
+
+``-V`` or a number at the end of the name (``dt-forest3``) gives the version.
+Without either, it is the latest version which has a link, since that is the
+one people comment on. The series' upstream is used unless ``-U`` is given.
+
+``--list-comments`` lists the comments on the series, for a tool to read, as a
+JSON list with an object for each comment::
+
+    patman review --own -s dt-forest -V 3 --list-comments
+
+=============== ===============================================================
+Field           Meaning
+=============== ===============================================================
+``seq``         Patch which the comment is about, 0 for the cover letter
+``id``          ID of the comment, as ``--respond-comment`` takes it
+``msgid``       Message-ID of the comment, e.g. ``<1234@x.com>``
+``in_reply_to`` Message-ID which the comment replies to, or ``null``
+``sender``      Who sent the comment, as ``Name <email>``
+``date``        When the comment was sent
+``subject``     Subject of the comment
+``own``         ``true`` if you sent the comment
+``body``        Text of the comment, including what it quotes
+``reply``       Your reply to the comment, if one is recorded, with its ``id``
+                (as ``--draft-reply`` takes it) and ``status`` (``new``,
+                ``suggested``, ``skip``, ``draft`` or ``sent``), else ``null``
+=============== ===============================================================
+
+This works without ``--own`` too, for a series you reviewed.
+
+Importing replies
+~~~~~~~~~~~~~~~~~
+
+If the replies are already written, e.g. by a Claude session which works on
+the next version of the series and knows what was changed for each comment,
+``--import-replies`` stores them without asking the agent::
+
+    patman review --own -s dt-forest -V 3 --import-replies replies.json
+
+The file holds a JSON list, with an object for each reply giving the
+``comment`` it replies to, by its ``id`` or ``msgid`` from
+``--list-comments``, and the reply's ``body``. Use ``-`` to read the list from
+stdin::
+
+    [
+      {"comment": "lore:20261107.1234@gibson.dropbear.id.au",
+       "body": "> Please split this patch\n\nDone in v4.\n"},
+      {"comment": "<20261108.5678@gibson.dropbear.id.au>",
+       "body": "I'd rather leave that for a follow-up, since ..."}
+    ]
+
+The body may quote lines from the comment, with ``>``, between the answers.
+patman adds the greeting, a line saying who wrote the comment and when, and
+your ``signoff``, as for a response which the agent writes, and threads it as
+a reply to the comment, to the person who made it, copied to everyone it went
+to.
+
+Each reply is stored as the suggested response to its comment, as with
+``--respond-comment``, so that it can be changed, drafted and sent from
+``patman serve``, or with ``--draft-reply`` and ``--send-reply``. Nothing is
+drafted or sent unless ``-d`` is given, which drafts each stored response in
+Gmail. If any comment cannot be found, nothing is stored.
+
+Importing again replaces the suggested response, including any change made to
+it on the page, but leaves alone a response which has been drafted or sent, or
+a comment marked as needing none.
+
 Stats
 ~~~~~
 
