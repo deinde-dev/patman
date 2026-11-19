@@ -230,6 +230,13 @@ def _setup_patchwork(cser, pwork, ups, pw_url, allow_lore=False,
                                                               cser.gitdir),
                                  cser.gitdir)
             return pwork
+    # With upstreams to choose from, the problem is that none was chosen
+    names = list(cser.db.upstream_get_dict()) if not ups else []
+    if names and not proj:
+        raise ValueError(
+            f"No upstream is given and none is the default; use -U with one "
+            f"of {', '.join(names)}, or set the default with 'patman "
+            f"upstream default <name>'")
     hint = ''
     if allow_lore and not ups_url:
         hint = (', or give the upstream its list on lore with '

@@ -3885,6 +3885,15 @@ VERDICT: approved"""
             control._setup_patchwork(cser, None, 'dtc', 'https://pw')
         self.assertIn('Patchwork project not configured', str(exc.exception))
 
+        # Without an upstream, the error says how to choose one
+        with self.assertRaises(ValueError) as exc:
+            control._setup_patchwork(cser, None, None, 'https://pw',
+                                     allow_lore=True)
+        self.assertEqual(
+            'No upstream is given and none is the default; use -U with one '
+            "of dtc, or set the default with 'patman upstream default "
+            "<name>'", str(exc.exception))
+
         # Patchwork is used if the upstream has it, as well as lore
         cser.db.upstream_set('dtc', patchwork_url='https://pw.dtc')
         cser.db.patchwork_update('dtc', 3, 'dtc', 'dtc')

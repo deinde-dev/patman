@@ -33,6 +33,13 @@ Added
   suggested them, so that they can be checked, drafted and sent from
   ``patman serve``. A response already drafted or sent is left alone.
 
+Fixed
+~~~~~
+- With no upstream given and none set as the default, a command which
+  needs patchwork or lore, such as 'Scan for new versions' on the page,
+  says so and how to choose one, rather than that the patchwork project is
+  not configured.
+
 0.8.0 - 2026-11-10
 ------------------
 
