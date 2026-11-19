@@ -10,6 +10,9 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman review --scan`` finds new versions of the series you reviewed
+  on a list on lore, as well as on patchwork. An upstream with no feed
+  cannot be scanned.
 - The snap brings git's ``libsecret`` credential helper, so that ``git
   send-email`` can find your SMTP password in your desktop's keyring once
   the snap's ``password-manager-service`` interface is connected. patman

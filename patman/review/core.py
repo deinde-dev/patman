@@ -1239,6 +1239,13 @@ def do_review(args, pwork, cser, own_db=None):
         return 0
 
     if args.scan:
+        # Reading the whole of lore for a month would take far too long
+        ups = getattr(pwork, 'upstream', None)
+        if (isinstance(pwork, lorelist.LoreList) and ups and
+                (own_db or cser.db).upstream_get_no_feed(ups)):
+            raise ValueError(f"Upstream '{ups}' has no feed, so cannot be "
+                             'scanned for new versions; review each one '
+                             'with -s')
         return scan.do_scan(args, pwork, cser)
 
     if getattr(args, 'suggest_rules', False):

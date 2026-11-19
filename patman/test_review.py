@@ -3893,13 +3893,50 @@ VERDICT: approved"""
         self.assertNotIsInstance(pwork, lorelist.LoreList)
         self.assertEqual('https://pw.dtc', pwork.url)
 
-        # A list on lore cannot be scanned for new versions
-        with self.assertRaises(ValueError) as exc:
-            review.scan.do_scan(None, lorelist.LoreList(
-                'https://lore.kernel.org/devicetree-compiler'), cser)
+
+    def test_review_scan_lore(self):
+        """--scan finds new versions on a list on lore"""
+        cser = self.get_database()
+        db = cser.db
+        sid = db.series_add('rev', 'dtc: Tidy up', None)
+        db.series_set_source(sid, 'review')
+        db.ser_ver_add(sid, 1, link='v1@x')
+        db.commit()
+        pwork = lorelist.LoreList(
+            'https://lore.kernel.org/devicetree-compiler')
+        pwork.upstream = 'dtc'
+        today = datetime.now().isoformat()
+        pages = [[{'id': 'v2@x', 'name': 'dtc: Tidy up', 'version': 2,
+                   'total': 2, 'received_total': 2, 'date': today,
+                   'patches': [{'id': 'lore:p1@x'}, {'id': 'lore:p2@x'}]},
+                  {'id': 'o@x', 'name': 'Other', 'version': 3, 'total': 1,
+                   'received_total': 1, 'date': today, 'patches': []}], []]
+
+        async def get_recent_series(_client, _project, page, _per_page,
+                                    max_age=None):
+            del max_age
+            return pages[page - 1]
+
+        async def get_states(_client, _link):
+            return ['new', 'new']
+
+        with mock.patch.object(pwork, 'get_recent_series',
+                               side_effect=get_recent_series), \
+                mock.patch.object(pwork, 'get_series_patch_states',
+                                  side_effect=get_states):
+            found = review.scan._scan_new_versions(pwork, cser)
         self.assertEqual(
-            'Cannot scan https://lore.kernel.org/devicetree-compiler for new '
-            'versions yet; review each one with -s', str(exc.exception))
+            [review.scan.NewVersion('dtc: Tidy up', 2, 'v2@x', True, True)],
+            found)
+
+        # An upstream with no feed is not scanned, since it is all of lore
+        db.upstream_add('dtc', 'https://dtc.git',
+                        lore_url='https://lore.kernel.org/all', no_feed=True)
+        args = cmdline.parse_args(['review', '--scan'], config_fname=False)
+        with self.assertRaises(ValueError) as exc:
+            review.core.do_review(args, pwork, cser)
+        self.assertIn("Upstream 'dtc' has no feed, so cannot be scanned",
+                      str(exc.exception))
 
     def test_review_records_upstream(self):
         """A review knows its upstream, which names its branch"""

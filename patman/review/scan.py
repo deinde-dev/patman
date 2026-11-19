@@ -6,10 +6,10 @@
 
 """Scanning for new versions of reviewed series
 
-The scan reads the series sent to patchwork in the last SCAN_DAYS, as the
-inbox does, to find a newer version of each series which has been reviewed,
-and reviews each one it finds in its own 'patman review' process, optionally
-creating Gmail drafts for the results.
+The scan reads the series sent to patchwork, or to a list on lore, in the
+last SCAN_DAYS, as the inbox does, to find a newer version of each series
+which has been reviewed, and reviews each one it finds in its own 'patman
+review' process, optionally creating Gmail drafts for the results.
 """
 
 from collections import namedtuple
@@ -153,7 +153,7 @@ async def _is_active(client, pwork, pws):
 
 
 def _scan_new_versions(pwork, cser):
-    """Find newer patchwork versions of already-reviewed series
+    """Find newer versions of already-reviewed series, on patchwork or lore
 
     The series sent in the last SCAN_DAYS are read, as for the inbox, and
     each is matched to a reviewed series by its title or b4 key. For each
@@ -163,19 +163,12 @@ def _scan_new_versions(pwork, cser):
     older, now-superseded version.
 
     Args:
-        pwork (Patchwork): Configured patchwork instance
+        pwork (Patchwork or LoreList): Where the series come from
         cser (Cseries): Open cseries instance
 
     Returns:
         list of NewVersion: one entry per series that has a newer version
-
-    Raises:
-        ValueError: The upstream's series are on lore, which cannot be
-            searched for new versions yet
     """
-    if isinstance(pwork, lorelist.LoreList):
-        raise ValueError(f'Cannot scan {pwork.url} for new versions yet; '
-                         'review each one with -s')
     since = (datetime.now() - timedelta(days=SCAN_DAYS)).strftime('%Y-%m-%d')
     series = cser.db.series_get_dict(reviews_only=True)
     by_id = {ser.idnum: ser for ser in series.values()}
