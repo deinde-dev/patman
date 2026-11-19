@@ -10,6 +10,9 @@ Unreleased
 
 Added
 ~~~~~
+- ``patman review --scan`` finds new versions of the series you reviewed
+  on a list on lore, as well as on patchwork. An upstream with no feed
+  cannot be scanned.
 - The snap brings git's ``libsecret`` credential helper, so that ``git
   send-email`` can find your SMTP password in your desktop's keyring once
   the snap's ``password-manager-service`` interface is connected. patman
@@ -29,6 +32,13 @@ Added
   written outside patman and given in a JSON file, as if the agent had
   suggested them, so that they can be checked, drafted and sent from
   ``patman serve``. A response already drafted or sent is left alone.
+
+Fixed
+~~~~~
+- With no upstream given and none set as the default, a command which
+  needs patchwork or lore, such as 'Scan for new versions' on the page,
+  says so and how to choose one, rather than that the patchwork project is
+  not configured.
 
 0.8.0 - 2026-11-10
 ------------------

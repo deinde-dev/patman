@@ -95,9 +95,8 @@ with or without the angle brackets, or as the URL of the message on lore::
 The patches are the messages in the thread which have the same version and
 number of patches, so a new version sent in reply to an old one is kept apart.
 The other messages in the thread are the comments. Lore has no patch states,
-so every patch counts as new. Searching by title, with ``-S`` or ``-P``, and
-scanning for new versions with ``--scan`` are not supported yet. The inbox on
-the ``patman serve`` page lists the newest series sent to the list (see
+so every patch counts as new. Searching by title, with ``-S`` or ``-P``, is
+not supported yet. The inbox on the ``patman serve`` page lists the newest series sent to the list (see
 :ref:`a list on lore <serve_lore>`).
 
 The review branch is named after the part of the Message-ID before the ``@``,
@@ -1021,8 +1020,8 @@ Scanning for new versions
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Rather than reviewing one series at a time, ``--scan`` looks on
-patchwork for new versions of series you have already reviewed and
-reviews them::
+patchwork, or on the upstream's list on lore, for new versions of series
+you have already reviewed and reviews them::
 
     patman review --scan -U us --reviewer 'Your Name <your@email>'
 
@@ -1037,6 +1036,10 @@ fully appeared on patchwork; if the newest version is still arriving,
 the series is left to wait rather than reviewing an older, now
 superseded one. Inactive series (see `Active series only`_) are
 skipped.
+
+A list on lore is read in the same way, from its feed. An upstream with
+no feed (see :ref:`a list on lore <serve_lore>`), such as one with the
+whole of lore, cannot be scanned, since that would read far too much.
 
 Reviews run in parallel, each in its own child process and review
 worktree, up to ``--jobs`` (``-j``) at a time (default 4).
